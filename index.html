@@ -603,8 +603,9 @@ function launch(id) {
   $("frame").src = g.url;
   $("player").classList.add("on");
   // Telefonda Roblox gibi: tam ekran + yatay (tarayıcı izin vermezse sessizce geç)
-  if (matchMedia("(pointer: coarse)").matches && $("player").requestFullscreen) {
-    $("player").requestFullscreen().then(() => screen.orientation && screen.orientation.lock && screen.orientation.lock("landscape")).catch(() => {});
+  // Tüm sayfa tam ekran olmalı: yalnız #player olursa satın alma penceresi (#buyModal) görünmez
+  if (matchMedia("(pointer: coarse)").matches && document.documentElement.requestFullscreen) {
+    document.documentElement.requestFullscreen().then(() => screen.orientation && screen.orientation.lock && screen.orientation.lock("landscape")).catch(() => {});
   }
   document.body.style.overflow = "hidden";
   renderTop();
@@ -696,7 +697,7 @@ $("btnEarnClose").onclick = () => $("earnModal").classList.remove("on");
 $("earnModal").addEventListener("click", e => { if (e.target.id === "earnModal") $("earnModal").classList.remove("on"); });
 $("btnFull").onclick = () => {
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
-  else $("player").requestFullscreen && $("player").requestFullscreen().catch(() => {});
+  else document.documentElement.requestFullscreen && document.documentElement.requestFullscreen().catch(() => {});
 };
 $("btnProfName").onclick = () => {
   const n = $("profName").value.trim();
