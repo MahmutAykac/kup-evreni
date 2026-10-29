@@ -1,0 +1,775 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Küp Evreni</title>
+<!--
+  Küp Evreni: tüm oyunların tek yerden oynandığı platform (Roblox benzeri).
+  - Ana sayfa: oyun kartları, devam et, günlük Robux ödülü
+  - Avatar: renk, yüz ve aksesuar (oyunlara aktarılır)
+  - Profil: oyun süreleri, istatistikler, rozetler
+  - Oyunlar iframe içinde açılır. Platform ↔ oyun iletişimi postMessage ile (protokol INDEX.md'de).
+-->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+  :root {
+    --bg: #111216;
+    --surface: #1b1d23;
+    --surface2: #23262e;
+    --line: rgba(255, 255, 255, 0.09);
+    --text: #f2f3f5;
+    --muted: #9da1ab;
+    --accent: #00a2ff;
+    --play: #00b06f;
+    --gold: #ffd166;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: "Trebuchet MS", system-ui, sans-serif; }
+  button { font: inherit; color: inherit; }
+  a { color: var(--accent); }
+
+  /* Üst çubuk */
+  #top { position: fixed; top: 0; left: 0; right: 0; height: 56px; display: flex; align-items: center; gap: 14px;
+    padding: 0 16px; background: var(--surface); border-bottom: 1px solid var(--line); z-index: 5; }
+  #logo { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 19px; letter-spacing: 0.02em; cursor: pointer; }
+  #logo i { width: 26px; height: 26px; background: var(--text); transform: rotate(14deg); border-radius: 4px; display: grid; place-items: center; }
+  #logo i::after { content: ""; width: 9px; height: 9px; background: var(--surface); }
+  #search { flex: 1; max-width: 420px; height: 36px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg);
+    color: var(--text); padding: 0 12px; font: inherit; }
+  #topRight { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+  #jeton { background: var(--surface2); padding: 6px 12px; border-radius: 10px; font-weight: 700; color: var(--gold); white-space: nowrap;
+    border: 0; cursor: pointer; font: inherit; font-weight: 700; color: var(--gold); }
+  .earn { display: grid; grid-template-columns: 44px 1fr auto; gap: 12px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--line); }
+  .earn .ico { font-size: 30px; text-align: center; }
+  .earn .amt { color: var(--gold); font-weight: 700; white-space: nowrap; }
+  .pbar { height: 8px; background: var(--surface2); border-radius: 6px; overflow: hidden; margin-top: 6px; }
+  .pbar i { display: block; height: 100%; background: var(--play); }
+  #me { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+  #meFace { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-size: 18px; }
+
+  /* Gezinme */
+  #nav { position: fixed; top: 56px; bottom: 0; left: 0; width: 200px; padding: 14px 10px; background: var(--surface);
+    border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; z-index: 4; }
+  #nav button { text-align: left; background: none; border: 0; padding: 10px 12px; border-radius: 10px; cursor: pointer; font-size: 16px; }
+  #nav button.on { background: var(--surface2); }
+  #nav button:hover { background: var(--surface2); }
+  main { margin: 56px 0 0 200px; padding: 22px 26px 60px; }
+  .page { display: none; max-width: 1180px; }
+  .page.on { display: block; }
+  h1 { font-size: 28px; margin: 4px 0 16px; }
+  h2 { font-size: 19px; margin: 26px 0 12px; }
+  .muted { color: var(--muted); }
+
+  /* Karşılama */
+  #hello { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+  #helloAvatar { width: 92px; height: 92px; border-radius: 50%; background: var(--surface2); overflow: hidden; }
+  #helloAvatar canvas { width: 100%; height: 100%; display: block; }
+  #daily { margin-left: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px 16px;
+    display: flex; align-items: center; gap: 12px; }
+  .btn { border: 0; border-radius: 10px; padding: 10px 16px; cursor: pointer; font-weight: 700; background: var(--surface2); }
+  .btn.play { background: var(--play); color: #fff; }
+  .btn.blue { background: var(--accent); color: #fff; }
+  .btn.red { background: #e63946; color: #fff; }
+  .btn:disabled { opacity: 0.45; cursor: default; }
+
+  /* Oyun kartları */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 16px; }
+  .row { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(190px, 220px); gap: 16px; overflow-x: auto; padding-bottom: 6px; }
+  .game { background: none; border: 0; padding: 0; text-align: left; cursor: pointer; }
+  .thumb { aspect-ratio: 1; border-radius: 14px; position: relative; overflow: hidden; display: grid; place-items: center; font-size: 74px;
+    box-shadow: inset 0 0 0 1px var(--line); transition: transform 0.12s; }
+  .game:hover .thumb { transform: translateY(-3px); }
+  .thumb .tag { position: absolute; left: 8px; top: 8px; background: rgba(0,0,0,0.55); font-size: 12px; padding: 3px 8px; border-radius: 8px; }
+  .thumb .soon { position: absolute; inset: 0; background: rgba(10,10,14,0.6); display: grid; place-items: center; font-size: 16px; font-weight: 700; }
+  .game b { display: block; margin-top: 8px; font-size: 16px; }
+  .game span { display: block; font-size: 13px; color: var(--muted); }
+
+  /* Modallar */
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: none; align-items: center; justify-content: center; padding: 16px; z-index: 20; }
+  .modal.on { display: flex; }
+  .sheet { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; width: 100%; max-width: 640px; max-height: 92vh; overflow: auto; }
+  .sheet .hero { height: 170px; display: grid; place-items: center; font-size: 96px; border-radius: 18px 18px 0 0; }
+  .sheet .body { padding: 18px 22px 22px; line-height: 1.5; }
+  .sheet h1 { margin: 0 0 4px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin: 14px 0; }
+  .stat { background: var(--surface2); border-radius: 12px; padding: 10px 12px; }
+  .stat b { display: block; font-size: 18px; }
+  .stat span { font-size: 12px; color: var(--muted); }
+  #nameSheet input, #profile input { width: 100%; height: 44px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg);
+    color: var(--text); padding: 0 12px; font: inherit; font-size: 17px; margin: 10px 0; }
+  #buySheet { max-width: 380px; text-align: center; }
+  #buyModal { z-index: 50; } /* oyun ekranının (#player) üstünde açılmalı */
+
+  /* Avatar */
+  #avatarWrap { display: grid; grid-template-columns: minmax(260px, 380px) 1fr; gap: 22px; align-items: start; }
+  #avatarView { aspect-ratio: 3 / 4; background: radial-gradient(circle at 50% 30%, #2c3140, #15171c); border-radius: 18px; overflow: hidden; touch-action: none; }
+  #avatarView canvas { width: 100%; height: 100%; display: block; }
+  .swatches { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 14px; }
+  .sw { width: 38px; height: 38px; border-radius: 10px; border: 3px solid transparent; cursor: pointer; }
+  .sw.on { border-color: #fff; }
+  .chip { padding: 8px 12px; border-radius: 10px; border: 2px solid var(--line); background: var(--surface2); cursor: pointer; }
+  .chip.on { border-color: var(--accent); }
+
+  /* Rozetler */
+  .badges { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .badge { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px; text-align: center; }
+  .badge div { font-size: 34px; }
+  .badge.off { opacity: 0.35; filter: grayscale(1); }
+
+  /* Oyun ekranı */
+  #player { position: fixed; inset: 0; background: #000; display: none; z-index: 30; }
+  #player.on { display: block; }
+  #playerBar { position: absolute; top: 0; left: 0; right: 0; height: 40px; display: flex; align-items: center; gap: 10px; padding: 0 10px;
+    background: rgba(17,18,22,0.92); border-bottom: 1px solid var(--line); z-index: 2; }
+  #playerBar .btn { padding: 6px 12px; font-size: 14px; }
+  #frame { position: absolute; top: 40px; left: 0; width: 100%; height: calc(100% - 40px); border: 0; display: block; background: #000; }
+  #toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #fff; color: #111; padding: 10px 16px; border-radius: 12px;
+    font-weight: 700; display: none; z-index: 40; }
+
+  /* Açılış ekranı (hesap yokken) */
+  #landing { position: fixed; inset: 0; z-index: 15; background: var(--bg); overflow-y: auto; display: none; }
+  #landing.on { display: block; }
+  #lHero { position: relative; min-height: 70vh; display: flex; align-items: center; padding: 90px 60px 60px; overflow: hidden;
+    background: linear-gradient(180deg, rgba(17,18,22,0) 55%, var(--bg) 100%), radial-gradient(circle at 70% 40%, #ffe9a8 0, #f4b860 18%, #6a8fb8 48%, #1d2b44 100%); }
+  #lTop { position: absolute; top: 0; left: 0; right: 0; display: flex; align-items: center; padding: 22px 60px; z-index: 2; }
+  #lTop #lLogo { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 22px; letter-spacing: 0.04em; }
+  #lTop #lLogo i { width: 26px; height: 26px; background: #fff; transform: rotate(14deg); border-radius: 4px; display: grid; place-items: center; }
+  #lTop #lLogo i::after { content: ""; width: 9px; height: 9px; background: #1d2b44; }
+  #btnLogin { margin-left: auto; background: rgba(255,255,255,0.18); backdrop-filter: blur(6px); color: #fff; padding: 12px 22px; }
+  #lText { position: relative; z-index: 2; max-width: 620px; text-shadow: 0 2px 18px rgba(0,0,0,0.45); }
+  #lText h1 { font-size: clamp(40px, 7vw, 76px); line-height: 1.05; margin: 0 0 18px; font-weight: 800; letter-spacing: -0.02em; }
+  #lText p { font-size: 18px; line-height: 1.5; margin: 0 0 26px; max-width: 520px; }
+  #lText .btn { padding: 14px 18px; font-size: 18px; }
+  #lAvatar { position: absolute; right: 8%; bottom: 0; width: min(42vw, 460px); height: 90%; }
+  #lAvatar canvas { width: 100%; height: 100%; display: block; }
+  .cube { position: absolute; border-radius: 6px; background: rgba(255,255,255,0.22); animation: float 7s ease-in-out infinite; }
+  @keyframes float { 50% { transform: translateY(-22px) rotate(25deg); } }
+  #lGames { padding: 10px 60px 60px; }
+  #lGames .row { grid-auto-columns: minmax(240px, 1fr); }
+  #lGames .thumb { aspect-ratio: 16 / 9; }
+  #lCta { position: relative; min-height: 78vh; display: grid; place-items: center; text-align: center; overflow: hidden;
+    background: linear-gradient(180deg, #0d0e11, #141519); }
+  #lCta .gridBg { position: absolute; inset: -20%; pointer-events: none;
+    background-image: linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px);
+    background-size: 52px 52px; transform: perspective(900px) rotateX(18deg) scale(1.15); animation: gridWave 14s ease-in-out infinite;
+    -webkit-mask-image: radial-gradient(ellipse at center, transparent 8%, #000 45%, transparent 80%); mask-image: radial-gradient(ellipse at center, transparent 8%, #000 45%, transparent 80%); }
+  @keyframes gridWave { 50% { transform: perspective(900px) rotateX(10deg) rotateZ(2deg) scale(1.2); } }
+  #lCta h1 { position: relative; font-size: clamp(34px, 4.5vw, 52px); line-height: 1.15; font-weight: 800; margin: 0 0 30px; }
+  #lCta .btn { position: relative; padding: 16px 0; width: 250px; font-size: 18px; background: #335fff; }
+  .accRow { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px; margin: 6px 0; border-radius: 12px; border: 1px solid var(--line);
+    background: var(--surface2); cursor: pointer; text-align: left; }
+  .accRow:hover { border-color: var(--accent); }
+  .accRow .face { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; font-size: 22px; }
+
+  @media (max-width: 760px) {
+    #lHero { padding: 90px 16px 40px; min-height: 80vh; align-items: flex-end; }
+    #lTop { padding: 16px; }
+    #lGames { padding: 10px 16px 40px; }
+    #lAvatar { right: -10%; width: 70vw; height: 60%; top: 60px; bottom: auto; opacity: 0.85; }
+    #nav { top: auto; bottom: 0; width: 100%; height: 62px; flex-direction: row; justify-content: space-around; padding: 6px; border-right: 0; border-top: 1px solid var(--line); }
+    #nav button { text-align: center; font-size: 13px; padding: 6px 4px; flex: 1; }
+    main { margin: 56px 0 0; padding: 16px 16px 90px; }
+    #search { display: none; }
+    #meName { display: none; }
+    #avatarWrap { grid-template-columns: 1fr; }
+    #avatarView { max-height: 52vh; aspect-ratio: auto; height: 52vh; }
+    #daily { margin-left: 0; width: 100%; }
+    .grid { grid-template-columns: repeat(2, 1fr); gap: 12px; }
+  }
+</style>
+</head>
+<body>
+<header id="top">
+  <div id="logo"><i></i>KÜP EVRENİ</div>
+  <input id="search" placeholder="🔍 Oyun ara">
+  <div id="topRight">
+    <button id="jeton" title="Robux: platform parası. Nasıl kazanılır?">R$ 0</button>
+    <div id="me"><span id="meFace"></span><span id="meName"></span></div>
+  </div>
+</header>
+<nav id="nav">
+  <button data-page="home" class="on">🏠 Ana Sayfa</button>
+  <button data-page="avatar">🧍 Avatar</button>
+  <button data-page="profile">👤 Profil</button>
+</nav>
+<main>
+  <section id="home" class="page on">
+    <div id="hello">
+      <div id="helloAvatar"></div>
+      <div><h1 id="helloTitle" style="margin:0">Merhaba!</h1><div class="muted" id="helloSub"></div></div>
+      <div id="daily"><span style="font-size:28px">🎁</span><div><b>Günlük ödül</b><div class="muted" id="dailyTxt"></div></div>
+        <button class="btn blue" id="btnDaily">Al</button></div>
+    </div>
+    <div id="recentWrap"><h2>Devam Et</h2><div class="row" id="recent"></div></div>
+    <h2>Tüm Oyunlar</h2>
+    <div class="grid" id="games"></div>
+  </section>
+
+  <section id="avatar" class="page">
+    <h1>Avatar</h1>
+    <div id="avatarWrap">
+      <div id="avatarView"></div>
+      <div id="avatarOpts"></div>
+    </div>
+  </section>
+
+  <section id="profile" class="page">
+    <h1>Profil</h1>
+    <div class="stats" id="profStats"></div>
+    <h2>Kullanıcı adı</h2>
+    <div style="display:flex;gap:10px;max-width:420px"><input id="profName" maxlength="20"><button class="btn blue" id="btnProfName">Kaydet</button></div>
+    <h2>Rozetler</h2>
+    <div class="badges" id="badges"></div>
+    <h2>Oyun istatistikleri</h2>
+    <div id="gameStats"></div>
+    <h2>Hesaplar</h2>
+    <div id="accounts" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center"></div>
+    <p class="muted" style="margin-top:28px">İlerleme bu tarayıcıda saklanır. <button class="btn" id="btnResetAll" style="margin-left:8px">Platform verisini sıfırla</button></p>
+  </section>
+</main>
+
+<div class="modal" id="gameModal"><div class="sheet" id="gameSheet"></div></div>
+<div id="landing">
+  <section id="lHero">
+    <div id="lTop"><div id="lLogo"><i></i>KÜP EVRENİ</div><button class="btn" id="btnLogin">Giriş yap</button></div>
+    <span class="cube" style="width:46px;height:46px;left:58%;top:18%"></span>
+    <span class="cube" style="width:22px;height:22px;left:48%;top:62%;animation-delay:-2s"></span>
+    <span class="cube" style="width:34px;height:34px;left:88%;top:26%;animation-delay:-4s"></span>
+    <div id="lAvatar"></div>
+    <div id="lText">
+      <h1>Tek platform.<br>Sonsuz macera.</h1>
+      <p>Pizza dükkânı işlet, uzayda evcil hayvan topla, adada hayatta kal. Avatarını tasarla, Robux kazan ve tüm oyunları tarayıcında oyna.</p>
+      <button class="btn blue" id="btnSignup">Hesap oluştur</button>
+    </div>
+  </section>
+  <section id="lGames">
+    <h2 style="margin-bottom:2px">Başlamanı sağlayacak oyunlar</h2>
+    <div class="muted" style="margin-bottom:14px">Basit kontroller, bol eğlence</div>
+    <div class="row" id="lGameRow"></div>
+  </section>
+  <section id="lCta">
+    <div class="gridBg"></div>
+    <div><h1>Küp Evreni'ne<br>bugün başla</h1><button class="btn blue" id="btnSignup2">Hesap oluştur</button></div>
+  </section>
+</div>
+<div class="modal" id="nameModal"><div class="sheet" id="nameSheet" style="max-width:420px"><div class="body">
+  <h1>👋 Hesap oluştur</h1>
+  <p class="muted">Oyunlarda görünecek bir kullanıcı adı seç.</p>
+  <input id="nameInput" maxlength="20" placeholder="Kullanıcı adı">
+  <button class="btn play" id="btnName" style="width:100%">Başla</button>
+</div></div></div>
+<div class="modal" id="loginModal"><div class="sheet" style="max-width:420px"><div class="body">
+  <h1>Giriş yap</h1>
+  <p class="muted">Bu cihazdaki hesaplardan birini seç.</p>
+  <div id="loginList"></div>
+  <button class="btn" style="width:100%;margin-top:10px" id="btnLoginNew">Yeni hesap oluştur</button>
+</div></div></div>
+<div class="modal" id="earnModal"><div class="sheet" style="max-width:480px"><div class="body">
+  <h1>💎 Robux nasıl kazanılır?</h1>
+  <div class="muted" id="earnBal"></div>
+  <div id="earnList"></div>
+  <p class="muted">Robux ile oyunların içindeki mağazalardan (🍕 Pizza: 2x Para, Yardımcı Aşçı · 🐾 Gezegenler: 2x Toz, +2 Slot) satın alım yapabilirsin.</p>
+  <button class="btn blue" style="width:100%" id="btnEarnClose">Tamam</button>
+</div></div></div>
+<div class="modal" id="buyModal"><div class="sheet" id="buySheet"><div class="body">
+  <div style="font-size:54px" id="buyIcon">🛒</div>
+  <h1 id="buyTitle" style="font-size:22px">Satın al</h1>
+  <p class="muted" id="buyGame"></p>
+  <p style="font-size:22px;font-weight:700;color:var(--gold)" id="buyPrice"></p>
+  <p class="muted" id="buyAfter"></p>
+  <div style="display:flex;gap:10px"><button class="btn" id="btnBuyNo" style="flex:1">Vazgeç</button><button class="btn play" id="btnBuyYes" style="flex:1">Satın al</button></div>
+</div></div></div>
+
+<div id="player">
+  <div id="playerBar">
+    <button class="btn" id="btnExit">← Ana sayfa</button>
+    <b id="playerTitle"></b>
+    <span style="margin-left:auto" id="playerJeton" class="muted"></span>
+    <button class="btn" id="btnFull" title="Tam ekran">⛶</button>
+  </div>
+  <iframe id="frame" allow="fullscreen; autoplay" allowfullscreen></iframe>
+</div>
+<div id="toast"></div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+
+// ================================================================ Oyun kataloğu
+const GAMES = [
+  { id: "pizza", title: "Pizza Kulesi Tycoon", icon: "🍕", genre: "Tycoon", url: "pizza-kulesi-tycoon/web/index.html",
+    bg: "linear-gradient(135deg,#ff7a45,#ffb703)", saveKey: "pizzaKulesi",
+    desc: "Küçük bir pizza dükkânıyla başla. Hamur aç, malzeme ekle, fırınla ve müşterilere teslim et. Kazandığın parayla fırın, menü ve masa al.",
+    controls: "Fare ile bak · WASD yürü · Shift koş · E / F etkileşim · Dokunmatik: joystick + butonlar" },
+  { id: "gezegen", title: "Evcil Hayvan Simülatörü: Gezegenler", icon: "🐾", genre: "Simülatör", url: "evcil-hayvan-gezegenler/web/index.html",
+    bg: "linear-gradient(135deg,#0b1d51,#2bb5ff)", saveKey: "evcilGezegenler",
+    desc: "Kristalleri kır, yıldız tozu topla, yumurta aç! Uzay hayvanlarını birleştirip Altın ve Gökkuşağı yap, yeni gezegenlerin kapısını aç, takas yap.",
+    controls: "Kristale tıkla · WASD yürü · sürükleyerek kamerayı çevir · E etkileşim · Dokunmatik: joystick + dokun" },
+  { id: "fabrika", title: "Kaçış Parkuru: Çılgın Fabrika", icon: "🏭", genre: "Obby", url: "cilgin-fabrika/web/index.html",
+    bg: "linear-gradient(135deg,#3a3a3a,#ff5a1f)", saveKey: "cilginFabrika",
+    desc: "10 bölümlük fabrika parkuru: bantlar, testereler, presler, lav, kaybolan zeminler ve lazerler. 10. bölümde patron Dev Öğütücü seni bekliyor! Süreni sıralamaya sok, iz ve kostüm kazan.",
+    controls: "WASD yürü · Space zıpla · sürükle: kamera · R: checkpoint'e dön · Dokunmatik: joystick + ⤒" },
+  { id: "ada", title: "Ada Hayatta Kalma: Tekne Kazası", icon: "🏝️", genre: "Hayatta Kalma", url: "tekne-kazasi/web/index.html",
+    bg: "linear-gradient(135deg,#0f7a5a,#7ad7f0)", saveKey: "tekneKazasi",
+    desc: "Teknen battı, ıssız bir adadasın! Odun, taş ve yiyecek topla, alet üret, kamp ateşi ve barınak kur. Gece kıyıdan yengeçler çıkar. Tekneyi bitir ve adadan kaç!",
+    controls: "WASD yürü · E topla · F saldır · C üretim · 1-3 ye/iç · Dokunmatik: joystick + butonlar" },
+  { id: "klavye", title: "Klavye Koşusu: +1 Hız", icon: "⌨️", genre: "Koşu", url: "asmr-klavye/web/index.html",
+    bg: "linear-gradient(135deg,#2a1f3d,#ff9ec7)", saveKey: "klavyeKosusu",
+    desc: "Dev klavye tuşlarından yapılmış yolda koş! Bastığın her tuş tatlı bir tık sesi çıkarır ve +Hız verir. 8 bölgenin duvarlarını kırıp Kupa topla, switch ve iz al, Yeniden Doğ ve daha da hızlan!",
+    controls: "WASD / oklar koş · Space zıpla · R otomatik koş · tekerlek: yakınlaş · Dokunmatik: joystick + ⤒" },
+  { id: "kasaba", title: "Kasaba Hayatı RP", icon: "🏘️", genre: "Rol Yapma", url: "kasaba-hayati/web/index.html",
+    bg: "linear-gradient(135deg,#3a86ff,#8ce99a)", saveKey: "kasabaHayati",
+    desc: "Kasabaya taşın, kendi hayatını kur! Arsaya ev yap, duvar rengini seç. Polis, Doktor, Kurye, Kafe Çalışanı ya da Öğrenci ol, görev yap, maaş al. Bisikletten spor arabaya araç sür, gece kasabayı gez. Rol adın başının üstünde!",
+    controls: "WASD yürü/sür · Space zıpla/fren · E etkileşim · F araca bin/in · H korna · P telefon · Dokunmatik: joystick + butonlar" },
+];
+
+const BADGES = [
+  { id: "welcome", icon: "👋", name: "Hoş geldin", desc: "Küp Evreni'ne katıl" },
+  { id: "firstGame", icon: "🎮", name: "İlk oyun", desc: "Herhangi bir oyunu oyna" },
+  { id: "explorer", icon: "🧭", name: "Kâşif", desc: "Tüm hazır oyunları dene" },
+  { id: "stylish", icon: "🧢", name: "Tarz sahibi", desc: "Avatarını değiştir" },
+  { id: "hour", icon: "⏱️", name: "Bir saat", desc: "Toplam 1 saat oyna" },
+  { id: "shopper", icon: "🛍️", name: "Alışverişçi", desc: "Oyun içinde Robux ile bir şey al" },
+];
+
+const SKINS = ["#ffdbac", "#f1c27d", "#e0ac69", "#c68642", "#8d5524", "#5c3a21"];
+const COLORS = ["#e63946", "#ff7a45", "#ffd166", "#06d6a0", "#118ab2", "#3a0ca3", "#7b2cbf", "#f72585", "#f2f3f5", "#2b2d42", "#6c757d", "#1b4332"];
+const HATS = [["none", "Yok"], ["cap", "Şapka"], ["crown", "Taç"], ["headphones", "Kulaklık"], ["helmet", "Uzay kaskı"]];
+const FACES = [["smile", "🙂"], ["cool", "😎"], ["wow", "😮"], ["grin", "😁"]];
+
+// ================================================================ Profil (localStorage)
+const KEY = "kupEvreni";
+const DEFAULT = { name: "", jeton: 200, lastDaily: "", joined: new Date().toISOString().slice(0, 10), recent: [], playTime: {},
+  badges: { welcome: true }, purchases: [], gameStats: {},
+  avatar: { skin: SKINS[0], shirt: "#118ab2", pants: "#2b2d42", hat: "cap", hatColor: "#e63946", face: "smile" } };
+let profile;
+try { profile = JSON.parse(localStorage.getItem(KEY) || "null"); } catch (e) { profile = null; }
+profile = profile ? { ...DEFAULT, ...profile, avatar: { ...DEFAULT.avatar, ...(profile.avatar || {}) } } : structuredClone(DEFAULT);
+function persist() { try { localStorage.setItem(KEY, JSON.stringify(profile)); } catch (e) {} }
+// Diğer (aktif olmayan) hesaplar
+const ACC_KEY = "kupEvreniHesaplar";
+let accounts;
+try { accounts = JSON.parse(localStorage.getItem(ACC_KEY) || "[]"); } catch (e) { accounts = []; }
+function persistAccounts() { try { localStorage.setItem(ACC_KEY, JSON.stringify(accounts)); } catch (e) {} }
+
+function toast(msg) {
+  const t = $("toast");
+  t.textContent = msg; t.style.display = "block";
+  clearTimeout(toast.h); toast.h = setTimeout(() => t.style.display = "none", 2600);
+}
+// Robux kazanma kuralları (hepsi platformda; oyunlar Robux veremez)
+const DAILY_REWARD = 100;
+const PLAY_REWARD = 15, PLAY_REWARD_SEC = 300;   // her 5 dk oyun
+const BADGE_REWARD = 25;
+function addRobux(n) {
+  profile.jeton += n; persist(); renderTop();
+  if (current) sendProfile(); // açık oyundaki bakiye de güncellensin
+}
+function award(id) {
+  if (profile.badges[id]) return;
+  profile.badges[id] = true;
+  const b = BADGES.find(x => x.id === id);
+  addRobux(BADGE_REWARD);
+  toast(`${b.icon} Rozet kazandın: ${b.name} (+R$ ${BADGE_REWARD})`);
+}
+function renderEarn() {
+  const canDaily = profile.lastDaily !== today();
+  const sec = profile.earnSec || 0;
+  const got = BADGES.filter(b => profile.badges[b.id]).length;
+  $("earnBal").textContent = `Bakiyen: R$ ${profile.jeton}`;
+  $("earnList").innerHTML = `
+    <div class="earn"><div class="ico">🎁</div><div><b>Günlük ödül</b><div class="muted">Her gün ana sayfadan al</div></div>
+      ${canDaily ? `<button class="btn blue" id="btnEarnDaily">+R$ ${DAILY_REWARD} al</button>` : `<span class="muted">Yarın tekrar ✓</span>`}</div>
+    <div class="earn"><div class="ico">⏱️</div><div><b>Oyun oyna</b><div class="muted">Her ${PLAY_REWARD_SEC / 60} dakika oyunda: sıradakine ${Math.ceil((PLAY_REWARD_SEC - sec) / 60)} dk</div>
+      <div class="pbar"><i style="width:${sec / PLAY_REWARD_SEC * 100}%"></i></div></div><span class="amt">+R$ ${PLAY_REWARD}</span></div>
+    <div class="earn"><div class="ico">🏅</div><div><b>Rozet kazan</b><div class="muted">${got}/${BADGES.length} rozet. Profil sayfasından hangilerinin kaldığını gör</div></div>
+      <span class="amt">+R$ ${BADGE_REWARD} her biri</span></div>`;
+  const d = $("btnEarnDaily");
+  if (d) d.onclick = () => { $("btnDaily").click(); renderEarn(); };
+}
+const fmtTime = s => s < 60 ? `${Math.round(s)} sn` : s < 3600 ? `${Math.floor(s / 60)} dk` : `${(s / 3600).toFixed(1).replace(".", ",")} sa`;
+const today = () => new Date().toISOString().slice(0, 10);
+
+// ================================================================ Blok avatar (three.js)
+function hasWebGL() { try { return !!document.createElement("canvas").getContext("webgl"); } catch (e) { return false; } }
+const GL = hasWebGL();
+
+// Oyunların da kullandığı avatar modeli: ön yüzü +Z
+function buildAvatar(a) {
+  const g = new THREE.Group();
+  const m = c => new THREE.MeshLambertMaterial({ color: c });
+  const part = (w, h, d, c, x, y, z) => { const p = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m(c)); p.position.set(x, y, z); g.add(p); return p; };
+  const legs = [part(0.9, 2, 1, a.pants, -0.5, 1, 0), part(0.9, 2, 1, a.pants, 0.5, 1, 0)];
+  part(2, 2, 1, a.shirt, 0, 3, 0);
+  const arms = [part(0.9, 2, 1, a.skin, -1.45, 3, 0), part(0.9, 2, 1, a.skin, 1.45, 3, 0)];
+  const head = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.62, 1.2, 20), m(a.skin));
+  head.position.set(0, 4.6, 0); g.add(head);
+  const faceTex = new THREE.CanvasTexture(drawFace(a.face));
+  const face = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.9), new THREE.MeshBasicMaterial({ map: faceTex, transparent: true }));
+  face.position.set(0, 4.6, 0.63); g.add(face);
+  const hc = a.hatColor || "#e63946";
+  if (a.hat === "cap") {
+    const c = new THREE.Mesh(new THREE.CylinderGeometry(0.66, 0.66, 0.35, 20), m(hc)); c.position.set(0, 5.3, 0); g.add(c);
+    part(1.1, 0.08, 0.6, hc, 0, 5.15, 0.75);
+  } else if (a.hat === "crown") {
+    const c = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.55, 0.4, 8, 1, true), new THREE.MeshLambertMaterial({ color: "#ffd166", side: THREE.DoubleSide }));
+    c.position.set(0, 5.4, 0); g.add(c);
+    for (let i = 0; i < 6; i++) { const s = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.3, 4), m("#ffd166")); const an = i / 6 * Math.PI * 2; s.position.set(Math.cos(an) * 0.55, 5.7, Math.sin(an) * 0.55); g.add(s); }
+  } else if (a.hat === "headphones") {
+    const band = new THREE.Mesh(new THREE.TorusGeometry(0.7, 0.07, 8, 20, Math.PI), m(hc)); band.position.set(0, 4.75, 0); band.rotation.z = 0; g.add(band);
+    part(0.25, 0.5, 0.5, hc, -0.7, 4.6, 0); part(0.25, 0.5, 0.5, hc, 0.7, 4.6, 0);
+  } else if (a.hat === "helmet") {
+    const h = new THREE.Mesh(new THREE.SphereGeometry(0.95, 20, 14), new THREE.MeshLambertMaterial({ color: "#cfe8ff", transparent: true, opacity: 0.35 }));
+    h.position.set(0, 4.65, 0); g.add(h);
+  }
+  g.userData = { legs, arms };
+  return g;
+}
+function drawFace(kind) {
+  const c = document.createElement("canvas"); c.width = c.height = 128;
+  const x = c.getContext("2d");
+  x.fillStyle = "#1b1b1b"; x.strokeStyle = "#1b1b1b"; x.lineWidth = 7; x.lineCap = "round";
+  if (kind === "cool") { x.fillRect(22, 40, 36, 18); x.fillRect(70, 40, 36, 18); x.fillRect(56, 44, 16, 5); }
+  else { x.beginPath(); x.ellipse(44, 50, 7, kind === "wow" ? 12 : 10, 0, 0, 7); x.ellipse(84, 50, 7, kind === "wow" ? 12 : 10, 0, 0, 7); x.fill(); }
+  x.beginPath();
+  if (kind === "wow") { x.ellipse(64, 92, 10, 13, 0, 0, 7); x.fill(); }
+  else if (kind === "grin") { x.moveTo(36, 82); x.quadraticCurveTo(64, 116, 92, 82); x.closePath(); x.fill(); }
+  else { x.arc(64, 74, 26, 0.25 * Math.PI, 0.75 * Math.PI); x.stroke(); }
+  return c;
+}
+
+// Avatar sahnesi (önizleme): canvas'a bağlı küçük renderer
+function avatarStage(container, { spin = true, zoom = 1 } = {}) {
+  if (!GL) { container.innerHTML = `<div style="display:grid;place-items:center;height:100%;font-size:48px">🧍</div>`; return { update() {} }; }
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  container.innerHTML = ""; container.appendChild(renderer.domElement);
+  const scene = new THREE.Scene();
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x445566, 0.9));
+  const d = new THREE.DirectionalLight(0xffffff, 0.6); d.position.set(3, 6, 5); scene.add(d);
+  const cam = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
+  let model = null, yaw = 0.5, drag = null;
+  const st = {
+    update() {
+      if (model) scene.remove(model);
+      model = buildAvatar(profile.avatar); model.position.y = -3; scene.add(model);
+    },
+    render() {
+      const w = container.clientWidth, h = container.clientHeight;
+      if (!w || !h) return;
+      if (renderer.domElement.width !== Math.round(w * devicePixelRatio)) {
+        renderer.setPixelRatio(Math.min(2, devicePixelRatio)); renderer.setSize(w, h, false); cam.aspect = w / h; cam.updateProjectionMatrix();
+      }
+      if (spin && !drag) yaw += 0.006;
+      const dist = 13 / zoom;
+      cam.position.set(Math.sin(yaw) * dist, zoom > 1.5 ? 1.6 : 0.4, Math.cos(yaw) * dist);
+      cam.lookAt(0, zoom > 1.5 ? 1.6 : -0.2, 0);
+      renderer.render(scene, cam);
+    },
+  };
+  container.addEventListener("pointerdown", e => { drag = e.clientX; });
+  addEventListener("pointermove", e => { if (drag !== null) { yaw -= (e.clientX - drag) * 0.01; drag = e.clientX; } });
+  addEventListener("pointerup", () => { drag = null; });
+  st.update();
+  stages.push(st);
+  return st;
+}
+const stages = [];
+(function loop() { if (!$("player").classList.contains("on")) stages.forEach(s => s.render && s.render()); requestAnimationFrame(loop); })();
+
+// ================================================================ Arayüz
+function renderTop() {
+  $("jeton").textContent = "R$ " + profile.jeton;
+  $("meName").textContent = profile.name;
+  $("meFace").style.background = profile.avatar.skin;
+  $("meFace").textContent = FACES.find(f => f[0] === profile.avatar.face)[1];
+  $("playerJeton").textContent = "R$ " + profile.jeton;
+}
+
+function gameCard(g) {
+  const t = profile.playTime[g.id] || 0;
+  return `<button class="game" data-game="${g.id}">
+    <div class="thumb" style="background:${g.bg}"><span class="tag">${g.genre}</span>${g.icon}${g.soon ? '<div class="soon">Yakında</div>' : ""}</div>
+    <b>${g.title}</b><span>${g.soon ? "Geliştiriliyor" : t ? "Oynadın: " + fmtTime(t) : "Tarayıcıda · Tek oyunculu"}</span></button>`;
+}
+function renderHome() {
+  $("helloTitle").textContent = `Merhaba, ${profile.name || "oyuncu"}!`;
+  const total = Object.values(profile.playTime).reduce((s, v) => s + v, 0);
+  $("helloSub").textContent = total ? `Toplam oyun süren: ${fmtTime(total)}` : "Bir oyun seç ve başla!";
+  const can = profile.lastDaily !== today();
+  $("dailyTxt").textContent = can ? "+R$ 100 seni bekliyor" : "Yarın yine gel!";
+  $("btnDaily").disabled = !can;
+  const q = $("search").value.trim().toLocaleLowerCase("tr");
+  const list = GAMES.filter(g => !q || g.title.toLocaleLowerCase("tr").includes(q) || g.genre.toLocaleLowerCase("tr").includes(q));
+  $("games").innerHTML = list.map(gameCard).join("") || `<p class="muted">“${q}” için oyun bulunamadı.</p>`;
+  const recent = profile.recent.map(id => GAMES.find(g => g.id === id)).filter(Boolean);
+  $("recentWrap").style.display = recent.length && !q ? "block" : "none";
+  $("recent").innerHTML = recent.map(gameCard).join("");
+}
+
+function statsFor(g) {
+  // Oyunun kendi bildirdiği özet (postMessage) yoksa localStorage'dan okumayı dene (aynı köken ise)
+  let s = profile.gameStats[g.id];
+  if (!s && g.saveKey) {
+    try {
+      const raw = JSON.parse(localStorage.getItem(g.saveKey) || "null");
+      if (raw && g.id === "pizza") s = { "💰 Para": raw.money, "📅 Gün": raw.day };
+      if (raw && g.id === "gezegen") s = { "💫 Yıldız tozu": Math.floor(raw.dust || 0), "🐾 Hayvan": (raw.pets || []).length };
+      if (raw && g.id === "ada") s = { "📅 Gün": raw.day, "🏆 En uzun": raw.bestDay, "🏝️ Kaçış": raw.escapes };
+      if (raw && g.id === "fabrika") s = { "🏭 Bölüm": (raw.cp || 0) + 1, "💀 Ölüm": raw.deaths, "🏆 Bitirme": raw.finishes };
+    } catch (e) {}
+  }
+  return s || null;
+}
+function openGameSheet(id) {
+  const g = GAMES.find(x => x.id === id);
+  const s = statsFor(g);
+  const statHtml = s ? `<div class="stats">${Object.entries(s).map(([k, v]) => `<div class="stat"><b>${v ?? "—"}</b><span>${k}</span></div>`).join("")}</div>` : "";
+  $("gameSheet").innerHTML = `<div class="hero" style="background:${g.bg}">${g.icon}</div><div class="body">
+    <h1>${g.title}</h1><div class="muted">${g.genre} · ${g.soon ? "Yakında" : "Tarayıcıda oynanır"}${profile.playTime[g.id] ? " · Oynadın: " + fmtTime(profile.playTime[g.id]) : ""}</div>
+    <p>${g.desc}</p>${statHtml}
+    ${g.controls ? `<p class="muted">🎮 ${g.controls}</p>` : ""}
+    <div style="display:flex;gap:10px;margin-top:14px"><button class="btn" id="btnSheetClose">Kapat</button>
+    <button class="btn play" id="btnPlay" style="flex:1;font-size:20px" ${g.soon ? "disabled" : ""}>${g.soon ? "Yakında" : "▶ Oyna"}</button></div></div>`;
+  $("gameModal").classList.add("on");
+  $("btnSheetClose").onclick = () => $("gameModal").classList.remove("on");
+  if (!g.soon) $("btnPlay").onclick = () => { $("gameModal").classList.remove("on"); launch(g.id); };
+}
+
+// ---------------------------------------------------------------- Avatar sayfası
+let avatarPreview = null;
+function renderAvatarOpts() {
+  const a = profile.avatar;
+  const sw = (key, list) => `<div class="swatches">${list.map(c => `<button class="sw ${a[key] === c ? "on" : ""}" data-k="${key}" data-v="${c}" style="background:${c}"></button>`).join("")}</div>`;
+  $("avatarOpts").innerHTML = `
+    <b>Ten rengi</b>${sw("skin", SKINS)}
+    <b>Tişört</b>${sw("shirt", COLORS)}
+    <b>Pantolon</b>${sw("pants", COLORS)}
+    <b>Yüz</b><div class="swatches">${FACES.map(([id, e]) => `<button class="chip ${a.face === id ? "on" : ""}" data-k="face" data-v="${id}" style="font-size:22px">${e}</button>`).join("")}</div>
+    <b>Aksesuar</b><div class="swatches">${HATS.map(([id, n]) => `<button class="chip ${a.hat === id ? "on" : ""}" data-k="hat" data-v="${id}">${n}</button>`).join("")}</div>
+    <b>Aksesuar rengi</b>${sw("hatColor", COLORS)}
+    <p class="muted">Avatarın oyunlara da taşınır (ör. Evcil Hayvan Simülatörü'nde karakterin, Pizza'da tabelan).</p>`;
+}
+$("avatarOpts").addEventListener("click", e => {
+  const b = e.target.closest("[data-k]");
+  if (!b) return;
+  profile.avatar[b.dataset.k] = b.dataset.v;
+  persist(); award("stylish");
+  renderAvatarOpts(); renderTop();
+  stages.forEach(s => s.update());
+});
+
+// ---------------------------------------------------------------- Profil sayfası
+function renderProfile() {
+  const total = Object.values(profile.playTime).reduce((s, v) => s + v, 0);
+  const played = GAMES.filter(g => profile.playTime[g.id]).length;
+  $("profStats").innerHTML = [
+    ["👤", profile.name, "Kullanıcı adı"], ["💎", "R$ " + profile.jeton, "Robux"], ["⏱️", fmtTime(total), "Toplam süre"],
+    ["🎮", `${played}/${GAMES.filter(g => !g.soon).length}`, "Oynanan oyun"], ["📅", profile.joined, "Katılma"],
+  ].map(([i, v, k]) => `<div class="stat"><b>${i} ${v}</b><span>${k}</span></div>`).join("");
+  $("profName").value = profile.name;
+  $("accounts").innerHTML = `<span class="btn blue" style="cursor:default">👤 ${profile.name} (aktif)</span>` +
+    accounts.map((a, i) => `<button class="btn" data-acc="${i}">↔️ ${a.name}</button>`).join("") +
+    `<button class="btn play" id="btnNewAcc">➕ Yeni Hesap Ekle</button><button class="btn" id="btnLogout">🚪 Çıkış yap</button><button class="btn red" id="btnCloseAcc">🗑️ Hesabı kapat</button>`;
+  $("badges").innerHTML = BADGES.map(b => `<div class="badge ${profile.badges[b.id] ? "" : "off"}"><div>${b.icon}</div><b>${b.name}</b><div class="muted" style="font-size:12px">${b.desc}</div></div>`).join("");
+  $("gameStats").innerHTML = GAMES.filter(g => !g.soon).map(g => {
+    const s = statsFor(g);
+    return `<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-bottom:10px">
+      <b>${g.icon} ${g.title}</b> <span class="muted">· ${profile.playTime[g.id] ? fmtTime(profile.playTime[g.id]) : "henüz oynanmadı"}</span>
+      ${s ? `<div class="stats" style="margin:10px 0 0">${Object.entries(s).map(([k, v]) => `<div class="stat"><b>${v ?? "—"}</b><span>${k}</span></div>`).join("")}</div>` : ""}</div>`;
+  }).join("");
+}
+
+function showPage(id) {
+  document.querySelectorAll(".page").forEach(p => p.classList.toggle("on", p.id === id));
+  document.querySelectorAll("#nav button").forEach(b => b.classList.toggle("on", b.dataset.page === id));
+  if (id === "home") renderHome();
+  if (id === "avatar") { renderAvatarOpts(); if (!avatarPreview) avatarPreview = avatarStage($("avatarView"), { spin: true }); }
+  if (id === "profile") renderProfile();
+  scrollTo(0, 0);
+}
+
+// ================================================================ Oyun başlatma + köprü (postMessage)
+let current = null, playTimer = null;
+function launch(id) {
+  const g = GAMES.find(x => x.id === id);
+  current = g;
+  profile.recent = [id, ...profile.recent.filter(x => x !== id)].slice(0, 6);
+  award("firstGame");
+  if (GAMES.filter(x => !x.soon).every(x => profile.recent.includes(x.id))) award("explorer");
+  persist();
+  $("playerTitle").textContent = `${g.icon} ${g.title}`;
+  $("frame").src = g.url;
+  $("player").classList.add("on");
+  // Telefonda Roblox gibi: tam ekran + yatay (tarayıcı izin vermezse sessizce geç)
+  if (matchMedia("(pointer: coarse)").matches && $("player").requestFullscreen) {
+    $("player").requestFullscreen().then(() => screen.orientation && screen.orientation.lock && screen.orientation.lock("landscape")).catch(() => {});
+  }
+  document.body.style.overflow = "hidden";
+  renderTop();
+  clearInterval(playTimer);
+  playTimer = setInterval(() => {
+    if (document.hidden) return;
+    profile.playTime[id] = (profile.playTime[id] || 0) + 10;
+    profile.earnSec = (profile.earnSec || 0) + 10;
+    if (profile.earnSec >= PLAY_REWARD_SEC) {
+      profile.earnSec -= PLAY_REWARD_SEC;
+      addRobux(PLAY_REWARD);
+      toast(`⏱️ ${PLAY_REWARD_SEC / 60} dakika oynadın: +R$ ${PLAY_REWARD}`);
+    }
+    if (Object.values(profile.playTime).reduce((s, v) => s + v, 0) >= 3600) award("hour");
+    persist();
+  }, 10000);
+}
+function exitGame() {
+  clearInterval(playTimer);
+  $("frame").src = "about:blank";
+  $("player").classList.remove("on");
+  document.body.style.overflow = "";
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  current = null;
+  renderTop(); renderHome();
+}
+function sendProfile() {
+  const w = $("frame").contentWindow;
+  if (w) w.postMessage({ type: "kup:profile", name: profile.name, avatar: profile.avatar, jeton: profile.jeton }, "*");
+}
+
+// Oyun → platform mesajları
+let pendingBuy = null;
+addEventListener("message", e => {
+  if (!current || e.source !== $("frame").contentWindow) return; // sadece açık oyundan gelenler
+  const m = e.data || {};
+  if (m.type === "kup:ready") sendProfile();
+  else if (m.type === "kup:stats" && m.stats && typeof m.stats === "object") {
+    profile.gameStats[current.id] = Object.fromEntries(Object.entries(m.stats).slice(0, 6).map(([k, v]) => [String(k).slice(0, 30), String(v).slice(0, 20)]));
+    persist();
+  } else if (m.type === "kup:purchase") {
+    const price = Math.floor(Number(m.price));
+    if (!(price > 0) || price > 100000) return;
+    pendingBuy = { reqId: m.reqId, id: String(m.id).slice(0, 40), name: String(m.name).slice(0, 40), price, icon: Array.from(String(m.icon || "🛒")).slice(0, 4).join("") }; // emoji'yi ortadan bölme
+    $("buyIcon").textContent = pendingBuy.icon;
+    $("buyTitle").textContent = pendingBuy.name;
+    $("buyGame").textContent = current.title;
+    $("buyPrice").textContent = `R$ ${price}`;
+    const after = profile.jeton - price;
+    $("buyAfter").textContent = after >= 0 ? `Satın alma sonrası: R$ ${after}` : `Yetersiz Robux (R$ ${profile.jeton}). Kazanmak için ana sayfadaki R$ butonuna bak.`;
+    $("btnBuyYes").disabled = after < 0;
+    $("buyModal").classList.add("on");
+  }
+});
+function answerBuy(ok) {
+  if (!pendingBuy) return;
+  if (ok && profile.jeton >= pendingBuy.price) {
+    profile.jeton -= pendingBuy.price;
+    profile.purchases.push({ game: current.id, id: pendingBuy.id, price: pendingBuy.price, at: Date.now() });
+    persist(); award("shopper");
+  } else ok = false;
+  $("frame").contentWindow.postMessage({ type: "kup:purchaseResult", reqId: pendingBuy.reqId, id: pendingBuy.id, ok, jeton: profile.jeton }, "*");
+  pendingBuy = null;
+  $("buyModal").classList.remove("on");
+  renderTop();
+}
+$("btnBuyYes").onclick = () => answerBuy(true);
+$("btnBuyNo").onclick = () => answerBuy(false);
+$("frame").addEventListener("load", sendProfile);
+
+// ================================================================ Olaylar
+document.querySelectorAll("#nav button").forEach(b => b.onclick = () => showPage(b.dataset.page));
+$("logo").onclick = () => showPage("home");
+$("me").onclick = () => showPage("profile");
+$("search").oninput = renderHome;
+document.addEventListener("click", e => {
+  const c = e.target.closest("[data-game]");
+  if (c) openGameSheet(c.dataset.game);
+});
+$("gameModal").addEventListener("click", e => { if (e.target.id === "gameModal") $("gameModal").classList.remove("on"); });
+$("btnDaily").onclick = () => {
+  if (profile.lastDaily === today()) return;
+  profile.lastDaily = today(); addRobux(DAILY_REWARD);
+  toast(`🎁 +R$ ${DAILY_REWARD}!`); renderHome();
+};
+$("btnExit").onclick = exitGame;
+$("jeton").onclick = () => { renderEarn(); $("earnModal").classList.add("on"); };
+$("btnEarnClose").onclick = () => $("earnModal").classList.remove("on");
+$("earnModal").addEventListener("click", e => { if (e.target.id === "earnModal") $("earnModal").classList.remove("on"); });
+$("btnFull").onclick = () => {
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  else $("player").requestFullscreen && $("player").requestFullscreen().catch(() => {});
+};
+$("btnProfName").onclick = () => {
+  const n = $("profName").value.trim();
+  if (n.length < 2) { toast("Kullanıcı adı en az 2 karakter olmalı"); return; }
+  profile.name = n; persist(); renderTop(); renderProfile(); toast("Kaydedildi");
+};
+$("accounts").addEventListener("click", e => {
+  if (e.target.id === "btnNewAcc" || e.target.id === "btnLogout") {
+    accounts.push(profile); persistAccounts();
+    localStorage.removeItem(KEY); location.reload(); // açılış ekranına döner
+    return;
+  }
+  if (e.target.id === "btnCloseAcc") {
+    // Aktif hesap kalıcı silinir; diğer hesaplar ve oyunların kendi kayıtları kalır
+    if (prompt(`"${profile.name}" hesabı kalıcı olarak kapatılacak (Robux, avatar, rozetler silinir). Onaylamak için kullanıcı adını yazın:`) !== profile.name) { toast("Hesap kapatılmadı"); return; }
+    localStorage.removeItem(KEY); location.reload();
+    return;
+  }
+  const b = e.target.closest("[data-acc]");
+  if (!b) return;
+  const i = +b.dataset.acc, other = accounts[i];
+  accounts[i] = profile; persistAccounts();
+  localStorage.setItem(KEY, JSON.stringify(other)); location.reload();
+});
+$("btnResetAll").onclick = () => {
+  if (!confirm("Platform verisi (ad, avatar, Robux, rozet, süreler) silinsin mi? Oyunların kendi kayıtları korunur.")) return;
+  localStorage.removeItem(KEY); location.reload();
+};
+$("btnName").onclick = () => {
+  const n = $("nameInput").value.trim();
+  if (n.length < 2) { $("nameInput").focus(); return; }
+  if (accounts.some(a => a.name.toLocaleLowerCase("tr") === n.toLocaleLowerCase("tr"))) { toast("Bu kullanıcı adı bu cihazda zaten var"); return; }
+  profile.name = n; persist();
+  $("nameModal").classList.remove("on");
+  $("landing").classList.remove("on");
+  renderTop(); renderHome();
+};
+$("nameInput").addEventListener("keydown", e => { if (e.key === "Enter") $("btnName").click(); });
+
+// ---------------------------------------------------------------- Açılış ekranı / giriş
+function openSignup() {
+  $("loginModal").classList.remove("on");
+  $("nameModal").classList.add("on"); setTimeout(() => $("nameInput").focus(), 50);
+}
+function openLogin() {
+  $("loginList").innerHTML = accounts.length
+    ? accounts.map((a, i) => `<button class="accRow" data-login="${i}"><span class="face" style="background:${a.avatar?.skin || SKINS[0]}">${(FACES.find(f => f[0] === a.avatar?.face) || FACES[0])[1]}</span>
+        <span><b>${a.name}</b><div class="muted" style="font-size:13px">R$ ${a.jeton} · Katılma: ${a.joined}</div></span></button>`).join("")
+    : `<p class="muted">Bu cihazda kayıtlı hesap yok.</p>`;
+  $("loginModal").classList.add("on");
+}
+$("btnSignup").onclick = openSignup;
+$("btnSignup2").onclick = openSignup;
+$("btnLoginNew").onclick = openSignup;
+$("btnLogin").onclick = openLogin;
+$("lGameRow").addEventListener("click", e => { if (e.target.closest("[data-game]")) { e.stopPropagation(); openSignup(); } });
+$("loginList").addEventListener("click", e => {
+  const b = e.target.closest("[data-login]");
+  if (!b) return;
+  const [acc] = accounts.splice(+b.dataset.login, 1); persistAccounts();
+  localStorage.setItem(KEY, JSON.stringify(acc)); location.reload();
+});
+["nameModal", "loginModal"].forEach(id => $(id).addEventListener("click", e => { if (e.target.id === id && $("landing").classList.contains("on")) $(id).classList.remove("on"); }));
+
+// ================================================================ Başlat
+renderTop();
+renderHome();
+avatarStage($("helloAvatar"), { spin: false, zoom: 2.2 });
+if (!profile.name) {
+  $("landing").classList.add("on");
+  $("lGameRow").innerHTML = GAMES.filter(g => !g.soon).map(gameCard).join("");
+  avatarStage($("lAvatar"));
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,1254 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Pizza Kulesi Tycoon</title>
+<!--
+  Pizza Kulesi Tycoon: tarayıcı sürümü (tek oyunculu, 1. şahıs 3D, three.js).
+  Roblox sürümündeki kuralların aynısı: Config.lua, PlotLayout.lua,
+  StationService, CustomerService, UpgradeService buraya JS olarak taşındı.
+  Kontroller: fare ile bak (ekrana tıkla), WASD ile yürü, ←/→ ile dön, E / F ile etkileşim.
+  Dokunmatik: sol yarıda joystick, sağ yarıda sürükleyerek bak, alttaki butonlara bas.
+  Sonsuz: her gün DAY_LENGTH saniye (2,5 dk).
+-->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+  :root {
+    --bg: #1b1f2a;
+    --panel: rgba(20, 22, 30, 0.82);
+    --text: #fff;
+    --accent: #ffb703;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: "Trebuchet MS", system-ui, sans-serif; overflow: hidden;
+    -webkit-user-select: none; user-select: none; touch-action: none; }
+  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  .hud { position: fixed; left: 50%; transform: translateX(-50%); pointer-events: none; text-align: center; }
+  #money { top: 12px; background: var(--panel); padding: 8px 22px; border-radius: 14px;
+    font-size: 26px; font-weight: 700; color: var(--accent); }
+  #hint { top: 62px; background: var(--panel); padding: 6px 16px; border-radius: 12px; font-size: 16px;
+    max-width: calc(100vw - 32px); }
+  #toasts { position: fixed; top: 104px; left: 50%; transform: translateX(-50%); display: flex;
+    flex-direction: column; gap: 6px; align-items: center; pointer-events: none; }
+  .toast { background: rgba(255, 255, 255, 0.95); color: #222; padding: 6px 14px; border-radius: 10px;
+    font-size: 15px; animation: fade 2.6s forwards; max-width: calc(100vw - 32px); }
+  @keyframes fade { 0%, 80% { opacity: 1; } 100% { opacity: 0; transform: translateY(-8px); } }
+  #crosshair { position: fixed; left: 50%; top: 50%; width: 8px; height: 8px; margin: -4px 0 0 -4px;
+    border-radius: 50%; background: rgba(255,255,255,0.85); box-shadow: 0 0 0 2px rgba(0,0,0,0.35);
+    pointer-events: none; }
+  .pop { position: fixed; left: 50%; top: 42%; transform: translateX(-50%); font-size: 34px; font-weight: 700;
+    color: #ffd166; text-shadow: 0 2px 0 rgba(0,0,0,0.5); pointer-events: none; animation: rise 1.2s forwards; }
+  @keyframes rise { to { opacity: 0; transform: translate(-50%, -70px); } }
+  #actions { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .act { position: relative; overflow: hidden; min-width: 190px; padding: 12px 16px; border-radius: 14px;
+    border: 2px solid rgba(255,255,255,0.7); background: var(--panel); color: var(--text);
+    font: inherit; font-size: 16px; text-align: left; cursor: pointer; touch-action: none; }
+  .act b { display: inline-block; width: 28px; height: 28px; line-height: 26px; text-align: center;
+    border-radius: 7px; background: #fff; color: #222; margin-right: 8px; }
+  .act .fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: rgba(90, 211, 90, 0.45);
+    pointer-events: none; }
+  .act span { position: relative; }
+  #menu { position: fixed; right: 16px; top: 12px; display: flex; gap: 8px; }
+  #menu button { font: inherit; font-size: 13px; padding: 6px 10px; border-radius: 10px; border: 0;
+    background: var(--panel); color: #ccc; cursor: pointer; }
+  #stick { position: fixed; width: 110px; height: 110px; margin: -55px 0 0 -55px; border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.5); background: rgba(0,0,0,0.2); display: none; pointer-events: none; }
+  #stick div { position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px;
+    border-radius: 50%; background: rgba(255,255,255,0.75); }
+  #day { position: fixed; left: 16px; top: 12px; background: var(--panel); padding: 8px 14px; border-radius: 14px;
+    font-size: 18px; font-weight: 700; pointer-events: none; }
+  #day.late { color: #ff6b6b; }
+  @media (max-width: 560px) { #day { top: 110px; font-size: 15px; } #menu { top: auto; bottom: 16px; left: 16px; right: auto; } }
+  #help, #summary, #shop { position: fixed; inset: 0; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.55); padding: 16px; }
+  #help { display: flex; }
+  #summary, #shop { display: none; }
+  .pass { display: grid; grid-template-columns: 44px 1fr auto; gap: 10px; align-items: center; padding: 10px 0;
+    border-bottom: 1px solid #eee; }
+  .pass .ico { font-size: 32px; text-align: center; }
+  .pass small { display: block; color: #666; font-size: 13px; line-height: 1.3; }
+  .card .pass button { margin: 0; width: auto; font-size: 15px; padding: 8px 12px; background: #f4a300; white-space: nowrap; }
+  .card .pass button:disabled { background: #bbb; }
+  #shopNote { font-size: 13px; color: #666; margin-top: 10px; }
+  #shop .close { background: #555; }
+  .card { background: #fff; color: #222; border-radius: 18px; padding: 22px 26px; max-width: 440px; width: 100%;
+    line-height: 1.5; }
+  .card h1 { margin: 0 0 8px; font-size: 26px; }
+  .card ol { padding-left: 20px; margin: 8px 0; }
+  .card button { margin-top: 12px; width: 100%; font: inherit; font-size: 18px; padding: 10px; border: 0;
+    border-radius: 12px; background: #e63946; color: #fff; cursor: pointer; }
+  #summary button { background: #2a9d8f; }
+  #summary table { width: 100%; font-size: 18px; margin: 10px 0; border-collapse: collapse; }
+  #summary td { padding: 4px 0; }
+  #summary td:last-child { text-align: right; font-weight: 700; }
+  #noWebgl { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 16px;
+    text-align: center; font-size: 18px; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="crosshair"></div>
+<div id="money" class="hud">💰 0</div>
+<div id="hint" class="hud">1/4  Hamur tezgâhından hamur al</div>
+<div id="toasts"></div>
+<div id="actions"></div>
+<div id="stick"><div></div></div>
+<div id="menu"><button id="btnShop">R$ Mağaza</button><button id="btnHelp">❓ Nasıl oynanır</button><button id="btnReset">↺ Sıfırla</button></div>
+<div id="shop">
+  <div class="card">
+    <h1>R$ Robux Mağazası</h1>
+    <div id="shopJeton" style="font-weight:700;color:#b07800"></div>
+    <div id="passList"></div>
+    <div id="shopNote"></div>
+    <button class="close" id="btnShopClose">Kapat</button>
+  </div>
+</div>
+<div id="day">☀️ Gün 1 · 2:30</div>
+<div id="summary">
+  <div class="card">
+    <h1 id="sumTitle">🌙 Gün 1 bitti!</h1>
+    <table>
+      <tr><td>💰 Kazanç</td><td id="sumEarned">0</td></tr>
+      <tr><td>😊 Mutlu müşteri</td><td id="sumServed">0</td></tr>
+      <tr><td>😠 Kızgın giden</td><td id="sumAngry">0</td></tr>
+      <tr><td>🏦 Toplam para</td><td id="sumMoney">0</td></tr>
+    </table>
+    <button id="btnNextDay">☀️ Sonraki gün başlasın (Gün 2)</button>
+  </div>
+</div>
+<div id="help">
+  <div class="card">
+    <h1>🍕 Pizza Kulesi Tycoon</h1>
+    <ol>
+      <li><b>Hamur tezgâhından</b> hamur al</li>
+      <li><b>Malzeme tezgâhında</b> pizzayı hazırla (E: Margarita, F: Karışık; Karışık yükseltmeyle açılır)</li>
+      <li>Çiğ pizzayı <b>fırına</b> koy, pişince geri al</li>
+      <li><b>Teslim tezgâhında</b> müşteriye ver</li>
+    </ol>
+    Müşterinin sabrı yarıya inmeden servis edersen <b>%20</b> bonus kazanırsın. Paranla yeşil
+    butonların üstüne çıkıp yükseltme al.<br>
+    Oyun sonsuz: her gün <b>2,5 dakika</b>. Son 15 saniyede yeni müşteri gelmez, gün sonunda özetini görürsün.<br>
+    <small>Ekrana tıkla ve fareyle bak · WASD: yürü · Shift: koş · ←/→: dön · E / F: tezgâha bakıp bas (hamur ve malzemede basılı tut) ·
+    Dokunmatik: sol yarı joystick (ileri sonuna kadar it = koş), sağ yarı sürükle-bak</small>
+    <button id="btnStart">Oyna!</button>
+  </div>
+</div>
+<div id="noWebgl">3D için WebGL gerekli; bu tarayıcıda açılamadı. Chrome / Edge ile dosyayı açmayı dene.</div>
+<script>
+"use strict";
+
+// ---------------------------------------------------------------- Config.lua
+const Config = {
+  WORKER_TIP_RATE: 0.2,
+  FAST_SERVICE_BONUS: 1.2,
+  PIZZA_ORDER: ["Margarita", "Karisik"],
+  PIZZAS: {
+    Margarita: { displayName: "Margarita", price: 10, color: [225, 60, 40] },
+    Karisik: { displayName: "Karışık", price: 25, color: [150, 70, 40], unlock: "Unlock_Karisik" },
+  },
+  CUSTOMER_PATIENCE: 60,
+  PLOT_DEFAULTS: { CookTime: 5, QueueCapacity: 3, SpawnInterval: 8, Unlock_Karisik: false },
+  UPGRADES: [
+    { id: "Oven2", name: "2. Fırın", price: 50 },
+    { id: "Karisik", name: "Karışık Pizza", price: 150 },
+    { id: "Tables", name: "Masalar (+2 müşteri)", price: 300 },
+    { id: "FastOven", name: "Hızlı Fırın", price: 600, requires: "Oven2" },
+  ],
+  // Robux (Küp Evreni platform parası) ile alınanlar. Roblox'ta gamepass / developer product
+  PASSES: [
+    { id: "double", name: "2x Para", icon: "💰", jeton: 150, desc: "Müşterilerden kazandığın her şey 2 katı." },
+    { id: "chef", name: "Yardımcı Aşçı", icon: "👨‍🍳", jeton: 100, desc: "Boş fırınlara kendiliğinden pizza koyar. Sen sadece al ve teslim et." },
+    { id: "cash500", name: "500 Para Paketi", icon: "⚡", jeton: 50, consumable: true, desc: "Anında 💰 500. İstediğin kadar alabilirsin." },
+  ],
+};
+
+// ---------------------------------------------------------------- PlotLayout.lua (x, z)
+const Layout = {
+  DOUGH: [-16, -10], TOPPING: [-6, -10], OVENS: [[6, -10], [16, -10]],
+  TRASH: [-24, -2], COUNTER: [0, 6],
+  CUSTOMER_SPAWN: [15, 34], MAX_QUEUE: 5,
+  queueSpot: i => [0, 10 + (i - 1) * 4],
+  BUTTONS: { Oven2: [-32, 20], Karisik: [-32, 10], Tables: [-32, 0], FastOven: [-32, -10] },
+  TABLES: [[26, 12], [26, 24]],
+};
+const PLOT_HALF = 40;
+const MAX_ACTIVATION = 10;
+const WALK_SPEED = 16;       // Roblox varsayılan yürüme hızı
+const RUN_SPEED = 28;
+let baseFov = 70;
+const CUSTOMER_SPEED = 10;
+const DAY_LENGTH = 150;      // bir gün = 2.5 dakika
+const LAST_ORDER = 15;       // son 15 sn yeni müşteri gelmez
+const EYE_HEIGHT = 5;
+const LOOK_SENS = 0.0025;
+const TURN_SPEED = 2.4;      // ←/→ ile dönüş (rad/sn)
+
+const rgb = (c, a = 1) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+const lerpColor = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
+const DOUGH_COLOR = [240, 220, 170];
+const CRUST_COLOR = [205, 135, 55];
+const SKIN = [[255, 220, 180], [234, 184, 146], [198, 134, 66], [141, 85, 36]];
+const SHIRT = [[52, 120, 220], [220, 60, 60], [60, 170, 90], [240, 190, 40], [150, 80, 200], [240, 240, 240]];
+const PANTS = [[40, 40, 60], [70, 50, 30], [30, 60, 110]];
+const pick = list => list[Math.floor(Math.random() * list.length)];
+const pizzaName = id => Config.PIZZAS[id].displayName;
+
+// ---------------------------------------------------------------- Durum
+const plot = { ...Config.PLOT_DEFAULTS };
+const state = {
+  money: 0,
+  owned: {},
+  passes: {},              // jetonla alınanlar: double, chef
+  carry: null,            // { stage: "dough"|"raw"|"cooked", pizza }
+  player: { x: 0, z: 1.5, yaw: -Math.PI / 2, pitch: -0.18 },  // yaw: bakış yönü (x,z düzleminde)
+  stations: [],
+  customers: [],           // sıradakiler + gidenler
+  queue: [],
+  spawnTimer: 3,
+  buyCooldown: 0,
+  day: 1,
+  dayTime: DAY_LENGTH,
+  dayOver: false,
+  stats: { earned: 0, served: 0, angry: 0 },
+  started: false,
+};
+
+const $ = id => document.getElementById(id);
+
+function notify(msg) {
+  const el = document.createElement("div");
+  el.className = "toast";
+  el.textContent = msg;
+  $("toasts").appendChild(el);
+  setTimeout(() => el.remove(), 2600);
+  while ($("toasts").children.length > 3) $("toasts").firstChild.remove();
+}
+
+function formatMoney(n) {
+  return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+}
+
+function save() {
+  try { localStorage.setItem("pizzaKulesi", JSON.stringify({ money: state.money, owned: state.owned, day: state.day, passes: state.passes })); } catch (e) {}
+  reportStats();
+}
+
+// ---------------------------------------------------------------- Küp Evreni köprüsü (postMessage)
+// Platform: kullanıcı adı + jeton. Jetonla satın alma platformda onaylanır ve düşülür.
+const platform = { inside: window.parent !== window, profile: null, reqs: {}, lastStats: 0 };
+function reportStats() {
+  if (!platform.inside || performance.now() - platform.lastStats < 3000) return;
+  platform.lastStats = performance.now();
+  parent.postMessage({ type: "kup:stats", stats: { "💰 Para": formatMoney(state.money), "📅 Gün": state.day,
+    "🛠️ Yükseltme": Object.keys(state.owned).length + "/" + Config.UPGRADES.length } }, "*");
+}
+function requestPurchase(item, done) {
+  if (!platform.inside) { notify("Robux ile almak için oyunu Küp Evreni'nden aç (ana klasördeki index.html)"); return; }
+  const reqId = Math.random().toString(36).slice(2);
+  platform.reqs[reqId] = done;
+  parent.postMessage({ type: "kup:purchase", reqId, id: item.id, name: item.name, price: item.jeton, icon: item.icon }, "*");
+}
+addEventListener("message", e => {
+  if (!platform.inside || e.source !== parent) return;
+  const m = e.data || {};
+  if (m.type === "kup:profile") {
+    platform.profile = m;
+    drawSign();
+    renderShop();
+  } else if (m.type === "kup:purchaseResult") {
+    if (platform.profile) platform.profile.jeton = m.jeton;
+    const done = platform.reqs[m.reqId];
+    delete platform.reqs[m.reqId];
+    if (done) done(!!m.ok);
+    renderShop();
+  }
+});
+if (platform.inside) parent.postMessage({ type: "kup:ready" }, "*");
+
+// ---------------------------------------------------------------- 3D sahne (three.js)
+const canvas = $("game");
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+} catch (e) {
+  $("noWebgl").style.display = "flex";
+  throw e;
+}
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x9fd3ff);
+scene.fog = new THREE.Fog(0x9fd3ff, 90, 220);
+const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 400);
+scene.add(camera);
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x6a8a4a, 0.75));
+const sun = new THREE.DirectionalLight(0xffffff, 0.75);
+sun.position.set(30, 60, 25);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -50, right: 50, top: 50, bottom: -50, near: 1, far: 150 });
+scene.add(sun);
+
+const col = c => new THREE.Color(c[0] / 255, c[1] / 255, c[2] / 255);
+const mat = (c, extra = {}) => new THREE.MeshLambertMaterial({ color: Array.isArray(c) ? col(c) : c, ...extra });
+
+function box(w, h, d, material, x, y, z, parent = scene) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
+  m.position.set(x, y, z);
+  m.castShadow = true;
+  m.receiveShadow = true;
+  parent.add(m);
+  return m;
+}
+function cyl(r, h, material, x, y, z, parent = scene, seg = 24) {
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, seg), material);
+  m.position.set(x, y, z);
+  m.castShadow = true;
+  m.receiveShadow = true;
+  parent.add(m);
+  return m;
+}
+
+function canvasTexture(w, h, draw) {
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  draw(c.getContext("2d"), w, h);
+  const t = new THREE.CanvasTexture(c);
+  t.anisotropy = 4;
+  return t;
+}
+
+// BillboardGui karşılığı: kameraya dönük, metni değişince yeniden çizilen sprite
+function makeLabel(worldW, worldH, cw = 512, ch = 128, onTop = false) {
+  const c = document.createElement("canvas");
+  c.width = cw; c.height = ch;
+  const tex = new THREE.CanvasTexture(c);
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: !onTop }));
+  sprite.scale.set(worldW, worldH, 1);
+  if (onTop) sprite.renderOrder = 10;
+  const label = { sprite, ctx: c.getContext("2d"), tex, key: null, w: cw, h: ch };
+  label.draw = (key, fn) => {
+    if (label.key === key) return;
+    label.key = key;
+    label.ctx.clearRect(0, 0, cw, ch);
+    fn(label.ctx, cw, ch);
+    tex.needsUpdate = true;
+  };
+  return label;
+}
+
+function fitText(ctx, text, maxW, size) {
+  ctx.font = `700 ${size}px "Trebuchet MS", system-ui, sans-serif`;
+  const w = ctx.measureText(text).width;
+  if (w > maxW) {
+    size = Math.floor(size * maxW / w);
+    ctx.font = `700 ${size}px "Trebuchet MS", system-ui, sans-serif`;
+  }
+  return size;
+}
+
+function outlinedText(ctx, text, x, y, maxW, size, color = "#fff") {
+  fitText(ctx, text, maxW, size);
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.lineWidth = 10;
+  ctx.lineJoin = "round";
+  ctx.strokeStyle = "rgba(0,0,0,0.6)";
+  ctx.strokeText(text, x, y);
+  ctx.fillStyle = color;
+  ctx.fillText(text, x, y);
+}
+
+// Tabela: platformdan kullanıcı adı gelirse "<ad>'in PİZZA KULESİ"
+let signTex = null;
+function drawSign() {
+  if (!signTex) return;
+  const c = signTex.image, g = c.getContext("2d"), w = c.width, h = c.height;
+  const name = platform.profile && platform.profile.name;
+  g.fillStyle = "#e63946"; g.fillRect(0, 0, w, h);
+  g.fillStyle = "#fff"; g.textAlign = "center"; g.textBaseline = "middle";
+  if (name) {
+    fitText(g, `${name}'in`, w - 80, 58); g.fillText(`${name}'in`, w / 2, h * 0.27);
+    fitText(g, "🍕 PİZZA KULESİ", w - 80, 96); g.fillText("🍕 PİZZA KULESİ", w / 2, h * 0.66);
+  } else {
+    g.font = '700 110px "Trebuchet MS", system-ui, sans-serif';
+    g.fillText("🍕 PİZZA KULESİ", w / 2, h / 2 + 6);
+  }
+  signTex.needsUpdate = true;
+}
+
+function buildWorld() {
+  // Çim ve plot zemini
+  const grass = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), mat([70, 150, 70]));
+  grass.rotation.x = -Math.PI / 2;
+  grass.position.y = -0.05;
+  grass.receiveShadow = true;
+  scene.add(grass);
+  box(PLOT_HALF * 2, 1, PLOT_HALF * 2, mat([201, 180, 138]), 0, -0.5, 0).castShadow = false;
+
+  // Mutfak karoları
+  const tiles = canvasTexture(128, 128, (g) => {
+    g.fillStyle = "#f1ece2"; g.fillRect(0, 0, 128, 128);
+    g.fillStyle = "#d9d2c3"; g.fillRect(0, 0, 64, 64); g.fillRect(64, 64, 64, 64);
+  });
+  tiles.wrapS = tiles.wrapT = THREE.RepeatWrapping;
+  tiles.repeat.set(14, 5);
+  const kitchen = new THREE.Mesh(new THREE.PlaneGeometry(56, 20), new THREE.MeshLambertMaterial({ map: tiles }));
+  kitchen.rotation.x = -Math.PI / 2;
+  kitchen.position.set(0, 0.02, -8);
+  kitchen.receiveShadow = true;
+  scene.add(kitchen);
+
+  // Giriş yolu
+  const path = mat([169, 148, 112]);
+  box(8, 0.06, 32, path, 0, 0.03, 24).castShadow = false;
+  box(23, 0.06, 6, path, 7.5, 0.035, 34).castShadow = false;
+
+  // Mutfak arka duvarı + tabela
+  const wall = mat([235, 228, 214]);
+  box(60, 12, 1, wall, 0, 6, -20);
+  box(1, 12, 14, wall, -29.5, 6, -13);
+  box(1, 12, 14, wall, 29.5, 6, -13);
+  signTex = canvasTexture(1024, 192, () => {});
+  drawSign();
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(26, 4.9), new THREE.MeshBasicMaterial({ map: signTex }));
+  sign.position.set(0, 9.2, -19.45);
+  scene.add(sign);
+
+  // Giriş kapısı (müşteriler buradan gelir)
+  const post = mat([120, 80, 50]);
+  box(1, 9, 1, post, 9, 4.5, 38);
+  box(1, 9, 1, post, 21, 4.5, 38);
+  box(13, 1.2, 1, mat([230, 57, 70]), 15, 9, 38);
+}
+
+function makePizzaMesh() {
+  const g = new THREE.Group();
+  const crust = cyl(1.3, 0.22, mat(CRUST_COLOR), 0, 0, 0, g);
+  const sauce = cyl(1.02, 0.26, mat([225, 60, 40]), 0, 0.01, 0, g);
+  const dots = [];
+  for (let i = 0; i < 6; i++) {
+    const a = i * 1.05 + 0.3;
+    dots.push(cyl(0.2, 0.3, mat([255, 245, 215]), Math.cos(a) * 0.55, 0.02, Math.sin(a) * 0.55, g, 10));
+  }
+  g.userData = { crust, sauce, dots };
+  return g;
+}
+
+function setPizza(g, stage, pizza) {
+  const { crust, sauce, dots } = g.userData;
+  crust.material.color.copy(col(stage === "dough" ? DOUGH_COLOR : CRUST_COLOR));
+  sauce.visible = stage !== "dough";
+  if (stage === "dough") crust.material.color.copy(col(DOUGH_COLOR));
+  if (pizza) {
+    const c = stage === "cooked" ? lerpColor(Config.PIZZAS[pizza].color, CRUST_COLOR, 0.5) : Config.PIZZAS[pizza].color;
+    sauce.material.color.copy(col(c));
+  }
+  for (const d of dots) d.visible = stage !== "dough";
+}
+
+// Elde taşınan pizza: kameraya bağlı, ekranın alt kısmında görünür
+const heldPizza = makePizzaMesh();
+heldPizza.position.set(0.9, -1.15, -2.4);
+heldPizza.rotation.x = 0.55;
+heldPizza.traverse(o => { o.castShadow = false; });
+heldPizza.visible = false;
+camera.add(heldPizza);
+
+// ---------------------------------------------------------------- Günler (sonsuz, her gün DAY_LENGTH sn)
+function updateDayLabel() {
+  const t = Math.max(0, Math.ceil(state.dayTime));
+  const mm = Math.floor(t / 60), ss = String(t % 60).padStart(2, "0");
+  const el = $("day");
+  el.textContent = `☀️ Gün ${state.day} · ${mm}:${ss}` + (t <= LAST_ORDER ? " · Kapanış!" : "");
+  el.classList.toggle("late", t <= LAST_ORDER);
+}
+
+function endDay() {
+  state.dayOver = true;
+  state.started = false;
+  keys.clear();
+  hold.key = null;
+  unlockPointer();
+  $("sumTitle").textContent = `🌙 Gün ${state.day} bitti!`;
+  $("sumEarned").textContent = "💰 " + formatMoney(state.stats.earned);
+  $("sumServed").textContent = state.stats.served;
+  $("sumAngry").textContent = state.stats.angry;
+  $("sumMoney").textContent = "💰 " + formatMoney(state.money);
+  $("btnNextDay").textContent = `☀️ Sonraki gün başlasın (Gün ${state.day + 1})`;
+  $("summary").style.display = "flex";
+  state.day += 1;
+  save();
+}
+
+function startDay() {
+  // Dükkân sabaha temiz açılır: müşteri, fırın ve eldeki pizza sıfırlanır
+  for (const c of state.customers) removeCustomerMesh(c);
+  state.customers = [];
+  state.queue = [];
+  state.spawnTimer = 3;
+  for (const s of state.stations) if (s.ovenIndex) { s.ovenState = "idle"; s.pizza = null; }
+  state.carry = null;
+  Object.assign(state.player, { x: 0, z: 1.5, yaw: -Math.PI / 2, pitch: -0.18 });
+  state.stats = { earned: 0, served: 0, angry: 0 };
+  state.dayTime = DAY_LENGTH;
+  state.dayOver = false;
+  $("summary").style.display = "none";
+  state.started = true;
+  updateHud();
+  updateDayLabel();
+}
+
+// ---------------------------------------------------------------- EconomyService
+function addMoney(amount) {
+  if (state.passes.double) amount *= 2;
+  state.money += amount;
+  state.stats.earned += amount;
+  const pop = document.createElement("div");
+  pop.className = "pop";
+  pop.textContent = "+" + formatMoney(amount);
+  document.body.appendChild(pop);
+  setTimeout(() => pop.remove(), 1200);
+  updateHud();
+  save();
+}
+function spend(amount) {
+  if (state.money < amount) return false;
+  state.money -= amount;
+  updateHud();
+  save();
+  return true;
+}
+
+// ---------------------------------------------------------------- HUD
+function updateHud() {
+  $("money").textContent = "💰 " + formatMoney(state.money);
+  const c = state.carry;
+  const name = c && c.pizza ? pizzaName(c.pizza) : "";
+  $("hint").textContent =
+    !c ? "1/4  Hamur tezgâhından hamur al" :
+    c.stage === "dough" ? "2/4  Malzeme tezgâhında pizzayı hazırla" :
+    c.stage === "raw" ? `3/4  ${name} pizzayı fırına koy` :
+    `4/4  ${name} pizzayı tezgâhta müşteriye ver`;
+}
+
+function setCarry(stage, pizza) { state.carry = { stage, pizza }; updateHud(); }
+function clearCarry() { state.carry = null; updateHud(); }
+
+// ---------------------------------------------------------------- StationService
+function makeStation(name, pos, w, d, h, color, extra = {}) {
+  const s = { name, x: pos[0], z: pos[1], w, d, h, color, prompts: [], ...extra };
+  s.material = mat(color);
+  s.mesh = box(w, h, d, s.material, s.x, h / 2, s.z);
+  s.label = makeLabel(5, 1.25);
+  s.label.sprite.position.set(s.x, h + 1.6, s.z);
+  scene.add(s.label.sprite);
+  state.stations.push(s);
+  return s;
+}
+
+function addToppingPrompt(topping, pizzaId, key) {
+  topping.prompts.push({
+    key, hold: 0.6,
+    text: () => pizzaName(pizzaId) + " hazırla",
+    run: () => {
+      if (!state.carry || state.carry.stage !== "dough") {
+        notify("Önce hamur tezgâhından hamur al");
+        return;
+      }
+      setCarry("raw", pizzaId);
+    },
+  });
+}
+
+function addOven(index) {
+  if (state.stations.some(s => s.ovenIndex === index)) return;
+  const oven = makeStation("Fırın", Layout.OVENS[index - 1], 6, 4, 5, [150, 70, 50],
+    { ovenIndex: index, ovenState: "idle", pizza: null, endsAt: 0 });
+  // Fırın kapağı (mutfağa bakan yüz) ve üstte pişen pizza
+  oven.door = box(4, 2.4, 0.2, new THREE.MeshLambertMaterial({ color: 0x2a1a14, emissive: 0x000000 }),
+    oven.x, 2.2, oven.z + 2.05);
+  box(6.4, 0.5, 4.4, mat([110, 50, 35]), oven.x, 5.25, oven.z);
+  oven.pizzaMesh = makePizzaMesh();
+  oven.pizzaMesh.position.set(oven.x, 5.65, oven.z);
+  oven.pizzaMesh.visible = false;
+  scene.add(oven.pizzaMesh);
+  oven.label.sprite.position.y = 7.2;
+  oven.prompts.push({
+    key: "E", hold: 0,
+    text: () => oven.ovenState === "idle" ? "Pizzayı fırına koy" :
+                oven.ovenState === "done" ? "Pizzayı al" : "Pişiyor...",
+    run: () => {
+      if (oven.ovenState === "idle") {
+        if (!state.carry || state.carry.stage !== "raw") {
+          notify("Fırına malzemesi eklenmiş çiğ pizza koymalısın");
+          return;
+        }
+        oven.ovenState = "cooking";
+        oven.pizza = state.carry.pizza;
+        oven.endsAt = now + plot.CookTime;
+        clearCarry();
+      } else if (oven.ovenState === "cooking") {
+        notify("Pizza hâlâ pişiyor");
+      } else {
+        if (state.carry) { notify("Elin dolu"); return; }
+        setCarry("cooked", oven.pizza);
+        oven.ovenState = "idle";
+        oven.pizza = null;
+      }
+    },
+  });
+}
+
+function unlockPizza(id) {
+  const topping = state.stations.find(s => s.name === "Malzeme Tezgâhı");
+  if (id === "Karisik" && !topping.prompts.some(p => p.key === "F")) {
+    addToppingPrompt(topping, "Karisik", "F");
+    cyl(0.7, 0.6, mat([150, 70, 40]), topping.x + 2, 4.3, topping.z);
+  }
+}
+
+function setupStations() {
+  const dough = makeStation("Hamur Tezgâhı", Layout.DOUGH, 6, 4, 4, [235, 225, 200]);
+  const doughBall = makePizzaMesh();
+  setPizza(doughBall, "dough", null);
+  doughBall.position.set(dough.x, 4.12, dough.z);
+  scene.add(doughBall);
+  dough.prompts.push({ key: "E", hold: 0.6, text: () => "Hamur aç", run: () => {
+    if (state.carry) { notify("Elin dolu"); return; }
+    setCarry("dough", null);
+  }});
+
+  const topping = makeStation("Malzeme Tezgâhı", Layout.TOPPING, 6, 4, 4, [90, 160, 80]);
+  cyl(0.7, 0.6, mat([225, 60, 40]), topping.x - 2, 4.3, topping.z);     // domates sosu
+  cyl(0.7, 0.6, mat([255, 245, 215]), topping.x, 4.3, topping.z);       // peynir
+  addToppingPrompt(topping, "Margarita", "E");
+
+  addOven(1);
+
+  const counter = makeStation("Teslim Tezgâhı", Layout.COUNTER, 16, 3, 4, [200, 50, 50]);
+  box(16.6, 0.4, 3.6, mat([150, 100, 60]), counter.x, 4.2, counter.z);
+  counter.prompts.push({ key: "E", hold: 0, text: () => "Teslim et", run: () => {
+    const c = state.carry;
+    if (!c || c.stage !== "cooked") { notify("Teslim için pişmiş pizza getir"); return; }
+    const bonus = tryServe(c.pizza);
+    if (!bonus) { notify(pizzaName(c.pizza) + " isteyen müşteri yok"); return; }
+    clearCarry();
+    addMoney(Math.floor(Config.PIZZAS[c.pizza].price * bonus));
+  }});
+
+  const trash = makeStation("Çöp", Layout.TRASH, 3, 3, 4, [70, 70, 70]);
+  box(3.3, 0.3, 3.3, mat([45, 45, 45]), trash.x, 4.15, trash.z);
+  trash.label.sprite.scale.set(3, 0.75);
+  trash.prompts.push({ key: "E", hold: 0, text: () => "Çöpe at", run: () => {
+    if (!state.carry) { notify("Elin boş"); return; }
+    clearCarry();
+  }});
+}
+
+// ---------------------------------------------------------------- CustomerService
+function availablePizzas() {
+  return Config.PIZZA_ORDER.filter(id => !Config.PIZZAS[id].unlock || plot[Config.PIZZAS[id].unlock]);
+}
+
+function relayout() {
+  state.queue.forEach((c, i) => { [c.tx, c.tz] = Layout.queueSpot(i + 1); });
+}
+
+// Roblox R15'e benzeyen bloklu karakter (ön yüzü +Z)
+function makeCustomerMesh(c) {
+  const g = new THREE.Group();
+  const skin = mat(c.skin), shirt = mat(c.shirt), pants = mat(c.pants);
+  c.legs = [box(0.9, 2, 1, pants, -0.5, 1, 0, g), box(0.9, 2, 1, pants, 0.5, 1, 0, g)];
+  box(2, 2, 1, shirt, 0, 3, 0, g);
+  c.arms = [box(0.9, 2, 1, skin, -1.45, 3, 0, g), box(0.9, 2, 1, skin, 1.45, 3, 0, g)];
+  cyl(0.65, 1.2, skin, 0, 4.6, 0, g);
+  const eye = mat([30, 30, 30]);
+  box(0.16, 0.25, 0.05, eye, -0.25, 4.75, 0.64, g);
+  box(0.16, 0.25, 0.05, eye, 0.25, 4.75, 0.64, g);
+  c.mesh = g;
+  c.bubble = makeLabel(4.6, 1.95, 256, 108, true);
+  c.bubble.sprite.position.y = 6.6;
+  g.add(c.bubble.sprite);
+  scene.add(g);
+}
+
+function removeCustomerMesh(c) {
+  if (!c.mesh) return;
+  scene.remove(c.mesh);
+  c.bubble.tex.dispose();
+  c.mesh = null;
+}
+
+function spawnCustomer() {
+  const [x, z] = Layout.CUSTOMER_SPAWN;
+  const c = {
+    x, z, tx: x, tz: z,
+    skin: pick(SKIN), shirt: pick(SHIRT), pants: pick(PANTS),
+    pizza: pick(availablePizzas()),
+    patience: Config.CUSTOMER_PATIENCE, timeLeft: Config.CUSTOMER_PATIENCE,
+    done: false, text: null, removeAt: 0, walk: 0, rot: Math.PI,
+  };
+  makeCustomerMesh(c);
+  state.customers.push(c);
+  state.queue.push(c);
+  relayout();
+}
+
+function leave(c, happy, text) {
+  if (c.done) return;
+  c.done = true;
+  state.queue.splice(state.queue.indexOf(c), 1);
+  relayout();
+  c.text = happy ? "😊 " + (text || "Teşekkürler!") : "😠 Çok bekledim!";
+  [c.tx, c.tz] = Layout.CUSTOMER_SPAWN;
+  c.removeAt = now + 4;
+}
+
+function tryServe(pizzaId) {
+  for (const c of state.queue) {
+    if (c.pizza === pizzaId && !c.done) {
+      const fast = c.timeLeft >= c.patience / 2;
+      leave(c, true, fast ? "Hızlı servis!" : "Teşekkürler!");
+      state.stats.served += 1;
+      return fast ? Config.FAST_SERVICE_BONUS : 1;
+    }
+  }
+  return null;
+}
+
+function updateCustomers(dt) {
+  state.spawnTimer -= dt;
+  if (state.spawnTimer <= 0) {
+    const open = state.dayTime > LAST_ORDER;
+    if (open && state.queue.length < Math.min(plot.QueueCapacity, Layout.MAX_QUEUE)) spawnCustomer();
+    state.spawnTimer = plot.SpawnInterval;
+  }
+  for (const c of state.customers) {
+    const dx = c.tx - c.x, dz = c.tz - c.z, dist = Math.hypot(dx, dz);
+    const step = CUSTOMER_SPEED * dt;
+    c.moving = dist > 0.05;
+    if (c.moving) {
+      if (dist <= step) { c.x = c.tx; c.z = c.tz; }
+      else { c.x += dx / dist * step; c.z += dz / dist * step; }
+      c.rot = Math.atan2(dx, dz);
+    } else if (!c.done) {
+      c.rot = Math.PI; // sırada tezgâha (−Z) bak
+    }
+    if (!c.done) {
+      c.timeLeft -= dt;
+      if (c.timeLeft <= 0) { leave(c, false); state.stats.angry += 1; }
+    }
+  }
+  for (const c of state.customers) if (c.done && now >= c.removeAt) removeCustomerMesh(c);
+  state.customers = state.customers.filter(c => !c.done || now < c.removeAt);
+}
+
+// ---------------------------------------------------------------- UpgradeService
+const buttons = []; // { id, x, z, u, mesh, label }
+let tablesBuilt = false;
+
+function buildTables() {
+  if (tablesBuilt) return;
+  tablesBuilt = true;
+  for (const [x, z] of Layout.TABLES) {
+    box(6, 0.6, 6, mat([240, 240, 240]), x, 3.5, z);
+    box(1, 3, 1, mat([60, 60, 60]), x, 1.6, z);
+    for (const [ox, oz] of [[-4, 0], [4, 0]]) {
+      box(2, 0.4, 2, mat([200, 60, 60]), x + ox, 2, z + oz);
+      box(0.5, 2, 0.5, mat([60, 60, 60]), x + ox, 1, z + oz);
+    }
+  }
+}
+
+function applyEffect(id) {
+  if (id === "Oven2") addOven(2);
+  else if (id === "Karisik") { plot.Unlock_Karisik = true; unlockPizza("Karisik"); }
+  else if (id === "Tables") { plot.QueueCapacity = 5; plot.SpawnInterval = 6; buildTables(); }
+  else if (id === "FastOven") plot.CookTime = 2.5;
+}
+
+function refreshButtons() {
+  for (const u of Config.UPGRADES) {
+    const reqMet = !u.requires || state.owned[u.requires];
+    if (!state.owned[u.id] && reqMet && !buttons.some(b => b.id === u.id)) {
+      const [x, z] = Layout.BUTTONS[u.id];
+      const b = { id: u.id, x, z, u };
+      b.material = new THREE.MeshLambertMaterial({ color: 0x46c85a, emissive: 0x1d6b28 });
+      b.mesh = box(6, 0.4, 6, b.material, x, 0.2, z);
+      b.mesh.castShadow = false;
+      b.label = makeLabel(6.5, 2.6, 512, 205);
+      b.label.sprite.position.set(x, 3.4, z);
+      scene.add(b.label.sprite);
+      buttons.push(b);
+    }
+  }
+}
+
+function buy(b) {
+  const u = b.u;
+  if (state.owned[u.id]) return;
+  if (u.requires && !state.owned[u.requires]) return;
+  if (!spend(u.price)) { notify(`${u.name} için 💰 ${u.price} gerekli`); return; }
+  state.owned[u.id] = true;
+  buttons.splice(buttons.indexOf(b), 1);
+  scene.remove(b.mesh, b.label.sprite);
+  applyEffect(u.id);
+  notify(u.name + " satın alındı!");
+  refreshButtons();
+  save();
+}
+
+function checkButtons() {
+  if (state.buyCooldown > now) return;
+  const p = state.player;
+  for (const b of buttons) {
+    if (Math.abs(p.x - b.x) < 3 + 1 && Math.abs(p.z - b.z) < 3 + 1) {
+      state.buyCooldown = now + 1.5;
+      buy(b);
+      return;
+    }
+  }
+}
+
+// ---------------------------------------------------------------- Yardımcı Aşçı (jeton)
+// Fırınların arkasında durur; boş fırın görünce sıradaki müşterinin istediği pizzayı fırına koyar.
+const CHEF_POS = [11, -15];
+const CHEF_INTERVAL = 6;
+let chef = null;
+function spawnChef() {
+  if (chef) return;
+  const g = new THREE.Group();
+  const white = mat([245, 245, 245]), skin = mat([234, 184, 146]);
+  const legs = [box(0.9, 2, 1, mat([40, 40, 60]), -0.5, 1, 0, g), box(0.9, 2, 1, mat([40, 40, 60]), 0.5, 1, 0, g)];
+  box(2, 2, 1, white, 0, 3, 0, g);
+  const arms = [box(0.9, 2, 1, white, -1.45, 3, 0, g), box(0.9, 2, 1, white, 1.45, 3, 0, g)];
+  cyl(0.65, 1.2, skin, 0, 4.6, 0, g);
+  cyl(0.6, 1.0, white, 0, 5.6, 0, g);           // aşçı şapkası
+  cyl(0.75, 0.5, white, 0, 6.2, 0, g);
+  const eye = mat([30, 30, 30]);
+  box(0.16, 0.25, 0.05, eye, -0.25, 4.75, 0.64, g);
+  box(0.16, 0.25, 0.05, eye, 0.25, 4.75, 0.64, g);
+  g.position.set(CHEF_POS[0], 0, CHEF_POS[1]);
+  scene.add(g);
+  const label = makeLabel(5, 1.25);
+  label.sprite.position.set(CHEF_POS[0], 7.6, CHEF_POS[1]);
+  label.draw("chef", (c, w, h) => outlinedText(c, "👨‍🍳 Yardımcı Aşçı", w / 2, h / 2, w - 20, 56));
+  scene.add(label.sprite);
+  chef = { g, arms, legs, timer: 2, busy: 0 };
+}
+function updateChef(dt) {
+  if (!chef) return;
+  chef.busy = Math.max(0, chef.busy - dt);
+  const swing = chef.busy > 0 ? Math.sin(chef.busy * 12) * 0.9 : 0;
+  chef.arms[0].rotation.x = -0.4 - swing; chef.arms[1].rotation.x = -0.4 + swing;
+  chef.timer -= dt;
+  if (chef.timer > 0) return;
+  chef.timer = CHEF_INTERVAL;
+  const oven = state.stations.find(s => s.ovenIndex && s.ovenState === "idle");
+  if (!oven) return;
+  // Sıradaki ilk müşterinin istediği ve henüz fırında olmayan pizza; yoksa Margarita
+  const inOven = state.stations.filter(s => s.ovenIndex && s.ovenState !== "idle").map(s => s.pizza);
+  const wanted = state.queue.map(c => c.pizza).find(p => !inOven.includes(p)) || "Margarita";
+  oven.ovenState = "cooking";
+  oven.pizza = wanted;
+  oven.endsAt = now + plot.CookTime;
+  chef.busy = 0.8;
+}
+
+// ---------------------------------------------------------------- Jeton mağazası
+function applyPass(id) {
+  if (id === "chef") spawnChef();
+}
+function renderShop() {
+  const j = platform.profile ? platform.profile.jeton : null;
+  $("shopJeton").textContent = j === null ? "" : `Bakiyen: R$ ${j}`;
+  $("passList").innerHTML = Config.PASSES.map(p => {
+    const owned = !p.consumable && state.passes[p.id];
+    return `<div class="pass"><div class="ico">${p.icon}</div><div><b>${p.name}</b><small>${p.desc}</small></div>
+      <button data-pass="${p.id}" ${owned ? "disabled" : ""}>${owned ? "✓ Sende" : "R$ " + p.jeton}</button></div>`;
+  }).join("");
+  $("shopNote").textContent = platform.inside
+    ? "Robux, Küp Evreni'nin ortak parası. Günlük ödül, oyun süresi ve rozetlerle kazanılır."
+    : "Robux ile almak için oyunu Küp Evreni'nden aç (ana klasördeki index.html).";
+}
+function openShop(open) {
+  $("shop").style.display = open ? "flex" : "none";
+  if (open) { renderShop(); state.started = false; keys.clear(); hold.key = null; unlockPointer(); }
+  else if (!state.dayOver && $("help").style.display === "none") { state.started = true; lockPointer(); }
+}
+$("passList").addEventListener("click", e => {
+  const b = e.target.closest("[data-pass]");
+  if (!b) return;
+  const p = Config.PASSES.find(x => x.id === b.dataset.pass);
+  if (!p.consumable && state.passes[p.id]) return;
+  requestPurchase(p, ok => {
+    if (!ok) { notify("Satın alma iptal edildi"); return; }
+    if (p.id === "cash500") { state.money += 500; updateHud(); }
+    else { state.passes[p.id] = true; applyPass(p.id); }
+    save();
+    notify(`${p.icon} ${p.name} alındı!`);
+    renderShop();
+  });
+});
+
+// ---------------------------------------------------------------- Oyuncu hareketi (1. şahıs)
+const keys = new Set();
+const PLAYER_R = 1.4;
+const stick = { id: null, ox: 0, oy: 0, x: 0, y: 0 };   // dokunmatik joystick (-1..1)
+const look = { id: null, lx: 0, ly: 0 };                  // dokunmatik / fare sürükle-bak
+
+function collide(p) {
+  for (const s of state.stations) {
+    const hw = s.w / 2 + PLAYER_R, hd = s.d / 2 + PLAYER_R;
+    const dx = p.x - s.x, dz = p.z - s.z;
+    if (Math.abs(dx) < hw && Math.abs(dz) < hd) {
+      const ox = hw - Math.abs(dx), oz = hd - Math.abs(dz);
+      if (ox < oz) p.x = s.x + Math.sign(dx || 1) * hw;
+      else p.z = s.z + Math.sign(dz || 1) * hd;
+    }
+  }
+  // Arka duvar
+  p.z = Math.max(-19.5 + PLAYER_R, p.z);
+  const lim = PLOT_HALF - PLAYER_R;
+  p.x = Math.max(-lim, Math.min(lim, p.x));
+  p.z = Math.max(-lim, Math.min(lim, p.z));
+}
+
+function updatePlayer(dt) {
+  const p = state.player;
+  if (keys.has("ArrowLeft")) p.yaw -= TURN_SPEED * dt;
+  if (keys.has("ArrowRight")) p.yaw += TURN_SPEED * dt;
+  let fwd = 0, side = 0;
+  if (keys.has("KeyW") || keys.has("ArrowUp")) fwd += 1;
+  if (keys.has("KeyS") || keys.has("ArrowDown")) fwd -= 1;
+  if (keys.has("KeyA")) side -= 1;
+  if (keys.has("KeyD")) side += 1;
+  fwd -= stick.y;
+  side += stick.x;
+  const len = Math.hypot(fwd, side);
+  // Koşma: Shift basılı ya da joystick sonuna kadar itilmiş
+  const stickFull = Math.hypot(stick.x, stick.y) > 0.92;
+  p.running = len > 0.05 && fwd > 0 && (keys.has("ShiftLeft") || keys.has("ShiftRight") || stickFull);
+  const speed = p.running ? RUN_SPEED : WALK_SPEED;
+  p.moving = len > 0.05;
+  if (p.moving) {
+    const k = Math.min(1, len) / len;
+    const fx = Math.cos(p.yaw), fz = Math.sin(p.yaw);   // ileri
+    const rx = -fz, rz = fx;                            // sağ
+    p.x += (fx * fwd + rx * side) * k * speed * dt;
+    p.z += (fz * fwd + rz * side) * k * speed * dt;
+    collide(p);
+    p.bobT = (p.bobT || 0) + dt * (p.running ? 14 : 10);
+  }
+  // Koşarken görüş alanı hafifçe genişler
+  const targetFov = baseFov + (p.running ? 10 : 0);
+  if (Math.abs(camera.fov - targetFov) > 0.05) {
+    camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 8);
+    camera.updateProjectionMatrix();
+  }
+}
+
+// ---------------------------------------------------------------- Etkileşim (ProximityPrompt)
+let nearStation = null;
+const hold = { key: null, t: 0, fired: false };
+
+// Menzildeki ve bakılan yöne en yakın istasyon
+function nearest() {
+  const p = state.player;
+  const fx = Math.cos(p.yaw), fz = Math.sin(p.yaw);
+  let best = null, bestScore = Infinity;
+  for (const s of state.stations) {
+    if (!s.prompts.length) continue;
+    const cx = Math.max(s.x - s.w / 2, Math.min(s.x + s.w / 2, p.x));
+    const cz = Math.max(s.z - s.d / 2, Math.min(s.z + s.d / 2, p.z));
+    const edge = Math.hypot(p.x - cx, p.z - cz);
+    const d = Math.min(Math.hypot(p.x - s.x, p.z - s.z), edge + 2);
+    if (d > MAX_ACTIVATION) continue;
+    // Bakış açısı: kenara en yakın nokta ile merkez arasından hangisi daha iyi hizalıysa
+    let angle = Math.PI;
+    for (const [tx, tz] of [[s.x, s.z], [cx, cz]]) {
+      const vx = tx - p.x, vz = tz - p.z, vl = Math.hypot(vx, vz);
+      if (vl < 0.01) { angle = 0; break; }
+      angle = Math.min(angle, Math.acos(Math.max(-1, Math.min(1, (vx * fx + vz * fz) / vl))));
+    }
+    if (edge < 0.6) angle = Math.min(angle, 0.5); // dibinde duruyorsan bakmasan da olur
+    if (angle > 1.0) continue;
+    const score = angle + d * 0.04;
+    if (score < bestScore) { best = s; bestScore = score; }
+  }
+  return best;
+}
+
+function promptFor(key) {
+  return nearStation && nearStation.prompts.find(pr => pr.key === key);
+}
+
+function pressKey(key) {
+  if (!promptFor(key)) return;
+  if (hold.key !== key) { hold.key = key; hold.t = 0; hold.fired = false; }
+}
+function releaseKey(key) {
+  if (hold.key === key) { hold.key = null; hold.t = 0; hold.fired = false; }
+}
+
+function updateHold(dt) {
+  if (!hold.key) return;
+  const pr = promptFor(hold.key);
+  if (!pr) { hold.key = null; return; }
+  if (hold.fired) return;
+  hold.t += dt;
+  if (hold.t >= pr.hold) { hold.fired = true; pr.run(); }
+}
+
+// Dokunmatik / fare için aksiyon butonları
+const actionsEl = $("actions");
+let actionSig = "";
+function renderActions() {
+  const list = nearStation ? nearStation.prompts : [];
+  const sig = (nearStation ? nearStation.name + nearStation.x : "") + list.map(p => p.key + p.text()).join("|");
+  if (sig !== actionSig) {
+    actionSig = sig;
+    actionsEl.innerHTML = "";
+    for (const pr of list) {
+      const b = document.createElement("button");
+      b.className = "act";
+      b.dataset.key = pr.key;
+      b.innerHTML = `<div class="fill"></div><span><b>${pr.key}</b>${pr.text()}</span>`;
+      b.addEventListener("pointerdown", e => { e.preventDefault(); e.stopPropagation(); pressKey(pr.key); });
+      ["pointerup", "pointerleave", "pointercancel"].forEach(ev => b.addEventListener(ev, () => releaseKey(pr.key)));
+      actionsEl.appendChild(b);
+    }
+  }
+  for (const b of actionsEl.children) {
+    const pr = promptFor(b.dataset.key);
+    const ratio = hold.key === b.dataset.key && pr ? (pr.hold ? Math.min(1, hold.t / pr.hold) : 1) : 0;
+    b.firstChild.style.width = (ratio * 100) + "%";
+  }
+}
+
+// ---------------------------------------------------------------- Sahneyi oyun durumuyla eşitle
+// Dik telefonda yatay görüş daralmasın: dikey FOV'u ekran oranına göre aç (en fazla 100°)
+function fitFov(base) {
+  const a = innerWidth / innerHeight;
+  if (a >= 1) return base;
+  return Math.min(100, 2 * Math.atan(Math.tan(base * Math.PI / 360) / a) * 180 / Math.PI);
+}
+function resize() {
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  renderer.setSize(innerWidth, innerHeight, false);
+  camera.aspect = innerWidth / innerHeight;
+  baseFov = fitFov(70);
+  camera.fov = baseFov;
+  camera.updateProjectionMatrix();
+}
+addEventListener("resize", resize);
+
+function stationText(s) {
+  if (!s.ovenIndex) return s.name;
+  if (s.ovenState === "idle") return "Fırın: Boş";
+  if (s.ovenState === "cooking") return "🔥 " + Math.max(0, Math.ceil(s.endsAt - now)) + " sn";
+  return "✅ " + pizzaName(s.pizza) + " hazır!";
+}
+
+function syncScene() {
+  const p = state.player;
+  const cp = Math.cos(p.pitch);
+  const bob = p.moving ? Math.sin(p.bobT) * (p.running ? 0.22 : 0.12) : 0;
+  camera.position.set(p.x, EYE_HEIGHT + bob, p.z);
+  camera.lookAt(p.x + Math.cos(p.yaw) * cp, EYE_HEIGHT + bob + Math.sin(p.pitch), p.z + Math.sin(p.yaw) * cp);
+
+  for (const s of state.stations) {
+    const text = stationText(s);
+    s.label.draw(text, (g, w, h) => outlinedText(g, text, w / 2, h / 2, w - 20, 64));
+    s.material.emissive.setHex(s === nearStation ? 0x3a3a10 : 0x000000);
+    if (s.ovenIndex) {
+      const flicker = s.ovenState === "cooking" ? 0.7 + Math.sin(now * 12) * 0.2 : 0;
+      s.door.material.emissive.setRGB(flicker, flicker * 0.45, 0);
+      s.pizzaMesh.visible = s.ovenState !== "idle";
+      if (s.pizza) setPizza(s.pizzaMesh, s.ovenState === "done" ? "cooked" : "raw", s.pizza);
+    }
+  }
+
+  const pulse = 0.25 + Math.sin(now * 4) * 0.15;
+  for (const b of buttons) {
+    const can = state.money >= b.u.price;
+    b.material.emissive.setRGB(0.1, can ? 0.35 + pulse : 0.15, 0.1);
+    b.label.draw(b.u.id + can, (g, w, h) => {
+      g.fillStyle = "rgba(30,30,30,0.78)";
+      g.beginPath(); g.roundRect(4, 4, w - 8, h - 8, 26); g.fill();
+      outlinedText(g, b.u.name, w / 2, h * 0.33, w - 40, 58);
+      outlinedText(g, "💰 " + formatMoney(b.u.price), w / 2, h * 0.7, w - 40, 58, can ? "#ffd166" : "#bbbbbb");
+    });
+  }
+
+  for (const c of state.customers) {
+    if (!c.mesh) continue;
+    c.mesh.position.set(c.x, 0, c.z);
+    c.mesh.rotation.y = c.rot;
+    c.walk = c.moving ? c.walk + 0.25 : 0;
+    const swing = Math.sin(c.walk) * 0.6;
+    c.legs[0].rotation.x = swing; c.legs[1].rotation.x = -swing;
+    c.arms[0].rotation.x = -swing; c.arms[1].rotation.x = swing;
+    const ratio = Math.max(0, Math.min(1, c.timeLeft / c.patience));
+    const text = c.text || "🍕 " + pizzaName(c.pizza);
+    c.bubble.draw(text + (c.done ? "" : Math.round(ratio * 60)), (g, w, h) => {
+      g.fillStyle = "#fff";
+      g.beginPath(); g.roundRect(2, 2, w - 4, 64, 16); g.fill();
+      fitText(g, text, w - 24, 40);
+      g.fillStyle = "#1e1e1e"; g.textAlign = "center"; g.textBaseline = "middle";
+      g.fillText(text, w / 2, 36);
+      if (!c.done) {
+        g.fillStyle = "#282828"; g.fillRect(8, 78, w - 16, 22);
+        g.fillStyle = rgb(lerpColor([230, 70, 70], [80, 220, 80], ratio));
+        g.fillRect(11, 81, (w - 22) * ratio, 16);
+      }
+    });
+  }
+
+  heldPizza.visible = !!state.carry;
+  if (state.carry) setPizza(heldPizza, state.carry.stage, state.carry.pizza);
+}
+
+// ---------------------------------------------------------------- Döngü
+let now = 0, last = performance.now();
+function frame(t) {
+  const dt = Math.min(0.1, (t - last) / 1000);
+  last = t;
+  if (state.started) {
+    now += dt;
+    updatePlayer(dt);
+    checkButtons();
+    updateCustomers(dt);
+    updateChef(dt);
+    for (const s of state.stations) if (s.ovenState === "cooking" && now >= s.endsAt) s.ovenState = "done";
+    nearStation = nearest();
+    updateHold(dt);
+    state.dayTime -= dt;
+    updateDayLabel();
+    if (state.dayTime <= 0) endDay();
+  }
+  renderActions();
+  syncScene();
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+
+// ---------------------------------------------------------------- Girdi
+function turn(dx, dy) {
+  const p = state.player;
+  p.yaw += dx * LOOK_SENS;
+  p.pitch = Math.max(-1.2, Math.min(1.2, p.pitch - dy * LOOK_SENS));
+}
+
+function lockPointer() {
+  try { const r = canvas.requestPointerLock(); if (r && r.catch) r.catch(() => {}); } catch (e) {}
+}
+function unlockPointer() {
+  try { if (document.pointerLockElement) document.exitPointerLock(); } catch (e) {}
+}
+
+addEventListener("keydown", e => {
+  if (e.repeat) return;
+  keys.add(e.code);
+  if (e.code === "KeyE") pressKey("E");
+  if (e.code === "KeyF") pressKey("F");
+  if (e.code.startsWith("Arrow") || e.code === "Space") e.preventDefault();
+});
+addEventListener("keyup", e => {
+  keys.delete(e.code);
+  if (e.code === "KeyE") releaseKey("E");
+  if (e.code === "KeyF") releaseKey("F");
+});
+addEventListener("blur", () => { keys.clear(); hold.key = null; });
+
+addEventListener("mousemove", e => {
+  if (state.started && document.pointerLockElement === canvas) turn(e.movementX, e.movementY);
+});
+
+canvas.addEventListener("pointerdown", e => {
+  if (!state.started) return;
+  if (e.pointerType === "mouse") {
+    lockPointer();
+    // Pointer lock yoksa (ör. gömülü önizleme) sürükleyerek bak
+    look.id = e.pointerId; look.lx = e.clientX; look.ly = e.clientY;
+    return;
+  }
+  if (e.clientX < innerWidth / 2 && stick.id === null) {
+    stick.id = e.pointerId; stick.ox = e.clientX; stick.oy = e.clientY;
+    const el = $("stick");
+    el.style.left = e.clientX + "px"; el.style.top = e.clientY + "px"; el.style.display = "block";
+  } else if (look.id === null) {
+    look.id = e.pointerId; look.lx = e.clientX; look.ly = e.clientY;
+  }
+});
+addEventListener("pointermove", e => {
+  if (e.pointerId === stick.id) {
+    let dx = e.clientX - stick.ox, dy = e.clientY - stick.oy;
+    const l = Math.hypot(dx, dy), max = 50;
+    if (l > max) { dx = dx / l * max; dy = dy / l * max; }
+    stick.x = dx / max; stick.y = dy / max;
+    $("stick").firstChild.style.transform = `translate(${dx}px, ${dy}px)`;
+  } else if (e.pointerId === look.id && document.pointerLockElement !== canvas) {
+    turn((e.clientX - look.lx) * (e.pointerType === "mouse" ? 1 : 1.6), (e.clientY - look.ly) * (e.pointerType === "mouse" ? 1 : 1.6));
+    look.lx = e.clientX; look.ly = e.clientY;
+  }
+});
+function endPointer(e) {
+  if (e.pointerId === stick.id) {
+    stick.id = null; stick.x = stick.y = 0;
+    $("stick").style.display = "none";
+    $("stick").firstChild.style.transform = "";
+  }
+  if (e.pointerId === look.id) look.id = null;
+}
+addEventListener("pointerup", endPointer);
+addEventListener("pointercancel", endPointer);
+
+$("btnStart").onclick = () => {
+  $("help").style.display = "none";
+  if (!state.dayOver) { state.started = true; lockPointer(); }
+};
+$("btnNextDay").onclick = () => { startDay(); lockPointer(); };
+$("btnHelp").onclick = () => { $("help").style.display = "flex"; state.started = false; unlockPointer(); };
+$("btnShop").onclick = () => openShop(true);
+$("btnShopClose").onclick = () => openShop(false);
+$("btnReset").onclick = () => {
+  if (!confirm("Tüm para, gün ve yükseltmeler silinsin mi?")) return;
+  try { localStorage.removeItem("pizzaKulesi"); } catch (e) {}
+  location.reload();
+};
+
+// ---------------------------------------------------------------- Başlat
+buildWorld();
+setupStations();
+try {
+  const saved = JSON.parse(localStorage.getItem("pizzaKulesi") || "null");
+  if (saved) { state.money = saved.money | 0; state.owned = saved.owned || {}; state.day = saved.day || 1; state.passes = saved.passes || {}; }
+} catch (e) {}
+for (const id of Object.keys(state.passes)) applyPass(id);
+for (const u of Config.UPGRADES) if (state.owned[u.id]) applyEffect(u.id); // Config sırasıyla
+refreshButtons();
+resize();
+updateHud();
+updateDayLabel();
+requestAnimationFrame(frame);
+</script>
+<div id="rotateHint" style="display:none;position:fixed;left:50%;top:30%;transform:translate(-50%,-50%);z-index:99;max-width:80vw;padding:12px 16px;border-radius:14px;background:rgba(0,0,0,0.78);color:#fff;font:600 15px system-ui,sans-serif;text-align:center;pointer-events:auto">📱↻ Daha geniş görmek için telefonu yan çevir<br><small style="opacity:.7">(kapatmak için dokun)</small></div>
+<script>
+// Dik tutulan telefonda bir kez "yan çevir" ipucu
+(() => {
+  const el = document.getElementById("rotateHint");
+  if (!matchMedia("(pointer: coarse)").matches) return;
+  let closed = false;
+  const upd = () => { el.style.display = !closed && innerWidth < innerHeight ? "block" : "none"; };
+  el.addEventListener("pointerdown", e => { e.stopPropagation(); closed = true; upd(); });
+  setTimeout(() => { closed = true; upd(); }, 8000);
+  addEventListener("resize", upd); upd();
+})();
+</script>
+</body>
+</html>

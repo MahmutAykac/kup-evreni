@@ -1,0 +1,1379 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Evcil Hayvan Simülatörü: Gezegenler</title>
+<!--
+  Evcil Hayvan Simülatörü: Gezegenler. Küp Evreni platformunda çalışır (tek başına da açılır).
+  Kurallar ve ekonomi TASARIM.md ile aynı. Para, yumurta zarı, birleştirme ve takas `Server` nesnesinde
+  (Roblox'ta RemoteFunction + sunucu servisleri olacak); arayüz sadece onu çağırır.
+  Kontroller: kristale tıkla/dokun · WASD yürü · Space zıpla · sürükle: kamera · tekerlek: yakınlaştır · E etkileşim
+-->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+  :root {
+    --panel: rgba(12, 16, 34, 0.82);
+    --card: #141a33;
+    --line: rgba(255, 255, 255, 0.12);
+    --text: #f1f4ff;
+    --muted: #9aa3c4;
+    --accent: #5cc8ff;
+    --gold: #ffd166;
+    --C: #b8c0cc; --U: #6ee7a0; --R: #4cc9f0; --E: #c77dff; --L: #ffd166;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #05060f; color: var(--text);
+    font-family: "Trebuchet MS", system-ui, sans-serif; overflow: hidden; -webkit-user-select: none; user-select: none; touch-action: none; }
+  button { font: inherit; color: inherit; }
+  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+
+  #hud { position: fixed; left: 14px; top: 12px; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+  .pill { background: var(--panel); border-radius: 14px; padding: 8px 14px; }
+  #dust { font-size: 26px; font-weight: 700; color: #b9e6ff; }
+  #power { font-size: 14px; color: var(--muted); }
+  #travel { display: flex; gap: 6px; pointer-events: auto; flex-wrap: wrap; }
+  #travel button { border: 2px solid var(--line); background: var(--panel); border-radius: 12px; padding: 6px 10px; cursor: pointer; font-size: 14px; }
+  #travel button.on { border-color: var(--accent); }
+  #menu { position: fixed; right: 14px; top: 12px; display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; max-width: 60vw; }
+  #menu button { border: 2px solid var(--line); background: var(--panel); border-radius: 14px; padding: 8px 12px; cursor: pointer; font-size: 15px; }
+  #hint { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); pointer-events: none; text-align: center; font-size: 15px;
+    max-width: calc(100vw - 420px); }
+  #toasts { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 6px; align-items: center; pointer-events: none; z-index: 5; }
+  .toast { background: rgba(241,244,255,0.95); color: #141a33; padding: 6px 14px; border-radius: 10px; font-size: 15px; animation: fade 2.8s forwards; text-align: center; max-width: calc(100vw - 32px); }
+  @keyframes fade { 0%, 80% { opacity: 1; } 100% { opacity: 0; transform: translateY(-8px); } }
+  #bottomRight { position: fixed; right: 14px; bottom: 14px; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
+  #bottomRight button { border: 2px solid var(--line); background: var(--panel); border-radius: 14px; padding: 12px 16px; cursor: pointer; font-size: 16px; min-width: 170px; text-align: left; }
+  #btnAuto.on { border-color: var(--U); color: var(--U); }
+  #btnAction { border-color: var(--gold) !important; display: none; }
+  #btnAction b { display: inline-block; background: #fff; color: #141a33; border-radius: 6px; width: 24px; text-align: center; margin-right: 6px; }
+  #stick { position: fixed; width: 110px; height: 110px; margin: -55px 0 0 -55px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.4);
+    background: rgba(0,0,0,0.25); display: none; pointer-events: none; }
+  #stick div { position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px; border-radius: 50%; background: rgba(255,255,255,0.7); }
+
+  .overlay { position: fixed; inset: 0; display: none; align-items: flex-start; justify-content: center; background: rgba(3,5,15,0.75); padding: 16px; overflow-y: auto; touch-action: pan-y; z-index: 10; }
+  .overlay.show { display: flex; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 18px 20px; width: 100%; max-width: 520px; margin: auto 0; line-height: 1.45; }
+  .card.wide { max-width: 860px; }
+  .card h1 { margin: 0 0 8px; font-size: 24px; }
+  .card h3 { margin: 14px 0 6px; font-size: 15px; color: var(--muted); }
+  .muted { color: var(--muted); font-size: 14px; }
+  .btn { border: 0; border-radius: 12px; padding: 10px 14px; cursor: pointer; font-weight: 700; background: #2a3360; }
+  .btn.go { background: #00b06f; color: #fff; }
+  .btn.blue { background: #2b7bff; color: #fff; }
+  .btn.red { background: #c0392b; color: #fff; }
+  .btn:disabled { opacity: 0.45; cursor: default; }
+  .rowb { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  .rowb .btn { flex: 1; }
+
+  /* Hayvan kartları */
+  .pets { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; margin: 10px 0; }
+  .pet { position: relative; border-radius: 14px; border: 3px solid var(--C); background: #1c2448; padding: 8px 4px 6px; text-align: center; cursor: pointer; }
+  .pet .ic { font-size: 36px; line-height: 1.1; }
+  .pet .nm { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pet .pw { font-size: 13px; font-weight: 700; }
+  .pet .eq { position: absolute; top: 3px; right: 5px; font-size: 13px; }
+  .pet.sel { outline: 3px solid #fff; outline-offset: 1px; }
+  .pet.v-g { background: linear-gradient(160deg, #6b5200, #c79a1b); }
+  .pet.v-r { background: linear-gradient(120deg, #ff4d6d, #ffb703, #06d6a0, #4cc9f0, #9b5de5); background-size: 300% 300%; animation: rb 4s linear infinite; }
+  @keyframes rb { 0% { background-position: 0% 50%; } 100% { background-position: 100% 50%; } }
+  .r-C { border-color: var(--C); } .r-U { border-color: var(--U); } .r-R { border-color: var(--R); } .r-E { border-color: var(--E); } .r-L { border-color: var(--L); box-shadow: 0 0 14px rgba(255,209,102,0.5); }
+  #petDetail { background: #1c2448; border-radius: 14px; padding: 12px; display: none; }
+
+  /* Yumurta */
+  .odds { width: 100%; border-collapse: collapse; font-size: 15px; }
+  .odds td { padding: 6px 4px; border-bottom: 1px solid var(--line); }
+  .odds td:last-child { text-align: right; }
+  #hatch { align-items: center; flex-direction: column; gap: 18px; }
+  #hatchStage { display: flex; gap: 18px; flex-wrap: wrap; justify-content: center; }
+  .egg { font-size: 110px; animation: shake 0.25s infinite; filter: drop-shadow(0 0 20px rgba(255,255,255,0.4)); }
+  @keyframes shake { 0%, 100% { transform: rotate(-8deg); } 50% { transform: rotate(8deg) scale(1.04); } }
+  .reveal { width: 170px; border-radius: 20px; border: 4px solid var(--C); background: var(--card); padding: 14px 10px; text-align: center; animation: pop 0.45s ease-out; position: relative; overflow: hidden; }
+  .reveal .ic { font-size: 74px; }
+  .reveal b { display: block; font-size: 17px; }
+  .reveal .new { position: absolute; top: 8px; left: 8px; background: #ff4d6d; border-radius: 8px; font-size: 12px; padding: 2px 6px; font-weight: 700; }
+  .reveal.r-L::before { content: ""; position: absolute; inset: -60%; background: conic-gradient(from 0deg, rgba(255,209,102,0.0), rgba(255,209,102,0.5), rgba(255,209,102,0.0) 30%); animation: spin 2s linear infinite; z-index: 0; }
+  .reveal > * { position: relative; z-index: 1; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes pop { 0% { transform: scale(0.3); opacity: 0; } 70% { transform: scale(1.08); } 100% { transform: scale(1); opacity: 1; } }
+
+  /* Takas */
+  .tradeCols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .offer { min-height: 110px; background: #0e1430; border-radius: 14px; padding: 8px; }
+  .offer .pets { margin: 0; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); }
+  .offer .pet .ic { font-size: 28px; }
+  .tState { font-size: 13px; margin-top: 6px; }
+  #tradeMsg { background: #0e1430; border-radius: 12px; padding: 10px 12px; margin-top: 10px; min-height: 42px; }
+  .botRow { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .botRow .av { width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; font-size: 20px; }
+  .botRow .btn { margin-left: auto; }
+  .lb { width: 100%; border-collapse: collapse; }
+  .lb td { padding: 8px 6px; border-bottom: 1px solid var(--line); }
+  .lb tr.me td { color: var(--gold); font-weight: 700; }
+  .lb td:last-child { text-align: right; }
+  .shopItem { display: grid; grid-template-columns: 46px 1fr auto; gap: 10px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--line); }
+  .shopItem .ic { font-size: 34px; text-align: center; }
+  #noWebgl { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 16px; text-align: center; }
+
+  @media (max-width: 640px) {
+    #dust { font-size: 20px; }
+    #menu { max-width: 52vw; }
+    #menu button { padding: 6px 9px; font-size: 13px; }
+    #hint { bottom: 150px; font-size: 13px; max-width: calc(100vw - 32px); }
+    #bottomRight button { min-width: 140px; padding: 10px 12px; font-size: 14px; }
+    .tradeCols { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud">
+  <div class="pill"><div id="dust">💫 0</div><div id="power">⚔️ 0/sn · 🐾 0/3</div></div>
+  <div id="travel"></div>
+</div>
+<div id="hint" class="pill">Kristale tıkla, hayvanların saldırsın!</div>
+<div id="menu">
+  <button id="bPets">🐾 Hayvanlar</button>
+  <button id="bTrade">🔁 Takas</button>
+  <button id="bLeader">🏆 Sıralama</button>
+  <button id="bShop">⭐ Mağaza</button>
+  <button id="bHelp">❓</button>
+</div>
+<div id="toasts"></div>
+<div id="bottomRight">
+  <button id="btnAction"><b>E</b><span></span></button>
+  <button id="btnAuto">🤖 Otomatik: Kapalı</button>
+</div>
+<div id="stick"><div></div></div>
+
+<div id="ovPets" class="overlay"><div class="card wide">
+  <h1>🐾 Hayvanlar</h1>
+  <div class="muted" id="petsInfo"></div>
+  <div class="rowb" style="margin-top:8px"><button class="btn blue" id="btnBest">⚡ En iyileri kuşan</button><button class="btn" data-close>Kapat</button></div>
+  <div id="petDetail"></div>
+  <div class="pets" id="petGrid"></div>
+</div></div>
+
+<div id="ovEgg" class="overlay"><div class="card">
+  <h1 id="eggTitle">🥚 Yumurta</h1>
+  <div class="muted" id="eggSub"></div>
+  <table class="odds" id="eggOdds"></table>
+  <div class="rowb"><button class="btn go" id="btnEgg1"></button><button class="btn go" id="btnEgg3"></button></div>
+  <div class="rowb"><button class="btn" data-close>Kapat</button></div>
+</div></div>
+
+<div id="hatch" class="overlay">
+  <div id="hatchStage"></div>
+  <button class="btn go" id="btnHatchOk" style="min-width:200px;display:none">Harika!</button>
+</div>
+
+<div id="ovTrade" class="overlay"><div class="card wide" id="tradeCard"></div></div>
+<div id="ovLeader" class="overlay"><div class="card">
+  <h1>🏆 Sıralama: toplam yıldız tozu</h1>
+  <table class="lb" id="lbTable"></table>
+  <div class="rowb"><button class="btn" data-close>Kapat</button></div>
+</div></div>
+<div id="ovShop" class="overlay"><div class="card">
+  <h1>⭐ Gamepass Mağazası</h1>
+  <div class="muted" id="shopBal"></div>
+  <div id="shopList"></div>
+  <p class="muted" id="shopNote"></p>
+  <div class="rowb"><button class="btn" data-close>Kapat</button></div>
+</div></div>
+<div id="ovHelp" class="overlay"><div class="card">
+  <h1>🐾 Evcil Hayvan Simülatörü: Gezegenler</h1>
+  <ol style="padding-left:20px">
+    <li><b>Kristale tıkla/dokun:</b> vurursun ve kuşandığın hayvanlar ona saldırır. Kırılınca 💫 yıldız tozu dökülür.</li>
+    <li><b>🤖 Otomatik</b> açıkken hayvanlar en yakın kristale kendileri gider.</li>
+    <li><b>🥚 Yumurta</b> standına git, <b>E</b> ile aç. Şanslar sunucuda hesaplanır: Efsanevi 1/1000!</li>
+    <li><b>🐾 Hayvanlar:</b> en fazla 3 hayvan kuşanırsın. <b>5 aynı hayvan → Altın (×3)</b>, <b>5 Altın → Gökkuşağı (×8)</b>.</li>
+    <li>Köprüdeki <b>kapıyı</b> yıldız tozuyla aç: Mars ve Kriyo'da daha zengin kristaller ve daha güçlü yumurtalar var.</li>
+    <li><b>🔁 Takas:</b> iki taraf "Hazırım" der, 3 sn sonra iki taraf "Onayla" der. Teklif değişirse onaylar sıfırlanır.</li>
+  </ol>
+  <p class="muted">Klavye: WASD yürü · Space zıpla · sürükle: kamerayı çevir · tekerlek: yakınlaştır · E etkileşim · Q otomatik.<br>
+    Dokunmatik: sol yarı joystick · sağ yarı sürükle · dokun: kristale vur.</p>
+  <div class="rowb"><button class="btn go" data-close>Oyna!</button></div>
+</div></div>
+<div id="noWebgl">3D için WebGL gerekli; bu tarayıcıda açılamadı. Chrome / Edge ile dosyayı açmayı dene.</div>
+
+<script>
+"use strict";
+// ================================================================ Yardımcılar
+const $ = id => document.getElementById(id);
+const rand = (a, b) => a + Math.random() * (b - a);
+const pick = list => list[Math.floor(Math.random() * list.length)];
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+function fmt(n) {
+  n = Math.floor(n);
+  if (n < 10000) return n.toLocaleString("tr-TR");
+  if (n < 1e6) return (n / 1e3).toFixed(n < 1e5 ? 1 : 0).replace(".", ",") + " B";
+  if (n < 1e9) return (n / 1e6).toFixed(1).replace(".", ",") + " Mn";
+  return (n / 1e9).toFixed(1).replace(".", ",") + " Mr";
+}
+function setText(el, t) { if (el._t !== t) { el._t = t; el.textContent = t; } }
+function notify(msg) {
+  const el = document.createElement("div");
+  el.className = "toast"; el.textContent = msg;
+  $("toasts").appendChild(el);
+  setTimeout(() => el.remove(), 2800);
+  while ($("toasts").children.length > 3) $("toasts").firstChild.remove();
+}
+// Kriptografik zar (Roblox'ta sunucudaki Random.new())
+function secureRandom() { const a = new Uint32Array(1); crypto.getRandomValues(a); return a[0] / 4294967296; }
+
+// ================================================================ Config (Roblox: ReplicatedStorage/Shared/Config)
+const PLANETS = [
+  { id: "ay", name: "Ay", icon: "🌙", x: 0, r: 28, gate: 0, ground: 0x8b8e99, accent: 0x9fd8ff, egg: "ay",
+    crystals: [{ hp: 10, drop: 4, size: 0.7, w: 6 }, { hp: 40, drop: 15, size: 1.05, w: 4 }, { hp: 150, drop: 60, size: 1.6, w: 2 }] },
+  { id: "mars", name: "Mars", icon: "🔴", x: 92, r: 28, gate: 3000, ground: 0xb5532e, accent: 0xff8a3c, egg: "mars",
+    crystals: [{ hp: 200, drop: 40, size: 0.75, w: 6 }, { hp: 700, drop: 150, size: 1.1, w: 4 }, { hp: 2500, drop: 550, size: 1.65, w: 2 }] },
+  { id: "kriyo", name: "Kriyo", icon: "❄️", x: 184, r: 28, gate: 40000, ground: 0xcfe9f5, accent: 0x6ff0ff, egg: "kriyo",
+    crystals: [{ hp: 3000, drop: 500, size: 0.8, w: 6 }, { hp: 10000, drop: 1800, size: 1.15, w: 4 }, { hp: 35000, drop: 6500, size: 1.7, w: 2 }] },
+];
+const CRYSTALS_PER_PLANET = 12;
+const RARITY = {
+  // w = ağırlık (toplamı 100 olmak zorunda değil; şans = w / toplam)
+  C: { name: "Sıradan", w: 0 }, U: { name: "Seyrek", w: 0 }, R: { name: "Nadir", w: 55 }, E: { name: "Epik", w: 67 }, L: { name: "Efsanevi", w: 99 },
+};
+const RARITY_ORDER = ["C", "U", "R", "E", "L"];
+const RVAL = { C: 1, U: 1.4, R: 2.2, E: 4.5, L: 14 }; // takas değeri çarpanı
+const PETS = {
+  tavsan: { name: "Uzay Tavşanı", icon: "🐰", rarity: "C", power: 2, color: 0xf2f2f7, shape: { ears: "long" } },
+  fare: { name: "Krater Faresi", icon: "🐭", rarity: "U", power: 3, color: 0xa9a9b5, shape: { ears: "round", tail: true } },
+  tilki: { name: "Yıldız Tilkisi", icon: "🦊", rarity: "R", power: 6, color: 0xff9a3c, shape: { ears: "tri", tail: true } },
+  kurt: { name: "Ay Kurdu", icon: "🐺", rarity: "E", power: 15, color: 0x6b7aa1, shape: { ears: "tri", tail: true } },
+  ejder: { name: "Galaksi Ejderi", icon: "🐉", rarity: "L", power: 60, color: 0x9b5cff, shape: { wings: true, horns: true, tail: true } },
+  akrep: { name: "Kızıl Akrep", icon: "🦂", rarity: "C", power: 20, color: 0xc0392b, shape: { tail: true } },
+  kertenkele: { name: "Toz Kertenkelesi", icon: "🦎", rarity: "U", power: 32, color: 0xd98c3a, shape: { tail: true } },
+  kartal: { name: "Mars Kartalı", icon: "🦅", rarity: "R", power: 60, color: 0x8b5a2b, shape: { wings: true, beak: true } },
+  golem: { name: "Lav Golemi", icon: "🗿", rarity: "E", power: 150, color: 0x4a2a1a, glow: 0x7a2a00, shape: { horns: true } },
+  anka: { name: "Phobos Ankası", icon: "🔥", rarity: "L", power: 600, color: 0xff5a1f, glow: 0x6a1a00, shape: { wings: true, tail: true, beak: true } },
+  penguen: { name: "Buz Pengueni", icon: "🐧", rarity: "C", power: 250, color: 0x2c3e50, shape: { beak: true } },
+  kristalTilki: { name: "Kristal Tilki", icon: "🦊", rarity: "U", power: 400, color: 0x9fe6ff, shape: { ears: "tri", tail: true } },
+  baykus: { name: "Kar Baykuşu", icon: "🦉", rarity: "R", power: 800, color: 0xf5f9ff, shape: { wings: true, ears: "tri", beak: true } },
+  ayi: { name: "Kuyrukluyıldız Ayısı", icon: "🐻", rarity: "E", power: 2000, color: 0xe8f4ff, shape: { ears: "round" } },
+  nebula: { name: "Nebula Ejderi", icon: "🐲", rarity: "L", power: 8000, color: 0x3ad1ff, glow: 0x003050, shape: { wings: true, horns: true, tail: true } },
+};
+const EGGS = {
+  ay: { name: "Ay Yumurtası", price: 100, color: 0xdfe3ee, pets: ["tavsan", "fare", "tilki", "kurt", "ejder"] },
+  mars: { name: "Mars Yumurtası", price: 1500, color: 0xd2693c, pets: ["akrep", "kertenkele", "kartal", "golem", "anka"] },
+  kriyo: { name: "Buz Yumurtası", price: 20000, color: 0x9fe6ff, pets: ["penguen", "kristalTilki", "baykus", "ayi", "nebula"] },
+};
+const VARIANTS = { n: { name: "", mult: 1 }, g: { name: "Altın", mult: 3 }, r: { name: "Gökkuşağı", mult: 8 } };
+const MERGE_COUNT = 5;
+const MAX_PETS = 50;
+const BASE_SLOTS = 3;
+const PASSES = [
+  { id: "double", name: "2x Yıldız Tozu", icon: "✨", jeton: 150, desc: "Kırdığın her kristalden 2 kat yıldız tozu." },
+  { id: "slots", name: "+2 Hayvan Slotu", icon: "🐾", jeton: 100, desc: "3 yerine 5 hayvan kuşan." },
+];
+const BOT_NAMES = ["YıldızAvcısı", "NebulaKedisi", "AyKaşifi", "MarsKralı", "GalaksiEfe", "UzayKızı_07", "KuyrukluYıldız"];
+const BOT_FACES = ["🧑‍🚀", "😺", "🦊", "👑", "😎", "🌟", "☄️"];
+const PLAYER_SPEED = 9;
+const CLICK_RANGE = 40;
+const petPower = p => PETS[p.sp].power * VARIANTS[p.v].mult;
+const petValue = p => petPower(p) * RVAL[PETS[p.sp].rarity];
+const petLabel = p => (p.v !== "n" ? VARIANTS[p.v].name + " " : "") + PETS[p.sp].name;
+
+// ================================================================ Kayıt
+const SAVE_KEY = "evcilGezegenler";
+let save = { dust: 0, totalDust: 0, pets: [], nextUid: 1, unlocked: [true, false, false], passes: {}, auto: false,
+  bots: null, seen: {}, stats: { eggs: 0, merges: 0, trades: 0 }, helpSeen: false };
+try {
+  const s = JSON.parse(localStorage.getItem(SAVE_KEY) || "null");
+  if (s) save = { ...save, ...s, stats: { ...save.stats, ...(s.stats || {}) } };
+} catch (e) {}
+if (!save.pets.length && !save.stats.eggs) { save.pets.push({ uid: save.nextUid++, sp: "tavsan", v: "n", eq: true }); save.seen.tavsan = true; }
+if (!save.bots) {
+  save.bots = BOT_NAMES.map((name, i) => {
+    const total = Math.round(10 ** rand(3.2, 6.4));
+    return { name, face: BOT_FACES[i], total, rate: total / 2500, pets: null };
+  });
+}
+let lastSave = 0;
+function persist(force) {
+  if (!force && performance.now() - lastSave < 3000) return;
+  lastSave = performance.now();
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) {}
+  reportStats();
+}
+
+// ================================================================ Küp Evreni köprüsü
+const platform = { inside: window.parent !== window, profile: null, reqs: {} };
+function reportStats() {
+  if (!platform.inside) return;
+  parent.postMessage({ type: "kup:stats", stats: { "💫 Yıldız tozu": fmt(save.dust), "🐾 Hayvan": save.pets.length,
+    "🪐 Gezegen": save.unlocked.filter(Boolean).length + "/3", "🥚 Yumurta": save.stats.eggs, "🌈 Birleştirme": save.stats.merges } }, "*");
+}
+function requestPurchase(item, done) {
+  if (!platform.inside) { notify("Robux ile almak için oyunu Küp Evreni'nden aç (ana klasördeki index.html)"); return; }
+  const reqId = Math.random().toString(36).slice(2);
+  platform.reqs[reqId] = done;
+  parent.postMessage({ type: "kup:purchase", reqId, id: item.id, name: item.name, price: item.jeton, icon: item.icon }, "*");
+}
+addEventListener("message", e => {
+  if (!platform.inside || e.source !== parent) return;
+  const m = e.data || {};
+  if (m.type === "kup:profile") { platform.profile = m; rebuildAvatar(); renderShop(); }
+  else if (m.type === "kup:purchaseResult") {
+    if (platform.profile) platform.profile.jeton = m.jeton;
+    const done = platform.reqs[m.reqId]; delete platform.reqs[m.reqId];
+    if (done) done(!!m.ok);
+    renderShop();
+  }
+});
+if (platform.inside) parent.postMessage({ type: "kup:ready" }, "*");
+
+// ================================================================ Server (Roblox: sunucu servisleri + RemoteFunction)
+// Arayüz sadece bu fonksiyonları çağırır; para, zar ve envanter burada doğrulanır.
+const Server = {
+  maxEquip: () => BASE_SLOTS + (save.passes.slots ? 2 : 0),
+  equippedCount: () => save.pets.filter(p => p.eq).length,
+  addDust(v) {
+    v = Math.floor(v * (save.passes.double ? 2 : 1));
+    save.dust += v; save.totalDust += v;
+    persist();
+    return v;
+  },
+  rollPet(eggId) {
+    const egg = EGGS[eggId];
+    const total = egg.pets.reduce((s, sp) => s + RARITY[PETS[sp].rarity].w, 0);
+    let r = secureRandom() * total;
+    for (const sp of egg.pets) {
+      const w = RARITY[PETS[sp].rarity].w;
+      if (w > 0 && r < w) return sp;
+      r -= w;
+    }
+    return egg.pets.filter(sp => RARITY[PETS[sp].rarity].w > 0).pop();
+  },
+  openEgg(eggId, n) {
+    const egg = EGGS[eggId];
+    const pi = PLANETS.findIndex(p => p.egg === eggId);
+    if (!egg || !save.unlocked[pi]) return { err: "Bu gezegen kilitli" };
+    if (save.pets.length + n > MAX_PETS) return { err: `Envanter dolu (${MAX_PETS}). Hayvan sil ya da birleştir` };
+    const cost = egg.price * n;
+    if (save.dust < cost) return { err: `💫 ${fmt(cost)} gerekli` };
+    save.dust -= cost;
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const sp = this.rollPet(eggId);
+      const pet = { uid: save.nextUid++, sp, v: "n", eq: false };
+      out.push({ pet, isNew: !save.seen[sp] });
+      save.seen[sp] = true;
+      save.pets.push(pet);
+    }
+    save.stats.eggs += n;
+    this.fillSlots();
+    persist(true);
+    return { pets: out };
+  },
+  fillSlots() { // boş slot varsa en güçlüleri kuşan
+    const free = this.maxEquip() - this.equippedCount();
+    if (free <= 0) return;
+    save.pets.filter(p => !p.eq).sort((a, b) => petPower(b) - petPower(a)).slice(0, free).forEach(p => p.eq = true);
+  },
+  equip(uid, on) {
+    const p = save.pets.find(x => x.uid === uid);
+    if (!p) return { err: "Hayvan bulunamadı" };
+    if (on && !p.eq && this.equippedCount() >= this.maxEquip()) return { err: `En fazla ${this.maxEquip()} hayvan kuşanabilirsin` };
+    p.eq = on; persist(true); return { ok: true };
+  },
+  equipBest() {
+    save.pets.forEach(p => p.eq = false);
+    save.pets.slice().sort((a, b) => petPower(b) - petPower(a)).slice(0, this.maxEquip()).forEach(p => p.eq = true);
+    persist(true);
+  },
+  mergeInfo(uid) {
+    const p = save.pets.find(x => x.uid === uid);
+    if (!p) return null;
+    const next = p.v === "n" ? "g" : p.v === "g" ? "r" : null;
+    const same = save.pets.filter(q => q.sp === p.sp && q.v === p.v);
+    return { p, next, count: same.length, same };
+  },
+  merge(uid) {
+    const info = this.mergeInfo(uid);
+    if (!info) return { err: "Hayvan bulunamadı" };
+    if (!info.next) return { err: "Gökkuşağı zaten en üst seviye" };
+    if (info.count < MERGE_COUNT) return { err: `${MERGE_COUNT} aynı hayvan gerekli (${info.count}/${MERGE_COUNT})` };
+    // Seçilen + kuşanılmamışlar önce gider
+    const use = [info.p, ...info.same.filter(q => q !== info.p).sort((a, b) => a.eq - b.eq)].slice(0, MERGE_COUNT);
+    const wasEq = use.some(q => q.eq);
+    save.pets = save.pets.filter(q => !use.includes(q));
+    const np = { uid: save.nextUid++, sp: info.p.sp, v: info.next, eq: wasEq };
+    save.pets.push(np);
+    save.stats.merges++;
+    this.fillSlots();
+    persist(true);
+    return { pet: np };
+  },
+  remove(uid) {
+    if (save.pets.length <= 1) return { err: "Son hayvanını silemezsin" };
+    save.pets = save.pets.filter(p => p.uid !== uid);
+    this.fillSlots(); persist(true); return { ok: true };
+  },
+  buyGate(i) {
+    if (save.unlocked[i]) return { ok: true };
+    if (!save.unlocked[i - 1]) return { err: "Önce önceki gezegeni aç" };
+    if (save.dust < PLANETS[i].gate) return { err: `💫 ${fmt(PLANETS[i].gate)} gerekli` };
+    save.dust -= PLANETS[i].gate;
+    save.unlocked[i] = true;
+    persist(true);
+    return { ok: true };
+  },
+  // Takas: iki tarafın envanteri işlem anında tekrar doğrulanır, değişim tek adımda yapılır
+  trade(bot, myUids, theirUids) {
+    const mine = myUids.map(u => save.pets.find(p => p.uid === u));
+    const theirs = theirUids.map(u => bot.pets.find(p => p.uid === u));
+    if (mine.some(p => !p) || theirs.some(p => !p)) return { err: "Teklifteki bir hayvan artık yok, takas iptal" };
+    if (!mine.length || !theirs.length) return { err: "İki taraf da en az bir hayvan koymalı" };
+    if (save.pets.length - mine.length < 1) return { err: "Tüm hayvanlarını veremezsin" };
+    if (save.pets.length - mine.length + theirs.length > MAX_PETS) return { err: "Envanterin dolar" };
+    save.pets = save.pets.filter(p => !mine.includes(p));
+    bot.pets = bot.pets.filter(p => !theirs.includes(p));
+    for (const p of theirs) { save.pets.push({ uid: save.nextUid++, sp: p.sp, v: p.v, eq: false }); save.seen[p.sp] = true; }
+    for (const p of mine) bot.pets.push({ uid: "b" + Math.random().toString(36).slice(2), sp: p.sp, v: p.v });
+    save.stats.trades++;
+    this.fillSlots();
+    persist(true);
+    return { ok: true };
+  },
+};
+
+// ================================================================ Ses (WebAudio sentez)
+const A = { ctx: null };
+function initAudio() {
+  if (A.ctx) { if (A.ctx.state === "suspended") A.ctx.resume(); return; }
+  try { A.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return; }
+  A.master = A.ctx.createGain(); A.master.gain.value = 0.6; A.master.connect(A.ctx.destination);
+  const len = A.ctx.sampleRate;
+  A.noise = A.ctx.createBuffer(1, len, A.ctx.sampleRate);
+  const d = A.noise.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+}
+function tone(freq, dur, type = "sine", gain = 0.12, freqEnd, delay = 0) {
+  if (!A.ctx) return;
+  const t0 = A.ctx.currentTime + delay, o = A.ctx.createOscillator(), g = A.ctx.createGain();
+  o.type = type; o.frequency.setValueAtTime(freq, t0);
+  if (freqEnd) o.frequency.exponentialRampToValueAtTime(freqEnd, t0 + dur);
+  g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(gain, t0 + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  o.connect(g).connect(A.master); o.start(t0); o.stop(t0 + dur + 0.05);
+}
+function noiseHit(dur, gain, freq, type = "bandpass", delay = 0) {
+  if (!A.ctx) return;
+  const t0 = A.ctx.currentTime + delay, s = A.ctx.createBufferSource(), f = A.ctx.createBiquadFilter(), g = A.ctx.createGain();
+  s.buffer = A.noise; f.type = type; f.frequency.value = freq;
+  g.gain.setValueAtTime(gain, t0); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  s.connect(f).connect(g).connect(A.master); s.start(t0); s.stop(t0 + dur + 0.05);
+}
+let orbSoundT = 0;
+const SFX = {
+  hit: () => { tone(900 + Math.random() * 300, 0.06, "triangle", 0.07, 1400); noiseHit(0.05, 0.08, 3000, "highpass"); },
+  break: () => [660, 880, 1320].forEach((f, i) => tone(f, 0.25, "sine", 0.08, undefined, i * 0.05)),
+  orb: () => { if (performance.now() - orbSoundT < 60) return; orbSoundT = performance.now(); tone(1300 + Math.random() * 500, 0.08, "sine", 0.04, 2000); },
+  crack: () => { noiseHit(0.3, 0.3, 900); tone(300, 0.15, "square", 0.04, 150); },
+  reveal: r => {
+    const base = { C: 440, U: 494, R: 523, E: 587, L: 659 }[r];
+    [1, 1.25, 1.5, 2].forEach((m, i) => tone(base * m, 0.4, "triangle", 0.08, undefined, i * 0.09));
+    if (r === "L" || r === "E") [2, 2.5, 3].forEach((m, i) => tone(base * m, 0.6, "sine", 0.06, undefined, 0.4 + i * 0.12));
+  },
+  error: () => tone(200, 0.15, "square", 0.04),
+  gate: () => { noiseHit(0.8, 0.25, 600, "lowpass"); [392, 523, 659, 784].forEach((f, i) => tone(f, 0.5, "triangle", 0.08, undefined, 0.2 + i * 0.08)); },
+  jump: () => tone(300, 0.15, "sine", 0.05, 600),
+};
+
+// ================================================================ 3D sahne
+const canvas = $("game");
+let renderer;
+try { renderer = new THREE.WebGLRenderer({ canvas, antialias: true }); }
+catch (e) { $("noWebgl").style.display = "flex"; throw e; }
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x05060f);
+scene.fog = new THREE.Fog(0x05060f, 110, 260);
+const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 1200);
+scene.add(new THREE.HemisphereLight(0xbcd0ff, 0x30283a, 0.75));
+const sun = new THREE.DirectionalLight(0xffffff, 0.75);
+sun.position.set(40, 80, 30);
+scene.add(sun);
+const lambert = (color, extra = {}) => new THREE.MeshLambertMaterial({ color, ...extra });
+function mesh(geo, material, x = 0, y = 0, z = 0, parent = scene) {
+  const m = new THREE.Mesh(geo, material); m.position.set(x, y, z); parent.add(m); return m;
+}
+
+// Kameraya dönük yazı (BillboardGui karşılığı)
+function makeLabel(worldW, worldH, cw = 512, ch = 128) {
+  const c = document.createElement("canvas"); c.width = cw; c.height = ch;
+  const tex = new THREE.CanvasTexture(c);
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
+  sprite.scale.set(worldW, worldH, 1);
+  const label = { sprite, ctx: c.getContext("2d"), tex, key: null, w: cw, h: ch };
+  label.draw = (key, fn) => { if (label.key === key) return; label.key = key; label.ctx.clearRect(0, 0, cw, ch); fn(label.ctx, cw, ch); tex.needsUpdate = true; };
+  return label;
+}
+function outlined(g, text, x, y, maxW, size, color = "#fff") {
+  g.font = `700 ${size}px "Trebuchet MS", system-ui, sans-serif`;
+  const w = g.measureText(text).width;
+  if (w > maxW) { size = Math.floor(size * maxW / w); g.font = `700 ${size}px "Trebuchet MS", system-ui, sans-serif`; }
+  g.textAlign = "center"; g.textBaseline = "middle"; g.lineWidth = 10; g.lineJoin = "round";
+  g.strokeStyle = "rgba(0,0,0,0.7)"; g.strokeText(text, x, y); g.fillStyle = color; g.fillText(text, x, y);
+}
+
+// Yıldızlar ve uzak gezegenler
+(function sky() {
+  const n = 2500, pos = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    const u = Math.random() * 2 - 1, a = Math.random() * Math.PI * 2, r = rand(500, 800), s = Math.sqrt(1 - u * u);
+    pos[i * 3] = Math.cos(a) * s * r + 90; pos[i * 3 + 1] = u * r; pos[i * 3 + 2] = Math.sin(a) * s * r;
+  }
+  const geo = new THREE.BufferGeometry(); geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  scene.add(new THREE.Points(geo, new THREE.PointsMaterial({ color: 0xffffff, size: 2, sizeAttenuation: false, fog: false })));
+  const giant = mesh(new THREE.SphereGeometry(60, 32, 24), new THREE.MeshLambertMaterial({ color: 0x5b3fa8, emissive: 0x1a0f3a, fog: false }), 120, 90, -380);
+  const ring = mesh(new THREE.TorusGeometry(95, 6, 2, 64), new THREE.MeshBasicMaterial({ color: 0xc9a3ff, transparent: true, opacity: 0.35, fog: false }), 0, 0, 0, giant);
+  ring.rotation.x = 1.2;
+  mesh(new THREE.SphereGeometry(22, 24, 16), new THREE.MeshLambertMaterial({ color: 0x2bb5ff, emissive: 0x08304a, fog: false }), -160, 50, 260);
+})();
+
+// ================================================================ Gezegenler, köprüler, kapılar, yumurtalar
+const gateX = i => PLANETS[i].x + PLANETS[i].r + 2;
+const eggPos = p => ({ x: p.x, z: -p.r * 0.5 });
+const gates = [];
+const eggStands = [];
+function buildPlanets() {
+  PLANETS.forEach((p, i) => {
+    const ground = mesh(new THREE.CylinderGeometry(p.r, p.r * 0.72, 7, 64), lambert(p.ground), p.x, -3.5, 0);
+    ground.userData.ground = true;
+    const rim = mesh(new THREE.TorusGeometry(p.r, 0.25, 8, 96), new THREE.MeshBasicMaterial({ color: p.accent }), p.x, 0.05, 0);
+    rim.rotation.x = Math.PI / 2;
+    // Süsler kenar halkasında: oyun alanını kapatmasın
+    for (let k = 0; k < 18; k++) {
+      const a = Math.random() * Math.PI * 2, rr = rand(p.r * 0.8, p.r * 0.95);
+      const x = p.x + Math.cos(a) * rr, z = Math.sin(a) * rr;
+      if (Math.abs(z) < 4) continue; // köprü ağızları açık kalsın
+      if (p.id === "ay") { const c = mesh(new THREE.CircleGeometry(rand(1, 2.6), 20), lambert(0x6c6f78), x, 0.03, z); c.rotation.x = -Math.PI / 2; }
+      else if (p.id === "mars") mesh(new THREE.DodecahedronGeometry(rand(0.6, 1.6)), lambert(0x7a2e18), x, 0.4, z);
+      else { const s = mesh(new THREE.ConeGeometry(rand(0.4, 0.9), rand(1.6, 4), 6), lambert(0xbff6ff, { transparent: true, opacity: 0.85, emissive: 0x0b3a48 }), x, 1.2, z); s.rotation.z = rand(-0.2, 0.2); }
+    }
+    const sign = makeLabel(16, 4);
+    sign.draw("s", (g, w, h) => outlined(g, `${p.icon} ${p.name}`, w / 2, h / 2, w - 30, 92));
+    sign.sprite.position.set(p.x, 11, -p.r * 0.85);
+    scene.add(sign.sprite);
+
+    // Yumurta standı
+    const ep = eggPos(p);
+    mesh(new THREE.CylinderGeometry(2.2, 2.6, 1, 32), lambert(0x2a3360), ep.x, 0.5, ep.z);
+    mesh(new THREE.CylinderGeometry(2.3, 2.3, 0.12, 32), new THREE.MeshBasicMaterial({ color: p.accent }), ep.x, 1.02, ep.z);
+    const egg = mesh(new THREE.SphereGeometry(1.25, 24, 18), lambert(EGGS[p.egg].color, { emissive: 0x111122 }), ep.x, 2.9, ep.z);
+    egg.scale.y = 1.3;
+    for (let k = 0; k < 7; k++) {
+      const a = k * 0.9, yy = rand(-0.6, 0.6);
+      mesh(new THREE.SphereGeometry(0.2, 8, 6), lambert(p.accent), Math.cos(a) * 1.15 * Math.sqrt(1 - yy * yy * 0.4), yy * 1.0, Math.sin(a) * 1.15, egg);
+    }
+    const lab = makeLabel(9, 2.4);
+    lab.sprite.position.set(ep.x, 6.2, ep.z);
+    scene.add(lab.sprite);
+    eggStands.push({ planet: i, x: ep.x, z: ep.z, egg, label: lab });
+
+    // Köprü + kapı
+    if (i < PLANETS.length - 1) {
+      const b = PLANETS[i + 1];
+      const x0 = p.x + p.r - 1, x1 = b.x - b.r + 1;
+      mesh(new THREE.BoxGeometry(x1 - x0, 1, 4), lambert(0x3a4170), (x0 + x1) / 2, -0.5, 0);
+      for (const s of [-1, 1]) mesh(new THREE.BoxGeometry(x1 - x0, 0.25, 0.25), new THREE.MeshBasicMaterial({ color: b.accent }), (x0 + x1) / 2, 0.6, s * 2);
+      const gx = gateX(i);
+      const g = new THREE.Group();
+      mesh(new THREE.BoxGeometry(0.4, 5, 4.4), new THREE.MeshBasicMaterial({ color: b.accent, transparent: true, opacity: 0.35, side: THREE.DoubleSide }), 0, 2.5, 0, g);
+      for (const s of [-1, 1]) mesh(new THREE.BoxGeometry(0.8, 6, 0.8), lambert(0x2a3360), 0, 3, s * 2.6, g);
+      mesh(new THREE.BoxGeometry(0.8, 0.8, 6), lambert(0x2a3360), 0, 6.2, 0, g);
+      g.position.set(gx, 0, 0);
+      scene.add(g);
+      const gl = makeLabel(10, 2.5);
+      gl.draw("g", (c, w, h) => { outlined(c, `🔒 ${b.icon} ${b.name}`, w / 2, h * 0.32, w - 30, 56); outlined(c, `💫 ${fmt(b.gate)}`, w / 2, h * 0.72, w - 30, 52, "#b9e6ff"); });
+      gl.sprite.position.set(gx, 8.2, 0);
+      scene.add(gl.sprite);
+      gates.push({ planet: i + 1, x: gx, z: 0, group: g, label: gl });
+    }
+  });
+  refreshGates();
+}
+function refreshGates() {
+  for (const g of gates) { g.group.visible = !save.unlocked[g.planet]; g.label.sprite.visible = g.group.visible; }
+}
+
+// Yürünebilir alan: açık gezegen diskleri + köprüler (kilitli kapıyı geçemezsin)
+function walkable(x, z) {
+  for (let i = 0; i < PLANETS.length; i++) {
+    const p = PLANETS[i];
+    if (save.unlocked[i] && Math.hypot(x - p.x, z) <= p.r - 0.8) return true;
+  }
+  for (let i = 0; i < PLANETS.length - 1; i++) {
+    const a = PLANETS[i], b = PLANETS[i + 1];
+    if (x >= a.x + a.r - 3 && x <= b.x - b.r + 3 && Math.abs(z) <= 1.6) {
+      if (!save.unlocked[i]) return false;
+      if (!save.unlocked[i + 1] && x > gateX(i) - 0.8) return false;
+      return true;
+    }
+  }
+  return false;
+}
+function planetAt(x, z) {
+  for (let i = 0; i < PLANETS.length; i++) if (Math.hypot(x - PLANETS[i].x, z) <= PLANETS[i].r + 1) return i;
+  return -1;
+}
+
+// ================================================================ Kristaller (Roblox: CrystalService)
+const crystals = [];
+function placeCrystal(c) {
+  const p = PLANETS[c.planet], ep = eggPos(p);
+  for (let t = 0; t < 40; t++) {
+    const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * (p.r - 4);
+    const x = p.x + Math.cos(a) * r, z = Math.sin(a) * r;
+    if (Math.hypot(x - ep.x, z - ep.z) < 6 || Math.hypot(x - p.x, z) < 4) continue;
+    if (Math.abs(z) < 3 && Math.abs(x - p.x) > p.r - 7) continue;
+    if (crystals.some(o => o !== c && o.alive && o.planet === c.planet && Math.hypot(o.x - x, o.z - z) < 3)) continue;
+    c.x = x; c.z = z; break;
+  }
+  c.hp = c.max; c.alive = true; c.mesh.visible = true;
+  c.mesh.position.set(c.x, c.def.size * 1.4, c.z);
+  c.spin = rand(0.3, 0.8);
+}
+function buildCrystals() {
+  PLANETS.forEach((p, pi) => {
+    const pool = p.crystals.flatMap((d, ti) => Array(d.w).fill(ti));
+    for (let k = 0; k < CRYSTALS_PER_PLANET; k++) {
+      const tier = pool[k % pool.length], def = p.crystals[tier];
+      const col = new THREE.Color(p.accent).offsetHSL(tier * 0.04, 0, tier * 0.05);
+      const m = new THREE.Mesh(new THREE.OctahedronGeometry(def.size), lambert(col, { emissive: col.clone().multiplyScalar(0.35), transparent: true, opacity: 0.95 }));
+      m.scale.y = 1.4;
+      scene.add(m);
+      const c = { planet: pi, tier, def, max: def.hp, hp: def.hp, x: 0, z: 0, alive: true, mesh: m, respawnT: 0, punch: 0, label: makeLabel(3.2, 0.8, 256, 64) };
+      m.userData.crystal = c;
+      c.label.sprite.visible = false;
+      scene.add(c.label.sprite);
+      crystals.push(c);
+      placeCrystal(c);
+    }
+  });
+}
+let target = null;
+function hitCrystal(c, dmg) {
+  if (!c.alive) return;
+  c.hp -= dmg;
+  if (c.hp <= 0) breakCrystal(c);
+}
+function breakCrystal(c) {
+  c.alive = false;
+  c.mesh.visible = false;
+  c.label.sprite.visible = false;
+  c.respawnT = rand(3, 6);
+  SFX.break();
+  const n = 3 + c.tier * 3, value = c.def.drop / n;
+  for (let i = 0; i < n; i++) spawnOrb(c.x, c.def.size * 1.4, c.z, value, PLANETS[c.planet].accent);
+  floatText(`+${fmt(c.def.drop * (save.passes.double ? 2 : 1))}`, c.x, c.def.size * 2.8 + 1, c.z);
+  if (target === c) target = null;
+}
+
+// Toz küreleri: patlar, sonra oyuncuya çekilir
+const orbs = [];
+const orbGeo = new THREE.SphereGeometry(0.2, 8, 6);
+function spawnOrb(x, y, z, value, color) {
+  const m = mesh(orbGeo, new THREE.MeshBasicMaterial({ color }), x, y, z);
+  const a = Math.random() * Math.PI * 2, s = rand(2, 5);
+  orbs.push({ m, x, y, z, vx: Math.cos(a) * s, vy: rand(4, 7), vz: Math.sin(a) * s, value, t: 0 });
+}
+function updateOrbs(dt) {
+  for (let i = orbs.length - 1; i >= 0; i--) {
+    const o = orbs[i];
+    o.t += dt;
+    if (o.t < 0.45) { o.vy -= 14 * dt; o.y = Math.max(0.3, o.y + o.vy * dt); o.x += o.vx * dt; o.z += o.vz * dt; }
+    else {
+      const dx = player.x - o.x, dy = player.y + 1.4 - o.y, dz = player.z - o.z, d = Math.hypot(dx, dy, dz);
+      const sp = 10 + o.t * 30;
+      if (d < 0.8) { Server.addDust(o.value); SFX.orb(); scene.remove(o.m); o.m.material.dispose(); orbs.splice(i, 1); continue; }
+      o.x += dx / d * sp * dt; o.y += dy / d * sp * dt; o.z += dz / d * sp * dt;
+    }
+    o.m.position.set(o.x, o.y, o.z);
+  }
+}
+const floats = [];
+function floatText(text, x, y, z) {
+  const l = makeLabel(4, 1, 256, 64);
+  l.draw(text, (g, w, h) => outlined(g, text, w / 2, h / 2, w - 10, 48, "#b9e6ff"));
+  l.sprite.position.set(x, y, z);
+  scene.add(l.sprite);
+  floats.push({ l, t: 0 });
+}
+function updateFloats(dt) {
+  for (let i = floats.length - 1; i >= 0; i--) {
+    const f = floats[i];
+    f.t += dt;
+    f.l.sprite.position.y += dt * 1.6;
+    f.l.sprite.material.opacity = 1 - f.t;
+    if (f.t >= 1) { scene.remove(f.l.sprite); f.l.tex.dispose(); f.l.sprite.material.dispose(); floats.splice(i, 1); }
+  }
+}
+
+// ================================================================ Oyuncu (avatar platformdan gelir)
+const player = { x: 0, y: 0, z: 6, vy: 0, face: Math.PI, moving: false, walk: 0, group: null, parts: null };
+const DEFAULT_AVATAR = { skin: "#ffdbac", shirt: "#118ab2", pants: "#2b2d42", hat: "helmet", hatColor: "#e63946", face: "smile" };
+function drawFace(kind) {
+  const c = document.createElement("canvas"); c.width = c.height = 128;
+  const x = c.getContext("2d");
+  x.fillStyle = "#1b1b1b"; x.strokeStyle = "#1b1b1b"; x.lineWidth = 7; x.lineCap = "round";
+  if (kind === "cool") { x.fillRect(22, 40, 36, 18); x.fillRect(70, 40, 36, 18); x.fillRect(56, 44, 16, 5); }
+  else { x.beginPath(); x.ellipse(44, 50, 7, kind === "wow" ? 12 : 10, 0, 0, 7); x.ellipse(84, 50, 7, kind === "wow" ? 12 : 10, 0, 0, 7); x.fill(); }
+  x.beginPath();
+  if (kind === "wow") { x.ellipse(64, 92, 10, 13, 0, 0, 7); x.fill(); }
+  else if (kind === "grin") { x.moveTo(36, 82); x.quadraticCurveTo(64, 116, 92, 82); x.closePath(); x.fill(); }
+  else { x.arc(64, 74, 26, 0.25 * Math.PI, 0.75 * Math.PI); x.stroke(); }
+  return c;
+}
+// Platformdaki blok avatarın aynısı (yükseklik ~5 → 0.55 ölçek)
+function buildAvatar(a) {
+  const g = new THREE.Group(), inner = new THREE.Group();
+  g.add(inner); inner.scale.setScalar(0.55);
+  const part = (w, h, d, c, x, y, z) => mesh(new THREE.BoxGeometry(w, h, d), lambert(c), x, y, z, inner);
+  const legs = [part(0.9, 2, 1, a.pants, -0.5, 1, 0), part(0.9, 2, 1, a.pants, 0.5, 1, 0)];
+  legs.forEach(l => { l.geometry.translate(0, -1, 0); l.position.y = 2; });
+  part(2, 2, 1, a.shirt, 0, 3, 0);
+  const arms = [part(0.9, 2, 1, a.skin, -1.45, 3, 0), part(0.9, 2, 1, a.skin, 1.45, 3, 0)];
+  arms.forEach(l => { l.geometry.translate(0, -0.8, 0); l.position.y = 3.8; });
+  mesh(new THREE.CylinderGeometry(0.62, 0.62, 1.2, 20), lambert(a.skin), 0, 4.6, 0, inner);
+  mesh(new THREE.PlaneGeometry(0.9, 0.9), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(drawFace(a.face)), transparent: true }), 0, 4.6, 0.63, inner);
+  const hc = a.hatColor || "#e63946";
+  if (a.hat === "cap") { mesh(new THREE.CylinderGeometry(0.66, 0.66, 0.35, 20), lambert(hc), 0, 5.3, 0, inner); part(1.1, 0.08, 0.6, hc, 0, 5.15, 0.75); }
+  else if (a.hat === "crown") {
+    mesh(new THREE.CylinderGeometry(0.6, 0.55, 0.4, 8, 1, true), lambert("#ffd166", { side: THREE.DoubleSide }), 0, 5.4, 0, inner);
+    for (let i = 0; i < 6; i++) { const an = i / 6 * Math.PI * 2; mesh(new THREE.ConeGeometry(0.1, 0.3, 4), lambert("#ffd166"), Math.cos(an) * 0.55, 5.7, Math.sin(an) * 0.55, inner); }
+  } else if (a.hat === "headphones") {
+    mesh(new THREE.TorusGeometry(0.7, 0.07, 8, 20, Math.PI), lambert(hc), 0, 4.75, 0, inner);
+    part(0.25, 0.5, 0.5, hc, -0.7, 4.6, 0); part(0.25, 0.5, 0.5, hc, 0.7, 4.6, 0);
+  } else if (a.hat === "helmet") {
+    mesh(new THREE.SphereGeometry(0.95, 20, 14), lambert("#cfe8ff", { transparent: true, opacity: 0.35 }), 0, 4.65, 0, inner);
+  }
+  const shadow = mesh(new THREE.CircleGeometry(0.75, 20), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.3 }), 0, 0.03, 0, g);
+  shadow.rotation.x = -Math.PI / 2;
+  return { group: g, legs, arms };
+}
+function rebuildAvatar() {
+  if (player.group) scene.remove(player.group);
+  const built = buildAvatar((platform.profile && platform.profile.avatar) || DEFAULT_AVATAR);
+  player.group = built.group; player.parts = built;
+  scene.add(player.group);
+}
+
+// ================================================================ Hayvan modelleri ve takip
+function makePetMesh(pet) {
+  const d = PETS[pet.sp];
+  const g = new THREE.Group(), inner = new THREE.Group();
+  g.add(inner);
+  let mat;
+  if (pet.v === "g") mat = lambert(0xffcf33, { emissive: 0x5a4000 });
+  else if (pet.v === "r") mat = lambert(0xff0000, { emissive: 0x202020 });
+  else mat = lambert(d.color, { emissive: d.glow || 0x000000 });
+  const black = new THREE.MeshBasicMaterial({ color: 0x111111 }), white = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  const body = mesh(new THREE.SphereGeometry(0.5, 16, 12), mat, 0, 0.55, 0, inner); body.scale.set(1, 0.9, 1.1);
+  mesh(new THREE.SphereGeometry(0.4, 16, 12), mat, 0, 1.05, 0.32, inner);
+  for (const s of [-1, 1]) { mesh(new THREE.SphereGeometry(0.075, 8, 6), black, s * 0.15, 1.12, 0.68, inner); mesh(new THREE.SphereGeometry(0.03, 6, 4), white, s * 0.13, 1.15, 0.745, inner); }
+  const sh = d.shape;
+  for (const s of [-1, 1]) {
+    if (sh.ears === "long") { const e = mesh(new THREE.BoxGeometry(0.12, 0.55, 0.08), mat, s * 0.16, 1.58, 0.25, inner); e.rotation.z = s * -0.12; }
+    if (sh.ears === "tri") { const e = mesh(new THREE.ConeGeometry(0.14, 0.32, 4), mat, s * 0.22, 1.45, 0.28, inner); e.rotation.z = s * -0.3; }
+    if (sh.ears === "round") mesh(new THREE.SphereGeometry(0.15, 10, 8), mat, s * 0.3, 1.38, 0.26, inner);
+    if (sh.horns) mesh(new THREE.ConeGeometry(0.06, 0.25, 6), lambert(0xffe08a), s * 0.13, 1.47, 0.42, inner);
+  }
+  if (sh.beak) { const b = mesh(new THREE.ConeGeometry(0.08, 0.22, 6), lambert(0xffa630), 0, 1.0, 0.78, inner); b.rotation.x = Math.PI / 2; }
+  if (sh.tail) { const t = mesh(new THREE.CylinderGeometry(0.05, 0.11, 0.6, 6), mat, 0, 0.55, -0.62, inner); t.rotation.x = -1.0; }
+  const wings = [];
+  if (sh.wings) for (const s of [-1, 1]) {
+    const pv = new THREE.Group(); pv.position.set(s * 0.4, 0.78, -0.05); inner.add(pv);
+    mesh(new THREE.BoxGeometry(0.8, 0.05, 0.45), mat, s * 0.4, 0, 0, pv);
+    wings.push({ pv, s });
+  }
+  const shadow = mesh(new THREE.CircleGeometry(0.5, 16), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.25 }), 0, 0.03, 0);
+  shadow.rotation.x = -Math.PI / 2;
+  g.scale.setScalar({ C: 0.8, U: 0.85, R: 0.95, E: 1.1, L: 1.3 }[d.rarity]);
+  scene.add(g);
+  return { g, inner, wings, mat, rainbow: pet.v === "r", shadow, x: player.x, z: player.z, h: 0 };
+}
+const petObjs = new Map(); // uid → model
+function syncPetObjs() {
+  const eq = save.pets.filter(p => p.eq);
+  const keep = new Set(eq.map(p => p.uid));
+  for (const [uid, o] of petObjs) if (!keep.has(uid)) {
+    scene.remove(o.g, o.shadow);
+    o.g.traverse(m => { if (m.geometry) m.geometry.dispose(); });
+    petObjs.delete(uid);
+  }
+  for (const p of eq) if (!petObjs.has(p.uid)) petObjs.set(p.uid, makePetMesh(p));
+}
+function totalPower() { return save.pets.filter(p => p.eq).reduce((s, p) => s + petPower(p), 0); }
+const clickDamage = () => 5 + totalPower() * 0.1;
+
+function updatePets(dt, t) {
+  const eq = save.pets.filter(p => p.eq);
+  if (target && (!target.alive || Math.hypot(target.x - player.x, target.z - player.z) > CLICK_RANGE + 5)) target = null;
+  if (!target && save.auto) {
+    const here = planetAt(player.x, player.z);
+    let best = null, bd = 30;
+    for (const c of crystals) if (c.alive && c.planet === here) { const d = Math.hypot(c.x - player.x, c.z - player.z); if (d < bd) { bd = d; best = c; } }
+    target = best;
+  }
+  eq.forEach((pet, i) => {
+    const o = petObjs.get(pet.uid);
+    if (!o) return;
+    let tx, tz, attacking = false;
+    const tg = target; // önceki hayvan kristali kırdıysa target bu turda null olabilir
+    if (tg) {
+      const a = i / eq.length * Math.PI * 2 + t * 0.9, rr = tg.def.size + 1.3;
+      tx = tg.x + Math.cos(a) * rr; tz = tg.z + Math.sin(a) * rr;
+      attacking = true;
+    } else {
+      const a = player.face + Math.PI + (i - (eq.length - 1) / 2) * 0.55;
+      tx = player.x + Math.sin(a) * 2.8; tz = player.z + Math.cos(a) * 2.8;
+    }
+    const k = Math.min(1, dt * (attacking ? 5 : 7));
+    o.x += (tx - o.x) * k; o.z += (tz - o.z) * k;
+    let face;
+    if (attacking && Math.hypot(o.x - tg.x, o.z - tg.z) < tg.def.size + 2.2) {
+      hitCrystal(tg, petPower(pet) * dt);
+      o.h = Math.abs(Math.sin(t * 9 + i)) * 0.7;
+      face = Math.atan2(tg.x - o.x, tg.z - o.z);
+    } else {
+      o.h = 0.35 + Math.sin(t * 3 + i) * 0.15;
+      face = Math.hypot(tx - o.x, tz - o.z) > 0.3 ? Math.atan2(tx - o.x, tz - o.z) : player.face;
+    }
+    o.g.position.set(o.x, o.h, o.z);
+    o.g.rotation.y = face;
+    o.shadow.position.set(o.x, 0.03, o.z);
+    for (const w of o.wings) w.pv.rotation.z = w.s * Math.sin(t * 14 + i) * 0.6;
+    if (o.rainbow) o.mat.color.setHSL((t * 0.25 + i * 0.2) % 1, 0.85, 0.6);
+  });
+}
+
+// ================================================================ Kamera ve hareket
+const cam = { yaw: 0, pitch: 0.55, dist: 15 };
+const keys = new Set();
+const stick = { id: null, ox: 0, oy: 0, x: 0, y: 0 };
+function updatePlayer(dt) {
+  if (keys.has("ArrowLeft")) cam.yaw += 2 * dt;
+  if (keys.has("ArrowRight")) cam.yaw -= 2 * dt;
+  let fwd = 0, side = 0;
+  if (keys.has("KeyW") || keys.has("ArrowUp")) fwd += 1;
+  if (keys.has("KeyS") || keys.has("ArrowDown")) fwd -= 1;
+  if (keys.has("KeyA")) side -= 1;
+  if (keys.has("KeyD")) side += 1;
+  fwd -= stick.y; side += stick.x;
+  const len = Math.hypot(fwd, side);
+  player.moving = len > 0.05;
+  if (player.moving) {
+    const k = Math.min(1, len) / len;
+    const fx = -Math.sin(cam.yaw), fz = -Math.cos(cam.yaw), rx = Math.cos(cam.yaw), rz = -Math.sin(cam.yaw);
+    const mx = (fx * fwd + rx * side) * k, mz = (fz * fwd + rz * side) * k;
+    const nx = player.x + mx * PLAYER_SPEED * dt, nz = player.z + mz * PLAYER_SPEED * dt;
+    if (walkable(nx, nz)) { player.x = nx; player.z = nz; }
+    else if (walkable(nx, player.z)) player.x = nx;
+    else if (walkable(player.x, nz)) player.z = nz;
+    player.face = Math.atan2(mx, mz);
+    player.walk += dt * 10;
+  }
+  player.vy -= 30 * dt;
+  player.y = Math.max(0, player.y + player.vy * dt);
+  if (player.y === 0) player.vy = Math.max(0, player.vy);
+  if (!walkable(player.x, player.z)) { player.x = PLANETS[0].x; player.z = 6; } // güvenlik: dışarı düştüysen
+}
+function jump() { if (player.y === 0) { player.vy = 11; SFX.jump(); } }
+function syncCamera(dt) {
+  const tx = player.x + Math.sin(cam.yaw) * Math.cos(cam.pitch) * cam.dist;
+  const tz = player.z + Math.cos(cam.yaw) * Math.cos(cam.pitch) * cam.dist;
+  const ty = player.y + 2 + Math.sin(cam.pitch) * cam.dist;
+  const k = Math.min(1, dt * 10);
+  camera.position.x += (tx - camera.position.x) * k;
+  camera.position.y += (ty - camera.position.y) * k;
+  camera.position.z += (tz - camera.position.z) * k;
+  camera.lookAt(player.x, player.y + 2, player.z);
+}
+
+// ================================================================ Etkileşim
+let nearAct = null;
+function nearestAction() {
+  for (const e of eggStands) if (save.unlocked[e.planet] && Math.hypot(e.x - player.x, e.z - player.z) < 5.5) return { kind: "egg", e };
+  for (const g of gates) if (!save.unlocked[g.planet] && save.unlocked[g.planet - 1] && Math.hypot(g.x - player.x, g.z - player.z) < 5) return { kind: "gate", g };
+  return null;
+}
+function actionText(a) {
+  if (a.kind === "egg") { const eg = EGGS[PLANETS[a.e.planet].egg]; return `🥚 ${eg.name} · 💫 ${fmt(eg.price)}`; }
+  const p = PLANETS[a.g.planet];
+  return `🔓 ${p.icon} ${p.name} kapısını aç · 💫 ${fmt(p.gate)}`;
+}
+function act() {
+  const a = nearAct;
+  if (!a) return;
+  if (a.kind === "egg") openEggMenu(PLANETS[a.e.planet].egg);
+  else {
+    const r = Server.buyGate(a.g.planet);
+    if (r.err) { notify(r.err); SFX.error(); return; }
+    SFX.gate(); refreshGates(); renderTravel();
+    notify(`${PLANETS[a.g.planet].icon} ${PLANETS[a.g.planet].name} açıldı! Yeni kristaller ve yumurta seni bekliyor.`);
+  }
+}
+
+// Kristale tıklama
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+function tapAt(cx, cy) {
+  initAudio();
+  ndc.set(cx / innerWidth * 2 - 1, -(cy / innerHeight) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  const hits = ray.intersectObjects(crystals.filter(c => c.alive).map(c => c.mesh));
+  if (!hits.length) return;
+  const c = hits[0].object.userData.crystal;
+  if (Math.hypot(c.x - player.x, c.z - player.z) > CLICK_RANGE) { notify("Çok uzak! Biraz yaklaş"); return; }
+  target = c;
+  c.punch = 0.18;
+  SFX.hit();
+  hitCrystal(c, clickDamage());
+}
+
+// ================================================================ HUD
+function renderTravel() {
+  $("travel").innerHTML = PLANETS.map((p, i) => save.unlocked[i] ? `<button data-go="${i}">${p.icon} ${p.name}</button>` : "").join("");
+}
+function updateHud() {
+  setText($("dust"), "💫 " + fmt(save.dust));
+  const eqN = Server.equippedCount();
+  setText($("power"), `⚔️ ${fmt(totalPower())}/sn · 🐾 ${eqN}/${Server.maxEquip()}${save.passes.double ? " · ✨2x" : ""}`);
+  const here = planetAt(player.x, player.z);
+  for (const b of $("travel").children) b.classList.toggle("on", +b.dataset.go === here);
+  const a = nearAct;
+  const btn = $("btnAction");
+  btn.style.display = a ? "block" : "none";
+  if (a) setText(btn.lastChild, actionText(a));
+  let hint;
+  if (!save.stats.eggs && save.dust >= EGGS.ay.price) hint = "🥚 Yumurta standına git ve E ile aç!";
+  else if (save.unlocked[1] === false && save.dust >= PLANETS[1].gate) hint = "🔓 Mars kapısını açabilirsin! Doğudaki köprüye git";
+  else if (save.unlocked[2] === false && save.unlocked[1] && save.dust >= PLANETS[2].gate) hint = "🔓 Kriyo kapısını açabilirsin!";
+  else if (!target && !save.auto) hint = "Kristale tıkla, hayvanların saldırsın!";
+  else hint = "";
+  setText($("hint"), hint);
+  $("hint").style.display = hint ? "block" : "none";
+}
+
+function syncCrystals(dt, t) {
+  for (const c of crystals) {
+    if (!c.alive) {
+      c.respawnT -= dt;
+      if (c.respawnT <= 0) placeCrystal(c);
+      continue;
+    }
+    c.punch = Math.max(0, c.punch - dt);
+    const s = 1 + c.punch * 1.5;
+    c.mesh.scale.set(s, 1.4 * s, s);
+    c.mesh.rotation.y += c.spin * dt;
+    c.mesh.position.y = c.def.size * 1.4 + Math.sin(t * 1.5 + c.x) * 0.15;
+    const show = c.hp < c.max;
+    c.label.sprite.visible = show;
+    if (show) {
+      const ratio = clamp(c.hp / c.max, 0, 1);
+      c.label.sprite.position.set(c.x, c.def.size * 2.8 + 0.8, c.z);
+      c.label.draw(Math.round(ratio * 40), (g, w, h) => {
+        g.fillStyle = "rgba(0,0,0,0.6)"; g.fillRect(4, 18, w - 8, 30);
+        g.fillStyle = target === c ? "#6ee7a0" : "#5cc8ff"; g.fillRect(8, 22, (w - 16) * ratio, 22);
+        outlined(g, fmt(Math.ceil(c.hp)), w / 2, 33, w - 20, 26);
+      });
+    }
+  }
+  for (const e of eggStands) {
+    e.egg.rotation.y += dt * 0.6;
+    e.egg.position.y = 2.9 + Math.sin(t * 2 + e.planet) * 0.2;
+    const eg = EGGS[PLANETS[e.planet].egg], can = save.dust >= eg.price;
+    e.label.draw(eg.name + can, (g, w, h) => { outlined(g, `🥚 ${eg.name}`, w / 2, h * 0.32, w - 30, 52); outlined(g, `💫 ${fmt(eg.price)}`, w / 2, h * 0.72, w - 30, 48, can ? "#ffd166" : "#bbbbbb"); });
+  }
+}
+function syncPlayer(t) {
+  const g = player.group;
+  if (!g) return;
+  g.position.set(player.x, player.y, player.z);
+  g.rotation.y = player.face;
+  const sw = player.moving ? Math.sin(player.walk) * 0.7 : 0;
+  player.parts.legs[0].rotation.x = sw; player.parts.legs[1].rotation.x = -sw;
+  player.parts.arms[0].rotation.x = -sw; player.parts.arms[1].rotation.x = sw;
+}
+
+// ================================================================ Arayüz: hayvanlar
+let selUid = null, delArm = 0;
+function petCard(p, extra = "") {
+  const d = PETS[p.sp];
+  return `<button class="pet r-${d.rarity} v-${p.v} ${p.uid === selUid ? "sel" : ""}" data-uid="${p.uid}" ${extra}>
+    ${p.eq ? '<span class="eq">✅</span>' : ""}<div class="ic">${d.icon}</div><div class="pw">⚔️ ${fmt(petPower(p))}</div>
+    <div class="nm">${p.v !== "n" ? VARIANTS[p.v].name + " " : ""}${d.name}</div></button>`;
+}
+function renderPets() {
+  const sorted = save.pets.slice().sort((a, b) => (b.eq - a.eq) || (petPower(b) - petPower(a)));
+  $("petsInfo").textContent = `Envanter ${save.pets.length}/${MAX_PETS} · Kuşanılan ${Server.equippedCount()}/${Server.maxEquip()} · Toplam güç ⚔️ ${fmt(totalPower())}/sn`;
+  $("petGrid").innerHTML = sorted.map(p => petCard(p)).join("");
+  const det = $("petDetail");
+  const info = selUid && Server.mergeInfo(selUid);
+  if (!info) { det.style.display = "none"; return; }
+  const p = info.p, d = PETS[p.sp];
+  det.style.display = "block";
+  det.innerHTML = `<div style="display:flex;gap:12px;align-items:center"><div style="font-size:52px">${d.icon}</div><div>
+    <b style="font-size:18px">${petLabel(p)}</b><div class="muted">${RARITY[d.rarity].name} · ⚔️ ${fmt(petPower(p))}/sn${p.v !== "n" ? ` (×${VARIANTS[p.v].mult})` : ""}</div></div></div>
+    <div class="rowb">
+      <button class="btn ${p.eq ? "" : "go"}" id="pdEquip">${p.eq ? "Çıkar" : "Kuşan"}</button>
+      <button class="btn blue" id="pdMerge" ${info.next && info.count >= MERGE_COUNT ? "" : "disabled"}>${info.next ? `🌟 ${VARIANTS[info.next].name} yap (${Math.min(info.count, MERGE_COUNT)}/${MERGE_COUNT})` : "🌈 En üst seviye"}</button>
+      <button class="btn red" id="pdDel">${delArm === p.uid ? "Emin misin?" : "🗑️ Sil"}</button>
+    </div>`;
+  $("pdEquip").onclick = () => { const r = Server.equip(p.uid, !p.eq); if (r.err) notify(r.err); syncPetObjs(); renderPets(); };
+  $("pdMerge").onclick = () => {
+    const r = Server.merge(p.uid);
+    if (r.err) { notify(r.err); return; }
+    selUid = r.pet.uid; syncPetObjs(); renderPets(); SFX.reveal(r.pet.v === "r" ? "L" : "E");
+    notify(`🌟 ${petLabel(r.pet)} oluşturuldu! (×${VARIANTS[r.pet.v].mult} güç)`);
+  };
+  $("pdDel").onclick = () => {
+    if (delArm !== p.uid) { delArm = p.uid; renderPets(); return; }
+    const r = Server.remove(p.uid);
+    if (r.err) { notify(r.err); return; }
+    delArm = 0; selUid = null; syncPetObjs(); renderPets();
+  };
+}
+$("petGrid").addEventListener("click", e => {
+  const b = e.target.closest("[data-uid]");
+  if (!b) return;
+  selUid = +b.dataset.uid; delArm = 0; renderPets();
+});
+$("btnBest").onclick = () => { Server.equipBest(); syncPetObjs(); renderPets(); notify("⚡ En güçlü hayvanlar kuşanıldı"); };
+
+// ================================================================ Arayüz: yumurta
+let eggMenuId = null;
+function openEggMenu(id) {
+  eggMenuId = id;
+  const eg = EGGS[id];
+  $("eggTitle").textContent = `🥚 ${eg.name}`;
+  $("eggSub").textContent = `Bakiyen: 💫 ${fmt(save.dust)} · Şanslar sunucuda hesaplanır`;
+  const eggTotal = eg.pets.reduce((s, sp) => s + RARITY[PETS[sp].rarity].w, 0);
+  $("eggOdds").innerHTML = eg.pets.map(sp => {
+    const d = PETS[sp], r = RARITY[d.rarity];
+    return `<tr><td style="font-size:22px">${d.icon}</td><td><b style="color:var(--${d.rarity})">${save.seen[sp] ? d.name : "???"}</b><div class="muted">${r.name} · ⚔️ ${fmt(d.power)}</div></td>
+      <td>%${String(+(r.w / eggTotal * 100).toFixed(1)).replace(".", ",")}${r.w && r.w / eggTotal < 0.01 ? `<div class="muted">1/${Math.round(eggTotal / r.w)}</div>` : ""}</td></tr>`;
+  }).join("");
+  $("btnEgg1").textContent = `1 Aç · 💫 ${fmt(eg.price)}`;
+  $("btnEgg3").textContent = `3 Aç · 💫 ${fmt(eg.price * 3)}`;
+  $("btnEgg1").disabled = save.dust < eg.price;
+  $("btnEgg3").disabled = save.dust < eg.price * 3;
+  show("ovEgg");
+}
+function hatch(n) {
+  const r = Server.openEgg(eggMenuId, n);
+  if (r.err) { notify(r.err); SFX.error(); return; }
+  hide("ovEgg");
+  const stage = $("hatchStage");
+  stage.innerHTML = r.pets.map(() => `<div class="egg">🥚</div>`).join("");
+  $("btnHatchOk").style.display = "none";
+  show("hatch");
+  SFX.crack();
+  setTimeout(() => {
+    SFX.crack();
+    const best = r.pets.reduce((a, b) => RARITY_ORDER.indexOf(PETS[b.pet.sp].rarity) > RARITY_ORDER.indexOf(PETS[a.pet.sp].rarity) ? b : a);
+    stage.innerHTML = r.pets.map(({ pet, isNew }) => {
+      const d = PETS[pet.sp];
+      return `<div class="reveal r-${d.rarity}">${isNew ? '<span class="new">YENİ!</span>' : ""}<div class="ic">${d.icon}</div>
+        <b>${d.name}</b><div style="color:var(--${d.rarity});font-weight:700">${RARITY[d.rarity].name}</div><div class="muted">⚔️ ${fmt(d.power)}/sn</div></div>`;
+    }).join("");
+    SFX.reveal(PETS[best.pet.sp].rarity);
+    $("btnHatchOk").style.display = "block";
+    syncPetObjs();
+  }, 1300);
+}
+$("btnEgg1").onclick = () => hatch(1);
+$("btnEgg3").onclick = () => hatch(3);
+$("btnHatchOk").onclick = () => { hide("hatch"); if (eggMenuId && save.dust >= EGGS[eggMenuId].price) openEggMenu(eggMenuId); };
+
+// ================================================================ Arayüz: takas (çift onay)
+const trade = { bot: null, mine: [], theirs: [], myReady: false, botReady: false, countdown: 0, confirming: false, msg: "", timer: null };
+function ensureBotPets(bot) {
+  if (bot.pets && bot.pets.length) return;
+  const lvl = bot.total > 300000 ? 2 : bot.total > 20000 ? 1 : 0;
+  bot.pets = [];
+  for (let i = 0; i < 8; i++) {
+    const egg = PLANETS[Math.floor(Math.random() * (lvl + 1))].egg;
+    const v = Math.random() < 0.02 ? "r" : Math.random() < 0.12 ? "g" : "n";
+    bot.pets.push({ uid: "b" + Math.random().toString(36).slice(2), sp: Server.rollPet(egg), v });
+  }
+}
+function botOffer(bot) {
+  const list = bot.pets.slice().sort(() => Math.random() - 0.5);
+  return list.slice(0, 1 + (Math.random() < 0.4 ? 1 : 0)).map(p => p.uid);
+}
+const offerValue = (pets, uids) => uids.reduce((s, u) => { const p = pets.find(x => x.uid === u); return s + (p ? petValue(p) : 0); }, 0);
+function resetReady(reason) {
+  if ((trade.myReady || trade.botReady) && reason) trade.msg = reason;
+  trade.myReady = trade.botReady = trade.confirming = false;
+  trade.countdown = 0;
+  clearInterval(trade.timer);
+}
+function openTrade() { trade.bot = null; renderTrade(); show("ovTrade"); }
+function renderTrade() {
+  const card = $("tradeCard");
+  if (!trade.bot) {
+    card.innerHTML = `<h1>🔁 Takas</h1><div class="muted">Sunucudaki oyuncular (tarayıcı sürümünde botlar). Takas çift onaylıdır: iki taraf <b>Hazırım</b> der, 3 sn bekleme, sonra iki taraf <b>Onayla</b>.</div>
+      ${save.bots.slice(0, 5).map((b, i) => `<div class="botRow"><div class="av" style="background:hsl(${i * 70},60%,35%)">${b.face}</div><div><b>${b.name}</b><div class="muted">💫 ${fmt(b.total)} toplam</div></div>
+      <button class="btn blue" data-bot="${i}">Takas iste</button></div>`).join("")}
+      <div class="rowb"><button class="btn" data-close>Kapat</button></div>`;
+    return;
+  }
+  const bot = trade.bot;
+  const mv = offerValue(save.pets, trade.mine), tv = offerValue(bot.pets, trade.theirs);
+  const st = (ready, conf) => conf ? "✅✅ Onayladı" : ready ? "✅ Hazır" : "⏳ Düzenliyor";
+  card.innerHTML = `<h1>🔁 ${bot.face} ${bot.name} ile takas</h1>
+    <div class="tradeCols">
+      <div><h3>Senin teklifin (en fazla 4) · değer ${fmt(mv)}</h3><div class="offer"><div class="pets">${trade.mine.map(u => petCard(save.pets.find(p => p.uid === u), 'data-rm="1"')).join("") || '<div class="muted" style="padding:8px">Aşağıdan hayvan ekle</div>'}</div></div>
+        <div class="tState">Sen: ${st(trade.myReady, trade.confirming)}</div></div>
+      <div><h3>${bot.name} teklifi · değer ${fmt(tv)}</h3><div class="offer"><div class="pets">${trade.theirs.map(u => { const p = bot.pets.find(x => x.uid === u); return p ? petCard(p, "disabled") : ""; }).join("")}</div></div>
+        <div class="tState">${bot.name}: ${st(trade.botReady, false)}</div>
+        <button class="btn" id="tReroll" style="margin-top:6px">🎲 Başka teklif iste</button></div>
+    </div>
+    <div id="tradeMsg">${trade.msg || "Teklifini hazırla ve <b>Hazırım</b>'a bas."}</div>
+    <div class="rowb">
+      <button class="btn" id="tCancel">İptal</button>
+      <button class="btn blue" id="tReady" ${trade.myReady ? "disabled" : ""}>1️⃣ Hazırım</button>
+      <button class="btn go" id="tConfirm" ${trade.myReady && trade.botReady && trade.countdown === 0 && !trade.confirming ? "" : "disabled"}>2️⃣ Onayla${trade.countdown ? ` (${trade.countdown})` : ""}</button>
+    </div>
+    <h3>Envanterin (eklemek için dokun)</h3>
+    <div class="pets">${save.pets.filter(p => !trade.mine.includes(p.uid)).sort((a, b) => petPower(b) - petPower(a)).map(p => petCard(p, 'data-add="1"')).join("")}</div>`;
+  $("tCancel").onclick = () => { resetReady(); trade.bot = null; renderTrade(); };
+  $("tReroll").onclick = () => { trade.theirs = botOffer(bot); resetReady("Teklif değişti, onaylar sıfırlandı."); renderTrade(); };
+  $("tReady").onclick = () => {
+    if (!trade.mine.length) { trade.msg = "Önce en az bir hayvan ekle."; renderTrade(); return; }
+    trade.myReady = true; trade.msg = `${bot.name} teklifine bakıyor…`; renderTrade();
+    setTimeout(() => {
+      if (!trade.myReady || trade.bot !== bot) return;
+      const mv2 = offerValue(save.pets, trade.mine), tv2 = offerValue(bot.pets, trade.theirs);
+      if (mv2 >= tv2 * 0.9) {
+        trade.botReady = true; trade.countdown = 3;
+        trade.msg = `${bot.name}: “Anlaştık!” Son kez kontrol et. Onay 3 saniye sonra açılacak.`;
+        clearInterval(trade.timer);
+        trade.timer = setInterval(() => { trade.countdown = Math.max(0, trade.countdown - 1); if (!trade.countdown) clearInterval(trade.timer); renderTrade(); }, 1000);
+      } else {
+        trade.myReady = false;
+        trade.msg = `${bot.name}: “Bu az geldi, biraz daha ekler misin? 🙂” (istenen değer ≈ ${fmt(tv2 * 0.9)})`;
+      }
+      renderTrade();
+    }, 800);
+  };
+  $("tConfirm").onclick = () => {
+    trade.confirming = true; trade.msg = `${bot.name} onaylıyor…`; renderTrade();
+    setTimeout(() => {
+      if (!trade.confirming || trade.bot !== bot) return;
+      const r = Server.trade(bot, trade.mine, trade.theirs);
+      if (r.err) { trade.msg = "❌ " + r.err; resetReady(); renderTrade(); return; }
+      SFX.reveal("R");
+      notify(`🔁 Takas tamamlandı! ${bot.name} ile ${trade.theirs.length} hayvan aldın.`);
+      syncPetObjs();
+      trade.mine = []; trade.theirs = botOffer(bot); resetReady();
+      trade.msg = "✅ Takas başarılı! Yeni bir teklif hazırlayabilirsin.";
+      renderTrade();
+    }, 600);
+  };
+}
+$("tradeCard").addEventListener("click", e => {
+  const bb = e.target.closest("[data-bot]");
+  if (bb) {
+    const bot = save.bots[+bb.dataset.bot];
+    ensureBotPets(bot);
+    Object.assign(trade, { bot, mine: [], theirs: botOffer(bot), msg: `${bot.name} takas isteğini kabul etti.` });
+    resetReady(); renderTrade(); return;
+  }
+  const add = e.target.closest("[data-add]"), rm = e.target.closest("[data-rm]");
+  if (add) {
+    if (trade.mine.length >= 4) { trade.msg = "En fazla 4 hayvan koyabilirsin."; renderTrade(); return; }
+    trade.mine.push(+add.dataset.uid); resetReady("Teklif değişti, onaylar sıfırlandı."); renderTrade();
+  } else if (rm) {
+    trade.mine = trade.mine.filter(u => u !== +rm.dataset.uid); resetReady("Teklif değişti, onaylar sıfırlandı."); renderTrade();
+  }
+});
+
+// ================================================================ Arayüz: sıralama ve mağaza
+function renderLeader() {
+  const myName = (platform.profile && platform.profile.name) || "Sen";
+  const rows = save.bots.map(b => ({ name: b.name, total: b.total })).concat([{ name: myName, total: save.totalDust, me: true }])
+    .sort((a, b) => b.total - a.total);
+  $("lbTable").innerHTML = rows.map((r, i) => `<tr class="${r.me ? "me" : ""}"><td>${["🥇", "🥈", "🥉"][i] || i + 1}</td><td>${r.name}${r.me ? " (sen)" : ""}</td><td>💫 ${fmt(r.total)}</td></tr>`).join("");
+}
+function renderShop() {
+  const j = platform.profile ? platform.profile.jeton : null;
+  $("shopBal").textContent = j === null ? "" : `Robux bakiyen: R$ ${j}`;
+  $("shopList").innerHTML = PASSES.map(p => `<div class="shopItem"><div class="ic">${p.icon}</div><div><b>${p.name}</b><div class="muted">${p.desc}</div></div>
+    <button class="btn ${save.passes[p.id] ? "" : "go"}" data-pass="${p.id}" ${save.passes[p.id] ? "disabled" : ""}>${save.passes[p.id] ? "✓ Sende" : "R$ " + p.jeton}</button></div>`).join("");
+  $("shopNote").textContent = platform.inside ? "Robux, Küp Evreni'nin ortak parasıdır. Günlük ödül, oyun süresi ve rozetlerle kazanılır." : "Robux ile almak için oyunu Küp Evreni'nden aç (ana klasördeki index.html).";
+}
+$("shopList").addEventListener("click", e => {
+  const b = e.target.closest("[data-pass]");
+  if (!b) return;
+  const p = PASSES.find(x => x.id === b.dataset.pass);
+  if (save.passes[p.id]) return;
+  requestPurchase(p, ok => {
+    if (!ok) { notify("Satın alma iptal edildi"); return; }
+    save.passes[p.id] = true;
+    if (p.id === "slots") { Server.fillSlots(); syncPetObjs(); }
+    persist(true);
+    notify(`${p.icon} ${p.name} etkin!`);
+    renderShop();
+  });
+});
+
+// ================================================================ Overlay yönetimi
+const OVERLAYS = ["ovPets", "ovEgg", "hatch", "ovTrade", "ovLeader", "ovShop", "ovHelp"];
+const anyOverlay = () => OVERLAYS.some(id => $(id).classList.contains("show"));
+function show(id) { $(id).classList.add("show"); keys.clear(); }
+function hide(id) {
+  $(id).classList.remove("show");
+  if (id === "ovTrade") { resetReady(); trade.bot = null; }
+  if (id === "ovHelp" && !save.helpSeen) { save.helpSeen = true; persist(true); }
+}
+document.querySelectorAll(".overlay").forEach(o => o.addEventListener("click", e => {
+  if (e.target.closest("[data-close]")) hide(o.id);
+}));
+$("bPets").onclick = () => { selUid = null; renderPets(); show("ovPets"); };
+$("bTrade").onclick = openTrade;
+$("bLeader").onclick = () => { renderLeader(); show("ovLeader"); };
+$("bShop").onclick = () => { renderShop(); show("ovShop"); };
+$("bHelp").onclick = () => show("ovHelp");
+$("btnAuto").onclick = () => toggleAuto();
+$("btnAction").onclick = () => act();
+$("travel").addEventListener("click", e => {
+  const b = e.target.closest("[data-go]");
+  if (!b) return;
+  const p = PLANETS[+b.dataset.go];
+  player.x = p.x; player.z = 6; target = null;
+  for (const o of petObjs.values()) { o.x = player.x; o.z = player.z; }
+});
+function toggleAuto() {
+  save.auto = !save.auto;
+  $("btnAuto").classList.toggle("on", save.auto);
+  $("btnAuto").textContent = `🤖 Otomatik: ${save.auto ? "Açık" : "Kapalı"}`;
+  if (!save.auto) target = null;
+  persist(true);
+}
+
+// ================================================================ Girdi
+addEventListener("keydown", e => {
+  if (e.repeat) return;
+  initAudio();
+  if (anyOverlay()) { if (e.code === "Escape") OVERLAYS.forEach(id => $(id).classList.contains("show") && id !== "hatch" && hide(id)); return; }
+  keys.add(e.code);
+  if (e.code === "KeyE") act();
+  if (e.code === "KeyQ") toggleAuto();
+  if (e.code === "Space") { jump(); e.preventDefault(); }
+  if (e.code.startsWith("Arrow")) e.preventDefault();
+});
+addEventListener("keyup", e => keys.delete(e.code));
+addEventListener("blur", () => keys.clear());
+addEventListener("wheel", e => { if (!anyOverlay()) cam.dist = clamp(cam.dist + Math.sign(e.deltaY) * 1.5, 8, 28); }, { passive: true });
+
+const ptrs = new Map(); // dokunma/fare: kamera sürükleme ve tıklama ayrımı
+canvas.addEventListener("pointerdown", e => {
+  initAudio();
+  const p = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t: performance.now(), moved: false, stick: false };
+  if (e.pointerType !== "mouse" && e.clientX < innerWidth / 2 && stick.id === null) {
+    p.stick = true; stick.id = e.pointerId; stick.ox = e.clientX; stick.oy = e.clientY;
+    const el = $("stick"); el.style.left = e.clientX + "px"; el.style.top = e.clientY + "px"; el.style.display = "block";
+  }
+  ptrs.set(e.pointerId, p);
+});
+addEventListener("pointermove", e => {
+  const p = ptrs.get(e.pointerId);
+  if (!p) return;
+  if (Math.hypot(e.clientX - p.sx, e.clientY - p.sy) > 8) p.moved = true;
+  if (p.stick) {
+    let dx = e.clientX - stick.ox, dy = e.clientY - stick.oy;
+    const l = Math.hypot(dx, dy), max = 50;
+    if (l > max) { dx = dx / l * max; dy = dy / l * max; }
+    stick.x = dx / max; stick.y = dy / max;
+    $("stick").firstChild.style.transform = `translate(${dx}px, ${dy}px)`;
+  } else if (p.moved) {
+    cam.yaw -= (e.clientX - p.x) * 0.006;
+    cam.pitch = clamp(cam.pitch + (e.clientY - p.y) * 0.004, 0.15, 1.25);
+  }
+  p.x = e.clientX; p.y = e.clientY;
+});
+function endPtr(e) {
+  const p = ptrs.get(e.pointerId);
+  if (!p) return;
+  ptrs.delete(e.pointerId);
+  if (p.stick) { stick.id = null; stick.x = stick.y = 0; $("stick").style.display = "none"; $("stick").firstChild.style.transform = ""; }
+  if (!p.moved && performance.now() - p.t < 450 && e.type === "pointerup") tapAt(e.clientX, e.clientY);
+}
+addEventListener("pointerup", endPtr);
+addEventListener("pointercancel", endPtr);
+
+// Dik telefonda yatay görüş daralmasın: dikey FOV'u ekran oranına göre aç (en fazla 100°)
+function fitFov(base) {
+  const a = innerWidth / innerHeight;
+  if (a >= 1) return base;
+  return Math.min(100, 2 * Math.atan(Math.tan(base * Math.PI / 360) / a) * 180 / Math.PI);
+}
+function resize() {
+  renderer.setPixelRatio(Math.min(1.5, devicePixelRatio || 1));
+  renderer.setSize(innerWidth, innerHeight, false);
+  camera.aspect = innerWidth / innerHeight;
+  camera.fov = fitFov(60);
+  camera.updateProjectionMatrix();
+}
+addEventListener("resize", resize);
+
+// ================================================================ Döngü
+let last = performance.now(), clock = 0, autoTapT = 1;
+function update(dt) {
+  clock += dt;
+  if (!anyOverlay()) updatePlayer(dt);
+  updatePets(dt, clock);
+  // Otomatik mod saniyede bir kez tıklama hasarı da verir
+  if (save.auto && target && target.alive) {
+    autoTapT -= dt;
+    if (autoTapT <= 0) { autoTapT = 1; target.punch = 0.12; hitCrystal(target, clickDamage()); }
+  }
+  updateOrbs(dt);
+  updateFloats(dt);
+  syncCrystals(dt, clock);
+  for (const b of save.bots) b.total += b.rate * dt;
+  nearAct = nearestAction();
+  updateHud();
+}
+function frame(t) {
+  const dt = Math.min(0.1, (t - last) / 1000);
+  last = t;
+  update(dt);
+  syncPlayer(clock);
+  syncCamera(dt);
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+
+// ================================================================ Başlat
+buildPlanets();
+buildCrystals();
+rebuildAvatar();
+syncPetObjs();
+renderTravel();
+resize();
+$("btnAuto").classList.toggle("on", save.auto);
+$("btnAuto").textContent = `🤖 Otomatik: ${save.auto ? "Açık" : "Kapalı"}`;
+camera.position.set(player.x, 10, player.z + 15);
+if (!save.helpSeen) show("ovHelp");
+setInterval(() => persist(true), 10000);
+requestAnimationFrame(frame);
+</script>
+<div id="rotateHint" style="display:none;position:fixed;left:50%;top:30%;transform:translate(-50%,-50%);z-index:99;max-width:80vw;padding:12px 16px;border-radius:14px;background:rgba(0,0,0,0.78);color:#fff;font:600 15px system-ui,sans-serif;text-align:center;pointer-events:auto">📱↻ Daha geniş görmek için telefonu yan çevir<br><small style="opacity:.7">(kapatmak için dokun)</small></div>
+<script>
+// Dik tutulan telefonda bir kez "yan çevir" ipucu
+(() => {
+  const el = document.getElementById("rotateHint");
+  if (!matchMedia("(pointer: coarse)").matches) return;
+  let closed = false;
+  const upd = () => { el.style.display = !closed && innerWidth < innerHeight ? "block" : "none"; };
+  el.addEventListener("pointerdown", e => { e.stopPropagation(); closed = true; upd(); });
+  setTimeout(() => { closed = true; upd(); }, 8000);
+  addEventListener("resize", upd); upd();
+})();
+</script>
+</body>
+</html>

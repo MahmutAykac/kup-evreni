@@ -1,0 +1,1041 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Kaçış Parkuru: Çılgın Fabrika</title>
+<!--
+  Çılgın Fabrika: 10 bölümlük obby, 10. bölüm patron. Küp Evreni platformunda çalışır (tek başına da açılır).
+  Tuzaklar veri tabanlı: her biri tip + parametre (Roblox'ta CollectionService etiketi + attribute). Bkz. TASARIM.md.
+  Kontroller: WASD / ok tuşları · Space zıpla · sürükle: kamera · tekerlek: yakınlaştır · R checkpoint'e dön
+  Dokunmatik: sol yarı joystick · sağ yarı sürükle · ⤒ zıpla
+-->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+  :root { --panel: rgba(20, 16, 12, 0.82); --card: #1f1a15; --line: rgba(255,255,255,0.12); --text: #f6f1ea; --muted: #b3a89a; --hazard: #ffc400; --ok: #6ee7a0; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #120e0a; color: var(--text); font-family: "Trebuchet MS", system-ui, sans-serif;
+    overflow: hidden; -webkit-user-select: none; user-select: none; touch-action: none; }
+  button { font: inherit; color: inherit; }
+  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  .pill { background: var(--panel); border-radius: 14px; padding: 8px 14px; }
+  #stageBox { position: fixed; left: 14px; top: 12px; pointer-events: none; }
+  #stageNum { font-size: 22px; font-weight: 700; color: var(--hazard); }
+  #stageName { font-size: 14px; color: var(--muted); }
+  #timer { position: fixed; left: 50%; top: 12px; transform: translateX(-50%); font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; pointer-events: none; }
+  #timer small { font-size: 14px; color: var(--muted); font-weight: 400; margin-left: 8px; }
+  #menu { position: fixed; right: 14px; top: 12px; display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; max-width: 50vw; }
+  #menu button { border: 2px solid var(--line); background: var(--panel); border-radius: 14px; padding: 8px 12px; cursor: pointer; font-size: 15px; }
+  #toasts { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 6px; align-items: center; pointer-events: none; z-index: 5; }
+  .toast { background: rgba(246,241,234,0.95); color: #1f1a15; padding: 6px 14px; border-radius: 10px; font-size: 15px; animation: fade 2.8s forwards; text-align: center; }
+  @keyframes fade { 0%, 80% { opacity: 1; } 100% { opacity: 0; transform: translateY(-8px); } }
+  #banner { position: fixed; left: 50%; top: 32%; transform: translate(-50%, -50%); font-size: 44px; font-weight: 700; text-align: center; pointer-events: none;
+    text-shadow: 0 4px 0 rgba(0,0,0,0.5); opacity: 0; transition: opacity 0.3s; }
+  #banner small { display: block; font-size: 20px; color: var(--hazard); }
+  #dead { position: fixed; inset: 0; background: rgba(200, 30, 20, 0.35); pointer-events: none; opacity: 0; transition: opacity 0.25s; }
+  #jumpBtn { position: fixed; right: 18px; bottom: 18px; width: 86px; height: 86px; border-radius: 50%; border: 3px solid rgba(255,255,255,0.6);
+    background: var(--panel); font-size: 34px; display: none; touch-action: none; }
+  #stick { position: fixed; width: 110px; height: 110px; margin: -55px 0 0 -55px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.4);
+    background: rgba(0,0,0,0.25); display: none; pointer-events: none; }
+  #stick div { position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px; border-radius: 50%; background: rgba(255,255,255,0.7); }
+  .overlay { position: fixed; inset: 0; display: none; align-items: flex-start; justify-content: center; background: rgba(10,8,6,0.75); padding: 16px; overflow-y: auto; touch-action: pan-y; z-index: 10; }
+  .overlay.show { display: flex; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 18px 20px; width: 100%; max-width: 520px; margin: auto 0; line-height: 1.45; }
+  .card h1 { margin: 0 0 8px; font-size: 24px; }
+  .muted { color: var(--muted); font-size: 14px; }
+  .btn { border: 0; border-radius: 12px; padding: 10px 14px; cursor: pointer; font-weight: 700; background: #3a3128; }
+  .btn.go { background: #00b06f; color: #fff; }
+  .btn.warn { background: var(--hazard); color: #1f1a15; }
+  .btn:disabled { opacity: 0.45; cursor: default; }
+  .rowb { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  .rowb .btn { flex: 1; }
+  .item { display: grid; grid-template-columns: 44px 1fr auto; gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .item .ic { font-size: 30px; text-align: center; }
+  .item.locked { opacity: 0.5; }
+  .lb { width: 100%; border-collapse: collapse; }
+  .lb td { padding: 8px 6px; border-bottom: 1px solid var(--line); }
+  .lb tr.me td { color: var(--hazard); font-weight: 700; }
+  .lb td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0; }
+  .stats div { background: #2a231c; border-radius: 12px; padding: 10px; text-align: center; }
+  .stats b { display: block; font-size: 20px; }
+  #noWebgl { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 16px; text-align: center; }
+  @media (max-width: 1100px) { #timer { top: 64px; } }
+  @media (max-width: 640px) {
+    #timer { top: 70px; font-size: 20px; }
+    #menu button { padding: 6px 9px; font-size: 13px; }
+    #banner { font-size: 30px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="dead"></div>
+<div id="stageBox" class="pill"><div id="stageNum">Bölüm 1/10</div><div id="stageName"></div></div>
+<div id="timer" class="pill">00:00.0<small id="deaths">💀 0</small></div>
+<div id="menu">
+  <button id="bLeader">🏆 Sıralama</button>
+  <button id="bRewards">🎁 Ödüller</button>
+  <button id="bShop">R$ Mağaza</button>
+  <button id="bRestart">↺ Baştan</button>
+  <button id="bHelp">❓</button>
+</div>
+<div id="toasts"></div>
+<div id="banner"></div>
+<button id="jumpBtn">⤒</button>
+<div id="stick"><div></div></div>
+
+<div id="ovHelp" class="overlay show"><div class="card">
+  <h1>🏭 Kaçış Parkuru: Çılgın Fabrika</h1>
+  <p>10 bölüm, her birinde farklı makineler. <b>10. bölümde patron</b> seni bekliyor! Düşersen ya da bir tuzağa yakalanırsan son <b>checkpoint</b>'ten devam edersin.</p>
+  <ul style="padding-left:20px">
+    <li>🟨 Bantlar seni iter: karşı yöne yürü</li>
+    <li>⚙️ Testere, 🔨 pres, 🔴 lazer ve 🟧 lav öldürür</li>
+    <li>🟫 Titreyen zemin düşer: durma!</li>
+    <li>🌀 Dönen kolların ve şok dalgalarının üstünden zıpla</li>
+  </ul>
+  <p class="muted">Klavye: WASD yürü · Space zıpla · fareyle sürükle: kamera · tekerlek: yakınlaştır · R: checkpoint'e dön<br>
+    Dokunmatik: sol yarı joystick · sağ yarı sürükle · ⤒ zıpla</p>
+  <div class="rowb"><button class="btn go" data-close>Başla!</button></div>
+</div></div>
+<div id="ovFinish" class="overlay"><div class="card" style="text-align:center">
+  <h1>🏁 Fabrikadan kaçtın!</h1>
+  <div class="stats"><div><b id="fTime"></b><span class="muted">Süre</span></div><div><b id="fDeaths"></b><span class="muted">Ölüm</span></div><div><b id="fBest"></b><span class="muted">En iyi</span></div></div>
+  <p id="fNote" class="muted"></p>
+  <div class="rowb"><button class="btn" data-close>Kapat</button><button class="btn go" id="btnAgain">↺ Tekrar koş</button></div>
+</div></div>
+<div id="ovLeader" class="overlay"><div class="card">
+  <h1>🏆 En iyi süreler</h1>
+  <table class="lb" id="lbTable"></table>
+  <p class="muted">Bölüm atlanan koşular sıralamaya girmez.</p>
+  <div class="rowb"><button class="btn" data-close>Kapat</button></div>
+</div></div>
+<div id="ovRewards" class="overlay"><div class="card">
+  <h1>🎁 Ödüller</h1>
+  <div id="rewardList"></div>
+  <div class="rowb"><button class="btn" data-close>Kapat</button></div>
+</div></div>
+<div id="ovShop" class="overlay"><div class="card">
+  <h1>R$ Robux Mağazası</h1>
+  <div class="muted" id="shopBal"></div>
+  <div id="shopList"></div>
+  <p class="muted" id="shopNote"></p>
+  <div class="rowb"><button class="btn" data-close>Kapat</button></div>
+</div></div>
+<div id="noWebgl">3D için WebGL gerekli; bu tarayıcıda açılamadı. Chrome / Edge ile dosyayı açmayı dene.</div>
+
+<script>
+"use strict";
+// ================================================================ Yardımcılar
+const $ = id => document.getElementById(id);
+const rand = (a, b) => a + Math.random() * (b - a);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+function setText(el, t) { if (el._t !== t) { el._t = t; el.textContent = t; } }
+function fmtTime(s) {
+  if (s == null) return "—";
+  const m = Math.floor(s / 60), sec = s - m * 60;
+  return `${String(m).padStart(2, "0")}:${sec.toFixed(1).padStart(4, "0").replace(".", ",")}`;
+}
+function notify(msg) {
+  const el = document.createElement("div");
+  el.className = "toast"; el.textContent = msg;
+  $("toasts").appendChild(el);
+  setTimeout(() => el.remove(), 2800);
+  while ($("toasts").children.length > 3) $("toasts").firstChild.remove();
+}
+let bannerT = null;
+function banner(text, sub = "") {
+  const b = $("banner");
+  b.innerHTML = `${text}${sub ? `<small>${sub}</small>` : ""}`;
+  b.style.opacity = 1;
+  clearTimeout(bannerT); bannerT = setTimeout(() => b.style.opacity = 0, 1800);
+}
+
+// ================================================================ Ayarlar (Roblox: Config)
+const G = 60, JUMP_V = 18, SPEED = 11, R = 0.4, H = 1.8, COYOTE = 0.1, JUMP_BUFFER = 0.13, FALL_Y = -12;
+const PASSES = [
+  { id: "skip", name: "Bölüm Atla", icon: "⏭️", jeton: 30, consumable: true, desc: "Bir sonraki checkpoint'e geç. Bu koşunun süresi sıralamaya girmez." },
+  { id: "speed", name: "Hız Botları", icon: "👟", jeton: 75, desc: "+%15 koşu hızı. Kalıcı." },
+];
+const TRAILS = [
+  { id: "none", icon: "➖", name: "İz yok", need: () => true, hint: "" },
+  { id: "blue", icon: "💙", name: "Mavi Kıvılcım", color: 0x4cc9f0, need: s => s.bestStage >= 3, hint: "3. bölüme ulaş" },
+  { id: "fire", icon: "🔥", name: "Ateş", color: 0xff6b1f, need: s => s.bestStage >= 6, hint: "6. bölüme ulaş" },
+  { id: "toxic", icon: "💚", name: "Zehir", color: 0x6ee7a0, need: s => s.deaths >= 50, hint: "50 kez öl 😅" },
+  { id: "rainbow", icon: "🌈", name: "Gökkuşağı", color: "rainbow", need: s => s.finishes >= 1, hint: "Parkuru bitir" },
+  { id: "gold", icon: "✨", name: "Altın", color: 0xffd166, need: s => s.bestTime != null && s.bestTime < 240, hint: "4 dakikanın altında bitir" },
+];
+const HARDHAT = { need: s => s.bestStage >= 10, hint: "Patron bölümüne ulaş" };
+const BOTS = [["ParkurUstası", 151], ["Zıpzıp_44", 188], ["FabrikaKaçkını", 214], ["TestereAvcısı", 262], ["LavYürüyücü", 305], ["ObbyKralı", 356], ["Yavaşİlerleyen", 448]];
+
+// ================================================================ Kayıt
+const SAVE_KEY = "cilginFabrika";
+let save = { cp: 0, runTime: 0, runSkipped: false, runDeaths: 0, bestTime: null, bestStage: 0, deaths: 0, finishes: 0,
+  trail: "none", hardhat: false, passes: {}, helpSeen: false };
+try { const s = JSON.parse(localStorage.getItem(SAVE_KEY) || "null"); if (s) save = { ...save, ...s }; } catch (e) {}
+let lastSave = 0;
+function persist(force) {
+  if (!force && performance.now() - lastSave < 3000) return;
+  lastSave = performance.now();
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) {}
+  reportStats();
+}
+
+// ================================================================ Küp Evreni köprüsü
+const platform = { inside: window.parent !== window, profile: null, reqs: {} };
+function reportStats() {
+  if (!platform.inside) return;
+  parent.postMessage({ type: "kup:stats", stats: { "🏭 Bölüm": `${save.cp + 1}/${STAGES.length}`, "🏁 En iyi süre": fmtTime(save.bestTime),
+    "💀 Ölüm": save.deaths, "🏆 Bitirme": save.finishes } }, "*");
+}
+function requestPurchase(item, done) {
+  if (!platform.inside) { notify("Robux ile almak için oyunu Küp Evreni'nden aç (ana klasördeki index.html)"); return; }
+  const reqId = Math.random().toString(36).slice(2);
+  platform.reqs[reqId] = done;
+  parent.postMessage({ type: "kup:purchase", reqId, id: item.id, name: item.name, price: item.jeton, icon: item.icon }, "*");
+}
+addEventListener("message", e => {
+  if (!platform.inside || e.source !== parent) return;
+  const m = e.data || {};
+  if (m.type === "kup:profile") { platform.profile = m; rebuildAvatar(); renderShop(); }
+  else if (m.type === "kup:purchaseResult") {
+    if (platform.profile) platform.profile.jeton = m.jeton;
+    const done = platform.reqs[m.reqId]; delete platform.reqs[m.reqId];
+    if (done) done(!!m.ok);
+    renderShop();
+  }
+});
+if (platform.inside) parent.postMessage({ type: "kup:ready" }, "*");
+
+// ================================================================ Ses
+const A = { ctx: null };
+function initAudio() {
+  if (A.ctx) { if (A.ctx.state === "suspended") A.ctx.resume(); return; }
+  try { A.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return; }
+  A.master = A.ctx.createGain(); A.master.gain.value = 0.55; A.master.connect(A.ctx.destination);
+  A.noise = A.ctx.createBuffer(1, A.ctx.sampleRate, A.ctx.sampleRate);
+  const d = A.noise.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  // Fabrika uğultusu
+  const o = A.ctx.createOscillator(); o.type = "sawtooth"; o.frequency.value = 55;
+  const f = A.ctx.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 140;
+  const g = A.ctx.createGain(); g.gain.value = 0.05;
+  o.connect(f).connect(g).connect(A.master); o.start();
+}
+function tone(freq, dur, type = "sine", gain = 0.1, freqEnd, delay = 0) {
+  if (!A.ctx || gain < 0.002) return;
+  const t0 = A.ctx.currentTime + delay, o = A.ctx.createOscillator(), g = A.ctx.createGain();
+  o.type = type; o.frequency.setValueAtTime(freq, t0);
+  if (freqEnd) o.frequency.exponentialRampToValueAtTime(freqEnd, t0 + dur);
+  g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(gain, t0 + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  o.connect(g).connect(A.master); o.start(t0); o.stop(t0 + dur + 0.05);
+}
+function noise(dur, gain, freq, type = "lowpass", delay = 0) {
+  if (!A.ctx || gain < 0.002) return;
+  const t0 = A.ctx.currentTime + delay, s = A.ctx.createBufferSource(), f = A.ctx.createBiquadFilter(), g = A.ctx.createGain();
+  s.buffer = A.noise; f.type = type; f.frequency.value = freq;
+  g.gain.setValueAtTime(gain, t0); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  s.connect(f).connect(g).connect(A.master); s.start(t0); s.stop(t0 + dur + 0.05);
+}
+const near = (x, z) => 1 / (1 + ((x - pl.x) ** 2 + (z - pl.z) ** 2) * 0.01);
+const SFX = {
+  jump: () => tone(320, 0.14, "square", 0.05, 640),
+  land: () => noise(0.06, 0.12, 400),
+  die: () => { tone(400, 0.5, "sawtooth", 0.12, 80); noise(0.3, 0.2, 900, "bandpass"); },
+  checkpoint: () => [523, 659, 784].forEach((f, i) => tone(f, 0.25, "triangle", 0.09, undefined, i * 0.07)),
+  finish: () => [523, 659, 784, 1046, 1318].forEach((f, i) => tone(f, 0.45, "triangle", 0.1, undefined, i * 0.1)),
+  slam: (x, z) => noise(0.25, 0.7 * near(x, z), 160),
+  vanish: () => tone(260, 0.3, "triangle", 0.06, 120),
+  boss: () => { tone(80, 1.2, "sawtooth", 0.2, 40); noise(0.8, 0.25, 300); },
+};
+
+// ================================================================ 3D sahne
+const canvas = $("game");
+let renderer;
+try { renderer = new THREE.WebGLRenderer({ canvas, antialias: true }); }
+catch (e) { $("noWebgl").style.display = "flex"; throw e; }
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1c140e);
+scene.fog = new THREE.Fog(0x1c140e, 40, 120);
+const camera = new THREE.PerspectiveCamera(65, 1, 0.1, 400);
+scene.add(new THREE.HemisphereLight(0xfff0dd, 0x2a1d12, 0.8));
+const sunL = new THREE.DirectionalLight(0xffe2b8, 0.7); sunL.position.set(20, 40, 15); scene.add(sunL);
+const lambert = (color, extra = {}) => new THREE.MeshLambertMaterial({ color, ...extra });
+function mesh(geo, material, x = 0, y = 0, z = 0, parent = scene) {
+  const m = new THREE.Mesh(geo, material); m.position.set(x, y, z); parent.add(m); return m;
+}
+function canvasTexture(w, h, draw) {
+  const c = document.createElement("canvas"); c.width = w; c.height = h;
+  draw(c.getContext("2d"), w, h);
+  const t = new THREE.CanvasTexture(c); t.anisotropy = 4; return t;
+}
+function makeLabel(worldW, worldH, cw = 512, ch = 128) {
+  const c = document.createElement("canvas"); c.width = cw; c.height = ch;
+  const tex = new THREE.CanvasTexture(c);
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
+  sprite.scale.set(worldW, worldH, 1);
+  return { sprite, ctx: c.getContext("2d"), tex, w: cw, h: ch };
+}
+function outlined(g, text, x, y, maxW, size, color = "#fff") {
+  g.font = `700 ${size}px "Trebuchet MS", system-ui, sans-serif`;
+  const w = g.measureText(text).width;
+  if (w > maxW) { size = Math.floor(size * maxW / w); g.font = `700 ${size}px "Trebuchet MS", system-ui, sans-serif`; }
+  g.textAlign = "center"; g.textBaseline = "middle"; g.lineWidth = 10; g.lineJoin = "round";
+  g.strokeStyle = "rgba(0,0,0,0.75)"; g.strokeText(text, x, y); g.fillStyle = color; g.fillText(text, x, y);
+}
+
+const stripeTex = canvasTexture(64, 64, (g, w, h) => {
+  g.fillStyle = "#1a1a1a"; g.fillRect(0, 0, w, h);
+  g.fillStyle = "#ffc400";
+  for (let i = -2; i < 4; i++) { g.beginPath(); g.moveTo(i * 32, h); g.lineTo(i * 32 + 16, h); g.lineTo(i * 32 + 16 + h, 0); g.lineTo(i * 32 + h, 0); g.fill(); }
+});
+stripeTex.wrapS = stripeTex.wrapT = THREE.RepeatWrapping;
+const plateTex = canvasTexture(128, 128, (g, w, h) => {
+  g.fillStyle = "#7d8288"; g.fillRect(0, 0, w, h);
+  g.strokeStyle = "#5f6469"; g.lineWidth = 4; g.strokeRect(2, 2, w - 4, h - 4);
+  g.fillStyle = "#6c7177";
+  for (let y = 12; y < h; y += 22) for (let x = (y / 22) % 2 ? 10 : 21; x < w; x += 22) { g.save(); g.translate(x, y); g.rotate(0.6); g.fillRect(-6, -2, 12, 4); g.restore(); }
+});
+plateTex.wrapS = plateTex.wrapT = THREE.RepeatWrapping;
+const beltTex = canvasTexture(64, 64, (g, w, h) => {
+  g.fillStyle = "#2b2b2b"; g.fillRect(0, 0, w, h);
+  g.strokeStyle = "#ffc400"; g.lineWidth = 7; g.lineCap = "round";
+  g.beginPath(); g.moveTo(14, 44); g.lineTo(32, 22); g.lineTo(50, 44); g.stroke(); // ↑ ok
+});
+beltTex.wrapS = beltTex.wrapT = THREE.RepeatWrapping;
+
+// Fabrika salonu: duvarlar, borular, ışıklar
+function buildHall(length) {
+  const wallM = lambert(0x3a2d22), winM = new THREE.MeshBasicMaterial({ color: 0xffb35c });
+  for (const s of [-1, 1]) {
+    mesh(new THREE.BoxGeometry(2, 40, length + 80), wallM, s * 34, 10, -length / 2);
+    for (let z = 10; z > -length - 40; z -= 18) {
+      mesh(new THREE.PlaneGeometry(6, 3), winM, s * 32.9, 14, z).rotation.y = -s * Math.PI / 2;
+      const pipe = mesh(new THREE.CylinderGeometry(0.8, 0.8, 18, 12), lambert(0x6b4a2f), s * 26, 9, z - 9); pipe.rotation.x = Math.PI / 2;
+      mesh(new THREE.BoxGeometry(1.4, 22, 1.4), lambert(0x2a211a), s * 28, 0, z);
+    }
+  }
+  const floor = mesh(new THREE.PlaneGeometry(70, length + 80), lambert(0x14100c), 0, -14, -length / 2);
+  floor.rotation.x = -Math.PI / 2;
+}
+
+// ================================================================ Tuzak kütüphanesi (Roblox: CollectionService etiketleri)
+// Her nesne: tip, konum/boyut (bx,by,bz merkez · w,h,d), isSolid(), update(t), kill() → oyuncuyu öldürüyor mu
+const objs = [];
+const add = o => { objs.push(o); return o; };
+const always = () => true;
+
+function platformMesh(w, h, d, topMat) {
+  const g = new THREE.Group();
+  const side = lambert(0x4a4f55);
+  const tm = topMat || lambert(0xffffff, { map: (() => { const t = plateTex.clone(); t.needsUpdate = true; t.repeat.set(w / 3, d / 3); return t; })() });
+  mesh(new THREE.BoxGeometry(w, h, d), [side, side, tm, side, side, side], 0, 0, 0, g);
+  // Kenarlarda sarı-siyah tehlike şeridi
+  for (const s of [-1, 1]) {
+    const t1 = stripeTex.clone(); t1.needsUpdate = true; t1.repeat.set(d / 1.2, 1);
+    const st = mesh(new THREE.BoxGeometry(0.22, h + 0.04, d + 0.02), lambert(0xffffff, { map: t1 }), s * (w / 2 - 0.1), 0.01, 0, g);
+    st.rotation.y = 0; st.material.map.rotation = 0;
+  }
+  scene.add(g);
+  return g;
+}
+function plat(x, top, z, w, d, extra = {}) {
+  const o = { type: "platform", solid: true, bx: x, by: top - 0.5, bz: z, w, h: 1, d, isSolid: always, ...extra };
+  o.mesh = platformMesh(w, 1, d, extra.topMat);
+  o.mesh.position.set(x, o.by, z);
+  return add(o);
+}
+function mover(a, b, w, d, speed, phase = 0) {
+  const o = plat(a[0], a[1], a[2], w, d, { type: "mover" });
+  Object.assign(o, { a, b, speed, phase, delta: { x: 0, y: 0, z: 0 } });
+  o.update = t => {
+    const k = (Math.sin(t * speed + phase) + 1) / 2;
+    const nx = a[0] + (b[0] - a[0]) * k, ny = a[1] + (b[1] - a[1]) * k - 0.5, nz = a[2] + (b[2] - a[2]) * k;
+    o.delta = { x: nx - o.bx, y: ny - o.by, z: nz - o.bz };
+    o.bx = nx; o.by = ny; o.bz = nz;
+  };
+  return o;
+}
+function conveyor(x, top, z, w, d, push) {
+  const tex = beltTex.clone(); tex.needsUpdate = true;
+  const len = Math.abs(push[0]) > Math.abs(push[1]) ? w : d, wid = Math.abs(push[0]) > Math.abs(push[1]) ? d : w;
+  tex.repeat.set(wid / 1.5, len / 1.5);
+  const o = plat(x, top, z, w, d, { type: "conveyor", push, topMat: lambert(0x333333) });
+  // Bant yüzeyi: ok işaretleri itme yönünü gösterir ve kayar
+  const theta = Math.atan2(-push[0], -push[1]);
+  const quarter = Math.abs(Math.sin(theta)) > 0.5;
+  const belt = mesh(new THREE.PlaneGeometry(quarter ? d : w, quarter ? w : d), new THREE.MeshBasicMaterial({ map: tex }), 0, 0.51, 0, o.mesh);
+  belt.rotation.set(-Math.PI / 2, 0, theta);
+  o.tex = tex;
+  o.update = (t, dt) => { tex.offset.y -= Math.hypot(push[0], push[1]) * dt / 1.5; };
+  return o;
+}
+function vanish(x, top, z, w, d) {
+  const o = plat(x, top, z, w, d, { type: "vanish", state: "solid", timer: 0, topMat: lambert(0x8a5a2b) });
+  o.isSolid = () => o.state !== "gone";
+  o.mats = [];
+  o.mesh.traverse(m => { if (m.material) { const arr = Array.isArray(m.material) ? m.material : [m.material]; arr.forEach(mm => { mm.transparent = true; o.mats.push(mm); }); } });
+  o.step = () => { if (o.state === "solid") { o.state = "warn"; o.timer = 0.45; } };
+  o.update = (t, dt) => {
+    if (o.state === "warn") { o.timer -= dt; if (o.timer <= 0) { o.state = "gone"; o.timer = 2.6; SFX.vanish(); } }
+    else if (o.state === "gone") { o.timer -= dt; if (o.timer <= 0) o.state = "solid"; }
+  };
+  o.sync = () => {
+    o.mesh.visible = o.state !== "gone";
+    const shake = o.state === "warn" ? (Math.random() - 0.5) * 0.15 : 0;
+    o.mesh.position.set(o.bx + shake, o.by, o.bz + shake);
+    o.mats.forEach(m => m.opacity = o.state === "warn" ? 0.75 : 1);
+  };
+  return o;
+}
+function lava(x, z, w, d, top = -2.5) {
+  const m = lambert(0xff5a00, { emissive: 0xff3a00 });
+  const lv = mesh(new THREE.BoxGeometry(w, 1, d), m, x, top - 0.5, z);
+  return add({ type: "lava", bx: x, by: top - 0.5, bz: z, w, h: 1, d, mesh: lv, mat: m,
+    kill: () => pl.y < top + 0.2 && Math.abs(pl.x - x) < w / 2 && Math.abs(pl.z - z) < d / 2,
+    update: t => m.emissive.setRGB(1, 0.2 + Math.sin(t * 3 + x) * 0.08, 0) });
+}
+function saw(x0, x1, y, z, r, speed, phase = 0) {
+  const g = new THREE.Group();
+  const blade = mesh(new THREE.CylinderGeometry(r, r, 0.14, 28), lambert(0xc9ced6, { emissive: 0x222222 }), 0, 0, 0, g);
+  blade.rotation.x = Math.PI / 2;
+  for (let i = 0; i < 12; i++) {
+    const a = i / 12 * Math.PI * 2;
+    const tooth = mesh(new THREE.ConeGeometry(0.14, 0.32, 4), lambert(0xe8ecf2), Math.cos(a) * (r + 0.1), Math.sin(a) * (r + 0.1), 0, g);
+    tooth.rotation.z = a - Math.PI / 2;
+  }
+  mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.3, 12), lambert(0xff3a3a), 0, 0, 0, g).rotation.x = Math.PI / 2;
+  scene.add(g);
+  mesh(new THREE.BoxGeometry(Math.abs(x1 - x0) + 0.6, 0.15, 0.4), lambert(0x222222), (x0 + x1) / 2, 0.05, z); // ray
+  const o = add({ type: "saw", x: x0, y, z, r, mesh: g });
+  o.update = t => { const k = (Math.sin(t * speed + phase) + 1) / 2; o.x = x0 + (x1 - x0) * k; g.rotation.z = -t * 12; };
+  o.kill = () => {
+    if (Math.abs(pl.z - z) > 0.55) return false;
+    const cy = clamp(y, pl.y, pl.y + H);
+    return Math.hypot(pl.x - o.x, cy - y) < r + R - 0.05;
+  };
+  o.sync = () => g.position.set(o.x, y, z);
+  return o;
+}
+function crusher(x, z, w, d, period, phase, floor = 0, high = 4) {
+  const g = new THREE.Group();
+  const t1 = stripeTex.clone(); t1.needsUpdate = true; t1.repeat.set(w / 1.2, 1);
+  const body = lambert(0x6b6f75);
+  mesh(new THREE.BoxGeometry(w, 2.4, d), [body, body, body, lambert(0x2a2a2a), lambert(0xffffff, { map: t1 }), lambert(0xffffff, { map: t1 })], 0, 1.2, 0, g);
+  mesh(new THREE.CylinderGeometry(0.35, 0.35, 12, 10), lambert(0x9aa0a6), 0, 8.4, 0, g);
+  scene.add(g);
+  const o = add({ type: "crusher", x, z, w, d, bottom: floor + high, mesh: g, wasDown: false });
+  o.update = t => {
+    const f = (((t + phase) % period) + period) % period / period;
+    let k; // 0 = yukarıda, 1 = aşağıda
+    if (f < 0.5) k = 0; else if (f < 0.6) k = (f - 0.5) / 0.1; else if (f < 0.78) k = 1; else k = 1 - (f - 0.78) / 0.22;
+    o.bottom = floor + high * (1 - k * k);
+    const down = k >= 1;
+    if (down && !o.wasDown) SFX.slam(x, z);
+    o.wasDown = down;
+  };
+  o.kill = () => Math.abs(pl.x - x) < w / 2 + R - 0.1 && Math.abs(pl.z - z) < d / 2 + R - 0.1 && pl.y + H > o.bottom + 0.05 && pl.y < o.bottom + 2.4;
+  o.sync = () => g.position.set(x, o.bottom, z);
+  return o;
+}
+function spinner(x, y, z, len, speed, thick = 0.6) {
+  const g = new THREE.Group();
+  const t1 = stripeTex.clone(); t1.needsUpdate = true; t1.repeat.set(len / 1.2, 1);
+  mesh(new THREE.BoxGeometry(len, thick, thick), lambert(0xffffff, { map: t1 }), 0, 0, 0, g);
+  mesh(new THREE.CylinderGeometry(0.6, 0.7, 1.6, 16), lambert(0x444444), 0, 0.2, 0, g);
+  scene.add(g);
+  g.position.set(x, y, z);
+  const o = add({ type: "spinner", mesh: g, a: 0 });
+  o.update = t => { o.a = t * speed; };
+  o.kill = () => {
+    const dx = pl.x - x, dz = pl.z - z;
+    if (Math.hypot(dx, dz) < 0.7 + R) return pl.y < y + 1;
+    const along = dx * Math.cos(o.a) - dz * Math.sin(o.a), perp = dx * Math.sin(o.a) + dz * Math.cos(o.a);
+    return Math.abs(along) < len / 2 && Math.abs(perp) < thick / 2 + R - 0.05 && pl.y < y + thick / 2 && pl.y + H > y - thick / 2;
+  };
+  o.sync = () => { g.rotation.y = o.a; };
+  return o;
+}
+function laser(x0, x1, y, z, on = 0, off = 0, phase = 0) {
+  const beamM = new THREE.MeshBasicMaterial({ color: 0xff2020, transparent: true, opacity: 0.9 });
+  const beam = mesh(new THREE.CylinderGeometry(0.07, 0.07, Math.abs(x1 - x0), 8), beamM, (x0 + x1) / 2, y, z);
+  beam.rotation.z = Math.PI / 2;
+  for (const xx of [x0, x1]) { mesh(new THREE.BoxGeometry(0.4, 0.4, 0.4), lambert(0x333333, { emissive: 0x330000 }), xx, y, z); mesh(new THREE.BoxGeometry(0.15, y + 0.5, 0.15), lambert(0x333333), xx, (y - 0.5) / 2, z); }
+  const o = add({ type: "laser", active: true, beam });
+  o.update = t => { o.active = !off || (((t + phase) % (on + off)) + on + off) % (on + off) < on; };
+  o.kill = () => o.active && Math.abs(pl.z - z) < 0.12 + R && pl.y < y && pl.y + H > y && pl.x > Math.min(x0, x1) && pl.x < Math.max(x0, x1);
+  o.sync = () => { beam.visible = o.active; beamM.opacity = 0.75 + Math.random() * 0.25; };
+  return o;
+}
+function shockwave(x, z, top, period, speed, maxR, phase = 0) {
+  const m = new THREE.MeshBasicMaterial({ color: 0xff7a1a, transparent: true, opacity: 0.85, side: THREE.DoubleSide });
+  const ring = mesh(new THREE.TorusGeometry(1, 0.18, 6, 64), m, x, top + 0.3, z);
+  ring.rotation.x = Math.PI / 2;
+  const o = add({ type: "shockwave", r: 0, active: false, ring, wasActive: false });
+  o.update = t => {
+    o.r = ((((t + phase) % period) + period) % period) * speed;
+    o.active = o.r > 0.5 && o.r < maxR;
+    if (o.active && !o.wasActive && Math.hypot(pl.x - x, pl.z - z) < 30) SFX.boss();
+    o.wasActive = o.active;
+  };
+  o.kill = () => o.active && pl.y < top + 0.55 && Math.abs(Math.hypot(pl.x - x, pl.z - z) - o.r) < 0.45 + R;
+  o.sync = () => { ring.visible = o.active; ring.scale.set(o.r, o.r, 1); m.opacity = 0.9 * (1 - o.r / maxR) + 0.1; };
+  return o;
+}
+const checkpoints = [];
+function checkpoint(i, x, top, z, name) {
+  const o = plat(x, top, z, 6, 6, { type: "checkpoint", cp: i, topMat: lambert(0x55606a) });
+  const flagM = lambert(0x888888, { emissive: 0x111111 });
+  mesh(new THREE.CylinderGeometry(0.1, 0.1, 4, 8), lambert(0xdddddd), x + 2.4, top + 2, z - 2.4);
+  o.flag = mesh(new THREE.BoxGeometry(1.4, 0.9, 0.06), flagM, x + 1.7, top + 3.5, z - 2.4);
+  o.flagM = flagM;
+  const lab = makeLabel(9, 2.2);
+  outlined(lab.ctx, `Bölüm ${i + 1}`, lab.w / 2, lab.h * 0.3, lab.w - 20, 52, "#ffc400");
+  outlined(lab.ctx, name, lab.w / 2, lab.h * 0.72, lab.w - 20, 46);
+  lab.tex.needsUpdate = true;
+  lab.sprite.position.set(x, top + 5.6, z - 2.6);
+  scene.add(lab.sprite);
+  o.spawn = { x, y: top, z: z + 1.5 };
+  checkpoints[i] = o;
+  return o;
+}
+let finishPad = null;
+function finish(x, top, z) {
+  finishPad = plat(x, top, z, 6, 6, { type: "finish", topMat: lambert(0xffd166, { emissive: 0x4a3600 }) });
+  const arch = lambert(0xffc400, { emissive: 0x332200 });
+  for (const s of [-1, 1]) mesh(new THREE.BoxGeometry(0.5, 5, 0.5), arch, x + s * 2.8, top + 2.5, z - 2.6);
+  mesh(new THREE.BoxGeometry(6.1, 0.8, 0.5), arch, x, top + 5.2, z - 2.6);
+  const lab = makeLabel(8, 2);
+  outlined(lab.ctx, "🏁 ÇIKIŞ", lab.w / 2, lab.h / 2, lab.w - 20, 80, "#ffd166");
+  lab.tex.needsUpdate = true;
+  lab.sprite.position.set(x, top + 6.8, z - 2.6);
+  scene.add(lab.sprite);
+}
+function bossHead(x, y, z) {
+  const g = new THREE.Group();
+  mesh(new THREE.BoxGeometry(10, 7, 5), lambert(0x5a5f66), 0, 0, 0, g);
+  const eyeM = new THREE.MeshBasicMaterial({ color: 0xff2a00 });
+  for (const s of [-1, 1]) mesh(new THREE.BoxGeometry(2, 1.2, 0.3), eyeM, s * 2.4, 1.2, 2.6, g);
+  for (let i = -2; i <= 2; i++) mesh(new THREE.BoxGeometry(1.2, 1, 0.3), lambert(0xd8dde3), i * 1.5, -2, 2.6, g);
+  for (const s of [-1, 1]) { const horn = mesh(new THREE.ConeGeometry(0.8, 3, 4), lambert(0x2a2a2a), s * 4, 4.5, 0, g); horn.rotation.z = -s * 0.4; }
+  g.position.set(x, y, z);
+  scene.add(g);
+  const lab = makeLabel(14, 2.4);
+  outlined(lab.ctx, "👹 DEV ÖĞÜTÜCÜ", lab.w / 2, lab.h / 2, lab.w - 20, 70, "#ff5a3a");
+  lab.tex.needsUpdate = true;
+  lab.sprite.position.set(x, y + 6, z);
+  scene.add(lab.sprite);
+  return add({ type: "boss", mesh: g, eyeM, update: t => { g.position.y = y + Math.sin(t * 1.3) * 0.5; g.rotation.y = Math.sin(t * 0.7) * 0.15; eyeM.color.setRGB(1, 0.1 + Math.abs(Math.sin(t * 4)) * 0.3, 0); } });
+}
+
+// ================================================================ Bölümler (zs: bölümün başladığı z, ileri = −z)
+const STAGES = [
+  { name: "Konveyör Hattı", build(zs) {
+    plat(0, 0, zs - 4, 4, 4); plat(0, 0, zs - 10, 4, 4); plat(0, 1, zs - 16, 4, 4);
+    conveyor(0, 1, zs - 26, 4, 12, [4, 0]);
+    plat(0, 1, zs - 36, 5, 5);
+    return zs - 38.5;
+  } },
+  { name: "Kayan Paletler", build(zs) {
+    lava(0, zs - 17, 22, 36);
+    mover([-5, 0, zs - 4], [5, 0, zs - 4], 4, 4, 1.0, 0);
+    mover([-5, 0, zs - 11], [5, 0, zs - 11], 4, 4, 1.0, Math.PI);
+    mover([-5, 0, zs - 18], [5, 0, zs - 18], 4, 4, 1.3, 0);
+    mover([-5, 0, zs - 25], [5, 0, zs - 25], 4, 4, 1.1, Math.PI / 2);
+    plat(0, 0, zs - 32, 6, 4);
+    return zs - 34;
+  } },
+  { name: "Testere Koridoru", build(zs) {
+    plat(0, 0, zs - 15, 4, 30);
+    [6, 12, 18, 24].forEach((dz, i) => saw(-2.2, 2.2, 1, zs - dz, 1.1, 1.5 + i * 0.35, i * 1.3));
+    return zs - 30;
+  } },
+  { name: "Kaybolan Zemin", build(zs) {
+    lava(0, zs - 19, 20, 38);
+    for (let k = 0; k < 6; k++) vanish(k % 2 ? 2 : -2, 0, zs - 4 - k * 5, 3, 3);
+    plat(0, 0, zs - 35, 6, 4);
+    return zs - 37;
+  } },
+  { name: "Pres Makinesi", build(zs) {
+    plat(0, 0, zs - 11, 4, 22);
+    crusher(0, zs - 5, 4.4, 2.5, 2.6, 0);
+    crusher(0, zs - 11, 4.4, 2.5, 2.6, 0.9);
+    crusher(0, zs - 17, 4.4, 2.5, 2.6, 1.8);
+    conveyor(0, 0, zs - 27, 4, 10, [0, 3]);
+    crusher(0, zs - 27, 4.4, 2.5, 2.2, 0.4);
+    plat(0, 0, zs - 34, 5, 4);
+    return zs - 36;
+  } },
+  { name: "Lav Asansörleri", build(zs) {
+    lava(0, zs - 18, 22, 38);
+    [[0, 4], [3, 11], [-3, 18], [0, 25]].forEach(([x, dz], i) => mover([x, -1.5, zs - dz], [x, 2, zs - dz], 4, 4, 1.2, i * Math.PI / 2));
+    plat(0, 2, zs - 32, 6, 4);
+    return zs - 34;
+  } },
+  { name: "Dönen Kollar", build(zs) {
+    plat(0, 0, zs - 12, 12.4, 20);
+    spinner(0, 0.45, zs - 7, 12.5, 1.5);
+    spinner(0, 0.45, zs - 17, 12.5, -1.9);
+    plat(0, 0, zs - 26, 5, 4);
+    return zs - 28;
+  } },
+  { name: "İtici Bantlar", build(zs) {
+    conveyor(0, 0, zs - 4, 8, 4, [6, 0]);
+    conveyor(0, 0, zs - 10, 8, 4, [-6, 0]);
+    conveyor(0, 0, zs - 16, 8, 4, [6, 0]);
+    saw(-3.5, 3.5, 1, zs - 10, 1, 1.4, 0);
+    plat(0, 0, zs - 22, 5, 4);
+    return zs - 24;
+  } },
+  { name: "Lazer Izgarası", build(zs) {
+    plat(0, 0, zs - 14, 4, 28);
+    laser(-2.3, 2.3, 0.4, zs - 5);
+    laser(-2.3, 2.3, 1.2, zs - 10, 1.2, 1.0, 0);
+    laser(-2.3, 2.3, 0.4, zs - 15);
+    laser(-2.3, 2.3, 1.2, zs - 20, 1.2, 1.0, 1.1);
+    laser(-2.3, 2.3, 0.9, zs - 24, 0.8, 1.2, 0.5);
+    return zs - 28;
+  } },
+  { name: "👹 PATRON: Dev Öğütücü", boss: true, build(zs) {
+    lava(0, zs - 20, 30, 44);
+    plat(0, 0, zs - 15, 21, 26);
+    spinner(0, 0.45, zs - 15, 20.6, 1.1, 0.7);
+    shockwave(0, zs - 15, 0, 3.2, 6, 10.4, 0);
+    plat(0, 0, zs - 31, 4, 3);
+    finish(0, 0, zs - 37);
+    bossHead(0, 8, zs - 46);
+    return zs - 40;
+  } },
+];
+let LEVEL_LEN = 0;
+function buildLevel() {
+  let z = 0;
+  STAGES.forEach((st, i) => {
+    checkpoint(i, 0, 0, z - 3, st.name);
+    st.zStart = z;
+    z = st.build(z - 6) - 2;
+  });
+  LEVEL_LEN = -z;
+  buildHall(LEVEL_LEN);
+}
+
+// ================================================================ Oyuncu
+const pl = { x: 0, y: 0, z: 1.5, vy: 0, grounded: false, ground: null, lastGround: 0, jumpBuf: 0, face: Math.PI, moving: false, walk: 0,
+  dead: false, deadT: 0, group: null, parts: null, hardhat: null };
+const DEFAULT_AVATAR = { skin: "#ffdbac", shirt: "#ff7a45", pants: "#2b2d42", hat: "cap", hatColor: "#ffc400", face: "grin" };
+function drawFace(kind) {
+  const c = document.createElement("canvas"); c.width = c.height = 128;
+  const x = c.getContext("2d");
+  x.fillStyle = "#1b1b1b"; x.strokeStyle = "#1b1b1b"; x.lineWidth = 7; x.lineCap = "round";
+  if (kind === "cool") { x.fillRect(22, 40, 36, 18); x.fillRect(70, 40, 36, 18); x.fillRect(56, 44, 16, 5); }
+  else { x.beginPath(); x.ellipse(44, 50, 7, kind === "wow" ? 12 : 10, 0, 0, 7); x.ellipse(84, 50, 7, kind === "wow" ? 12 : 10, 0, 0, 7); x.fill(); }
+  x.beginPath();
+  if (kind === "wow") { x.ellipse(64, 92, 10, 13, 0, 0, 7); x.fill(); }
+  else if (kind === "grin") { x.moveTo(36, 82); x.quadraticCurveTo(64, 116, 92, 82); x.closePath(); x.fill(); }
+  else { x.arc(64, 74, 26, 0.25 * Math.PI, 0.75 * Math.PI); x.stroke(); }
+  return c;
+}
+// Platformdaki blok avatar (yükseklik ~5,6 → 0,33 ölçekle ~1,8 m)
+function buildAvatar(a, withHardhat) {
+  const g = new THREE.Group(), inner = new THREE.Group();
+  g.add(inner); inner.scale.setScalar(0.33);
+  const part = (w, h, d, c, x, y, z) => mesh(new THREE.BoxGeometry(w, h, d), lambert(c), x, y, z, inner);
+  const legs = [part(0.9, 2, 1, a.pants, -0.5, 1, 0), part(0.9, 2, 1, a.pants, 0.5, 1, 0)];
+  legs.forEach(l => { l.geometry.translate(0, -1, 0); l.position.y = 2; });
+  part(2, 2, 1, a.shirt, 0, 3, 0);
+  const arms = [part(0.9, 2, 1, a.skin, -1.45, 3, 0), part(0.9, 2, 1, a.skin, 1.45, 3, 0)];
+  arms.forEach(l => { l.geometry.translate(0, -0.8, 0); l.position.y = 3.8; });
+  mesh(new THREE.CylinderGeometry(0.62, 0.62, 1.2, 20), lambert(a.skin), 0, 4.6, 0, inner);
+  mesh(new THREE.PlaneGeometry(0.9, 0.9), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(drawFace(a.face)), transparent: true }), 0, 4.6, 0.63, inner);
+  const hc = a.hatColor || "#e63946";
+  if (withHardhat) {
+    mesh(new THREE.SphereGeometry(0.72, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2), lambert(0xffc400), 0, 5.1, 0, inner);
+    mesh(new THREE.CylinderGeometry(0.95, 0.95, 0.08, 20), lambert(0xffc400), 0, 5.12, 0, inner);
+  } else if (a.hat === "cap") { mesh(new THREE.CylinderGeometry(0.66, 0.66, 0.35, 20), lambert(hc), 0, 5.3, 0, inner); part(1.1, 0.08, 0.6, hc, 0, 5.15, 0.75); }
+  else if (a.hat === "crown") {
+    mesh(new THREE.CylinderGeometry(0.6, 0.55, 0.4, 8, 1, true), lambert("#ffd166", { side: THREE.DoubleSide }), 0, 5.4, 0, inner);
+    for (let i = 0; i < 6; i++) { const an = i / 6 * Math.PI * 2; mesh(new THREE.ConeGeometry(0.1, 0.3, 4), lambert("#ffd166"), Math.cos(an) * 0.55, 5.7, Math.sin(an) * 0.55, inner); }
+  } else if (a.hat === "headphones") {
+    mesh(new THREE.TorusGeometry(0.7, 0.07, 8, 20, Math.PI), lambert(hc), 0, 4.75, 0, inner);
+    part(0.25, 0.5, 0.5, hc, -0.7, 4.6, 0); part(0.25, 0.5, 0.5, hc, 0.7, 4.6, 0);
+  } else if (a.hat === "helmet") mesh(new THREE.SphereGeometry(0.95, 20, 14), lambert("#cfe8ff", { transparent: true, opacity: 0.35 }), 0, 4.65, 0, inner);
+  const shadow = mesh(new THREE.CircleGeometry(0.45, 16), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.35, depthWrite: false }), 0, 0.02, 0);
+  shadow.rotation.x = -Math.PI / 2;
+  return { group: g, legs, arms, shadow };
+}
+function rebuildAvatar() {
+  if (pl.group) { scene.remove(pl.group); scene.remove(pl.parts.shadow); }
+  const built = buildAvatar((platform.profile && platform.profile.avatar) || DEFAULT_AVATAR, save.hardhat && HARDHAT.need(save));
+  pl.group = built.group; pl.parts = built;
+  scene.add(pl.group);
+}
+
+// İz efekti (Roblox: Trail)
+const trail = [];
+const trailGeo = new THREE.SphereGeometry(0.16, 8, 6);
+let trailT = 0;
+function updateTrail(dt, t) {
+  const def = TRAILS.find(x => x.id === save.trail);
+  trailT -= dt;
+  if (def && def.color && pl.moving && !pl.dead && trailT <= 0) {
+    trailT = 0.035;
+    const color = def.color === "rainbow" ? new THREE.Color().setHSL((t * 0.6) % 1, 0.9, 0.6) : new THREE.Color(def.color);
+    const m = mesh(trailGeo, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85 }), pl.x, pl.y + 0.5, pl.z);
+    trail.push({ m, t: 0 });
+  }
+  for (let i = trail.length - 1; i >= 0; i--) {
+    const p = trail[i];
+    p.t += dt;
+    p.m.material.opacity = 0.85 * (1 - p.t / 0.6);
+    p.m.scale.setScalar(1 - p.t / 0.8);
+    if (p.t >= 0.6) { scene.remove(p.m); p.m.material.dispose(); trail.splice(i, 1); }
+  }
+}
+
+// ================================================================ Fizik
+const keys = new Set();
+const stick = { id: null, ox: 0, oy: 0, x: 0, y: 0 };
+const cam = { yaw: 0, pitch: 0.42, dist: 11 };
+let wt = 0;          // dünya saati (tuzaklar buna bağlı → deterministik)
+let running = false; // koşu sayacı çalışıyor mu
+const solids = () => objs.filter(o => o.solid && o.isSolid());
+function overlaps(o) {
+  return Math.abs(pl.x - o.bx) < o.w / 2 + R && Math.abs(pl.z - o.bz) < o.d / 2 + R &&
+    pl.y < o.by + o.h / 2 - 1e-3 && pl.y + H > o.by - o.h / 2 + 1e-3;
+}
+function inputDir() {
+  let fwd = 0, side = 0;
+  if (keys.has("KeyW") || keys.has("ArrowUp")) fwd += 1;
+  if (keys.has("KeyS") || keys.has("ArrowDown")) fwd -= 1;
+  if (keys.has("KeyA") || keys.has("ArrowLeft")) side -= 1;
+  if (keys.has("KeyD") || keys.has("ArrowRight")) side += 1;
+  fwd -= stick.y; side += stick.x;
+  const len = Math.hypot(fwd, side);
+  if (len < 0.05) return { x: 0, z: 0, len: 0 };
+  const k = Math.min(1, len) / len;
+  const fx = -Math.sin(cam.yaw), fz = -Math.cos(cam.yaw), rx = Math.cos(cam.yaw), rz = -Math.sin(cam.yaw);
+  return { x: (fx * fwd + rx * side) * k, z: (fz * fwd + rz * side) * k, len };
+}
+function physicsStep(dt) {
+  wt += dt;
+  for (const o of objs) if (o.update) o.update(wt, dt);
+  if (pl.dead) {
+    pl.deadT -= dt;
+    if (pl.deadT <= 0) respawn();
+    return;
+  }
+  // Hareketli zemin oyuncuyu taşır
+  if (pl.ground && pl.ground.delta) { pl.x += pl.ground.delta.x; pl.y += pl.ground.delta.y; pl.z += pl.ground.delta.z; }
+  const dir = inputDir();
+  const speed = SPEED * (save.passes.speed ? 1.15 : 1);
+  let vx = dir.x * speed, vz = dir.z * speed;
+  pl.moving = dir.len > 0.05;
+  if (pl.moving) pl.face = Math.atan2(dir.x, dir.z);
+  if (pl.grounded && pl.ground && pl.ground.push) { vx += pl.ground.push[0]; vz += pl.ground.push[1]; }
+  // Zıplama: tampon + coyote time
+  pl.jumpBuf -= dt;
+  if (pl.jumpBuf > 0 && (pl.grounded || wt - pl.lastGround < COYOTE)) {
+    pl.vy = JUMP_V; pl.grounded = false; pl.ground = null; pl.jumpBuf = 0; pl.lastGround = -1; SFX.jump();
+  }
+  pl.vy = Math.max(-50, pl.vy - G * dt);
+  const sol = solids();
+  pl.x += vx * dt;
+  for (const o of sol) if (overlaps(o)) pl.x = (vx > 0 || (vx === 0 && pl.x < o.bx)) ? o.bx - o.w / 2 - R - 1e-3 : o.bx + o.w / 2 + R + 1e-3;
+  pl.z += vz * dt;
+  for (const o of sol) if (overlaps(o)) pl.z = (vz > 0 || (vz === 0 && pl.z < o.bz)) ? o.bz - o.d / 2 - R - 1e-3 : o.bz + o.d / 2 + R + 1e-3;
+  const wasGrounded = pl.grounded;
+  pl.y += pl.vy * dt;
+  pl.grounded = false;
+  let ground = null;
+  for (const o of sol) if (overlaps(o)) {
+    if (pl.vy <= 0) { pl.y = o.by + o.h / 2; pl.vy = 0; pl.grounded = true; ground = o; }
+    else { pl.y = o.by - o.h / 2 - H; pl.vy = 0; }
+  }
+  pl.ground = ground;
+  if (pl.grounded) {
+    pl.lastGround = wt;
+    if (!wasGrounded) SFX.land();
+    if (ground.type === "vanish") ground.step();
+    if (ground.cp !== undefined) reachCheckpoint(ground.cp);
+    if (ground.type === "finish") finishRun();
+  }
+  // Ölüm kontrolleri
+  if (pl.y < FALL_Y) return die("Düştün!");
+  for (const o of objs) if (o.kill && o.kill()) return die(o.type === "lava" ? "Lava düştün!" : "Yakalandın!");
+}
+function die(msg) {
+  if (pl.dead) return;
+  pl.dead = true; pl.deadT = 0.55; pl.vy = 0;
+  save.deaths++; save.runDeaths++;
+  SFX.die();
+  $("dead").style.opacity = 1; setTimeout(() => $("dead").style.opacity = 0, 300);
+  setText($("deaths"), `💀 ${save.runDeaths}`);
+  if (save.deaths === 50) notify("💚 Zehir izi açıldı! (Ödüller)");
+  persist();
+}
+function respawn() {
+  const s = checkpoints[save.cp].spawn;
+  Object.assign(pl, { x: s.x, y: s.y, z: s.z, vy: 0, dead: false, ground: null, grounded: false, face: Math.PI });
+  cam.yaw = 0;
+}
+function reachCheckpoint(i) {
+  if (i <= save.cp) return;
+  save.cp = i;
+  const before = save.bestStage;
+  save.bestStage = Math.max(save.bestStage, i + 1);
+  SFX.checkpoint();
+  const flag = checkpoints[i];
+  flag.flagM.color.setHex(0x00d084); flag.flagM.emissive.setHex(0x004020);
+  banner(`✅ Bölüm ${i + 1}`, STAGES[i].name);
+  if (STAGES[i].boss) setTimeout(() => banner("👹 PATRON!", "Dönen kolun ve şok dalgalarının üstünden zıpla"), 1900);
+  for (const t of TRAILS) if (t.need(save) && !t.need({ ...save, bestStage: before })) notify(`${t.icon} Yeni ödül: ${t.name} izi! (🎁 Ödüller)`);
+  if (HARDHAT.need(save) && !HARDHAT.need({ ...save, bestStage: before })) notify("🪖 Yeni kostüm: Fabrika Kaskı! (🎁 Ödüller)");
+  persist(true);
+}
+let finished = false;
+function finishRun() {
+  if (finished) return;
+  finished = true; running = false;
+  const time = save.runTime;
+  const prevBest = save.bestTime;
+  const was = { ...save };
+  save.finishes++;
+  save.bestStage = STAGES.length;
+  let note;
+  if (save.runSkipped) note = "Bu koşuda bölüm atladın, süre sıralamaya girmedi.";
+  else if (prevBest == null || time < prevBest) { save.bestTime = time; note = prevBest == null ? "İlk bitirişin! 🎉" : `Yeni rekor! Önceki: ${fmtTime(prevBest)}`; }
+  else note = `Rekorun: ${fmtTime(prevBest)}`;
+  const unlocked = TRAILS.filter(t => t.need(save) && !t.need(was)).map(t => `${t.icon} ${t.name}`);
+  if (unlocked.length) note += ` · Yeni iz: ${unlocked.join(", ")}`;
+  SFX.finish();
+  $("fTime").textContent = fmtTime(time);
+  $("fDeaths").textContent = save.runDeaths;
+  $("fBest").textContent = fmtTime(save.bestTime);
+  $("fNote").textContent = note;
+  show("ovFinish");
+  persist(true);
+}
+function restartRun() {
+  save.cp = 0; save.runTime = 0; save.runSkipped = false; save.runDeaths = 0;
+  finished = false; running = true;
+  checkpoints.forEach((c, i) => { c.flagM.color.setHex(i === 0 ? 0x00d084 : 0x888888); c.flagM.emissive.setHex(i === 0 ? 0x004020 : 0x111111); });
+  setText($("deaths"), "💀 0");
+  respawn();
+  persist(true);
+}
+function jump() { initAudio(); pl.jumpBuf = JUMP_BUFFER; }
+
+// ================================================================ Kamera ve senkron
+function syncCamera(dt) {
+  const tx = pl.x + Math.sin(cam.yaw) * Math.cos(cam.pitch) * cam.dist;
+  const tz = pl.z + Math.cos(cam.yaw) * Math.cos(cam.pitch) * cam.dist;
+  const ty = pl.y + 1.6 + Math.sin(cam.pitch) * cam.dist;
+  const k = Math.min(1, dt * 9);
+  camera.position.x += (tx - camera.position.x) * k;
+  camera.position.y += (ty - camera.position.y) * k;
+  camera.position.z += (tz - camera.position.z) * k;
+  camera.lookAt(pl.x, pl.y + 1.4, pl.z);
+}
+function syncScene() {
+  for (const o of objs) {
+    if (o.sync) o.sync();
+    else if (o.type === "mover") o.mesh.position.set(o.bx, o.by, o.bz);
+  }
+  if (!pl.group) return;
+  pl.group.visible = !pl.dead;
+  pl.group.position.set(pl.x, pl.y, pl.z);
+  pl.group.rotation.y = pl.face;
+  pl.walk += pl.moving && pl.grounded ? 0.3 : 0;
+  const sw = pl.grounded ? (pl.moving ? Math.sin(pl.walk) * 0.8 : 0) : 0.5;
+  pl.parts.legs[0].rotation.x = sw; pl.parts.legs[1].rotation.x = pl.grounded ? -sw : -0.3;
+  pl.parts.arms[0].rotation.x = pl.grounded ? -sw : -2.6; pl.parts.arms[1].rotation.x = pl.grounded ? sw : -2.6;
+  // Gölge: altındaki en yakın zemine
+  let gy = -100;
+  for (const o of objs) if (o.solid && o.isSolid() && Math.abs(pl.x - o.bx) < o.w / 2 && Math.abs(pl.z - o.bz) < o.d / 2) { const top = o.by + o.h / 2; if (top <= pl.y + 0.05 && top > gy) gy = top; }
+  pl.parts.shadow.visible = gy > -100 && !pl.dead;
+  pl.parts.shadow.position.set(pl.x, gy + 0.03, pl.z);
+}
+function updateHud() {
+  const i = save.cp;
+  setText($("stageNum"), `Bölüm ${i + 1}/${STAGES.length}`);
+  setText($("stageName"), STAGES[i].name + (save.runSkipped ? " · ⏭️ atlamalı koşu" : ""));
+  setText($("timer").firstChild, fmtTime(save.runTime));
+}
+
+// ================================================================ Arayüz
+const OVERLAYS = ["ovHelp", "ovFinish", "ovLeader", "ovRewards", "ovShop"];
+const anyOverlay = () => OVERLAYS.some(id => $(id).classList.contains("show"));
+function show(id) { $(id).classList.add("show"); keys.clear(); }
+function hide(id) { $(id).classList.remove("show"); if (id === "ovHelp" && !save.helpSeen) { save.helpSeen = true; persist(true); } }
+document.querySelectorAll(".overlay").forEach(o => o.addEventListener("click", e => { if (e.target.closest("[data-close]")) hide(o.id); }));
+function renderLeader() {
+  const me = (platform.profile && platform.profile.name) || "Sen";
+  const rows = BOTS.map(([name, t]) => ({ name, t })).concat(save.bestTime != null ? [{ name: me, t: save.bestTime, me: true }] : []).sort((a, b) => a.t - b.t);
+  $("lbTable").innerHTML = rows.map((r, i) => `<tr class="${r.me ? "me" : ""}"><td>${["🥇", "🥈", "🥉"][i] || i + 1}</td><td>${r.name}${r.me ? " (sen)" : ""}</td><td>${fmtTime(r.t)}</td></tr>`).join("")
+    + (save.bestTime == null ? `<tr><td></td><td class="muted">Parkuru bitir, sen de gir!</td><td></td></tr>` : "");
+}
+function renderRewards() {
+  $("rewardList").innerHTML = TRAILS.map(t => {
+    const ok = t.need(save), on = save.trail === t.id;
+    return `<div class="item ${ok ? "" : "locked"}"><div class="ic">${t.icon}</div><div><b>${t.name}</b><div class="muted">${ok ? (t.id === "none" ? "İzi kapat" : "Açıldı") : "🔒 " + t.hint}</div></div>
+      <button class="btn ${on ? "" : "go"}" data-trail="${t.id}" ${ok && !on ? "" : "disabled"}>${on ? "✓ Takılı" : "Tak"}</button></div>`;
+  }).join("") + (() => {
+    const ok = HARDHAT.need(save);
+    return `<div class="item ${ok ? "" : "locked"}"><div class="ic">🪖</div><div><b>Fabrika Kaskı (kostüm)</b><div class="muted">${ok ? "Avatarının şapkası yerine geçer" : "🔒 " + HARDHAT.hint}</div></div>
+      <button class="btn ${save.hardhat ? "" : "go"}" data-hat="1" ${ok ? "" : "disabled"}>${save.hardhat ? "Çıkar" : "Tak"}</button></div>`;
+  })();
+}
+$("rewardList").addEventListener("click", e => {
+  const t = e.target.closest("[data-trail]"), h = e.target.closest("[data-hat]");
+  if (t) { save.trail = t.dataset.trail; persist(true); renderRewards(); }
+  if (h) { save.hardhat = !save.hardhat; persist(true); rebuildAvatar(); renderRewards(); }
+});
+function renderShop() {
+  const j = platform.profile ? platform.profile.jeton : null;
+  $("shopBal").textContent = j === null ? "" : `Robux bakiyen: R$ ${j}`;
+  $("shopList").innerHTML = PASSES.map(p => {
+    const owned = !p.consumable && save.passes[p.id];
+    const lastStage = p.id === "skip" && save.cp >= STAGES.length - 1;
+    return `<div class="item"><div class="ic">${p.icon}</div><div><b>${p.name}</b><div class="muted">${p.desc}</div></div>
+      <button class="btn ${owned ? "" : "warn"}" data-pass="${p.id}" ${owned || lastStage ? "disabled" : ""}>${owned ? "✓ Sende" : lastStage ? "Son bölüm" : "R$ " + p.jeton}</button></div>`;
+  }).join("");
+  $("shopNote").textContent = platform.inside ? "Robux, Küp Evreni'nin ortak parasıdır. Günlük ödül, oyun süresi ve rozetlerle kazanılır." : "Robux ile almak için oyunu Küp Evreni'nden aç (ana klasördeki index.html).";
+}
+$("shopList").addEventListener("click", e => {
+  const b = e.target.closest("[data-pass]");
+  if (!b) return;
+  const p = PASSES.find(x => x.id === b.dataset.pass);
+  requestPurchase(p, ok => {
+    if (!ok) { notify("Satın alma iptal edildi"); return; }
+    if (p.id === "skip") {
+      if (save.cp < STAGES.length - 1) {
+        save.runSkipped = true;
+        hide("ovShop");
+        reachCheckpoint(save.cp + 1);
+        respawn();
+      }
+    } else save.passes[p.id] = true;
+    persist(true);
+    notify(`${p.icon} ${p.name}!`);
+    renderShop();
+  });
+});
+$("bLeader").onclick = () => { renderLeader(); show("ovLeader"); };
+$("bRewards").onclick = () => { renderRewards(); show("ovRewards"); };
+$("bShop").onclick = () => { renderShop(); show("ovShop"); };
+$("bHelp").onclick = () => show("ovHelp");
+$("bRestart").onclick = () => { if (confirm("Koşuyu baştan başlatmak istiyor musun? (Süre ve bölüm sıfırlanır, ödüller kalır)")) restartRun(); };
+$("btnAgain").onclick = () => { hide("ovFinish"); restartRun(); };
+
+// ================================================================ Girdi
+addEventListener("keydown", e => {
+  if (e.repeat) return;
+  initAudio();
+  if (anyOverlay()) { if (e.code === "Escape") OVERLAYS.forEach(id => hide(id)); return; }
+  keys.add(e.code);
+  if (e.code === "Space") { jump(); e.preventDefault(); }
+  if (e.code === "KeyR") die("");
+  if (e.code.startsWith("Arrow")) e.preventDefault();
+});
+addEventListener("keyup", e => keys.delete(e.code));
+addEventListener("blur", () => keys.clear());
+addEventListener("wheel", e => { if (!anyOverlay()) cam.dist = clamp(cam.dist + Math.sign(e.deltaY) * 1.2, 5, 22); }, { passive: true });
+const ptrs = new Map();
+canvas.addEventListener("pointerdown", e => {
+  initAudio();
+  const p = { x: e.clientX, y: e.clientY, stick: false };
+  if (e.pointerType !== "mouse") $("jumpBtn").style.display = "block";
+  if (e.pointerType !== "mouse" && e.clientX < innerWidth / 2 && stick.id === null) {
+    p.stick = true; stick.id = e.pointerId; stick.ox = e.clientX; stick.oy = e.clientY;
+    const el = $("stick"); el.style.left = e.clientX + "px"; el.style.top = e.clientY + "px"; el.style.display = "block";
+  }
+  ptrs.set(e.pointerId, p);
+});
+addEventListener("pointermove", e => {
+  const p = ptrs.get(e.pointerId);
+  if (!p) return;
+  if (p.stick) {
+    let dx = e.clientX - stick.ox, dy = e.clientY - stick.oy;
+    const l = Math.hypot(dx, dy), max = 50;
+    if (l > max) { dx = dx / l * max; dy = dy / l * max; }
+    stick.x = dx / max; stick.y = dy / max;
+    $("stick").firstChild.style.transform = `translate(${dx}px, ${dy}px)`;
+  } else {
+    cam.yaw -= (e.clientX - p.x) * 0.006;
+    cam.pitch = clamp(cam.pitch + (e.clientY - p.y) * 0.004, 0.05, 1.2);
+  }
+  p.x = e.clientX; p.y = e.clientY;
+});
+function endPtr(e) {
+  const p = ptrs.get(e.pointerId);
+  if (!p) return;
+  ptrs.delete(e.pointerId);
+  if (p.stick) { stick.id = null; stick.x = stick.y = 0; $("stick").style.display = "none"; $("stick").firstChild.style.transform = ""; }
+}
+addEventListener("pointerup", endPtr);
+addEventListener("pointercancel", endPtr);
+$("jumpBtn").addEventListener("pointerdown", e => { e.preventDefault(); e.stopPropagation(); jump(); });
+if (matchMedia("(pointer: coarse)").matches) $("jumpBtn").style.display = "block";
+
+// Dik telefonda yatay görüş daralmasın: dikey FOV'u ekran oranına göre aç (en fazla 100°)
+function fitFov(base) {
+  const a = innerWidth / innerHeight;
+  if (a >= 1) return base;
+  return Math.min(100, 2 * Math.atan(Math.tan(base * Math.PI / 360) / a) * 180 / Math.PI);
+}
+function resize() {
+  renderer.setPixelRatio(Math.min(1.5, devicePixelRatio || 1));
+  renderer.setSize(innerWidth, innerHeight, false);
+  camera.aspect = innerWidth / innerHeight;
+  camera.fov = fitFov(65);
+  camera.updateProjectionMatrix();
+}
+addEventListener("resize", resize);
+
+// ================================================================ Döngü
+let last = performance.now();
+function frame(t) {
+  let dt = Math.min(0.1, (t - last) / 1000);
+  last = t;
+  const paused = anyOverlay();
+  if (!paused) {
+    const n = Math.ceil(dt / (1 / 120));
+    for (let i = 0; i < n; i++) physicsStep(dt / n);
+    if (running && !finished) save.runTime += dt;
+    persist();
+  }
+  updateTrail(paused ? 0 : dt, wt);
+  syncScene();
+  syncCamera(dt);
+  updateHud();
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+
+// ================================================================ Başlat
+buildLevel();
+rebuildAvatar();
+checkpoints.forEach((c, i) => { if (i <= save.cp) { c.flagM.color.setHex(0x00d084); c.flagM.emissive.setHex(0x004020); } });
+respawn();
+running = true;
+setText($("deaths"), `💀 ${save.runDeaths}`);
+if (save.helpSeen) hide("ovHelp");
+resize();
+camera.position.set(pl.x, pl.y + 6, pl.z + 11);
+setInterval(() => persist(true), 10000);
+requestAnimationFrame(frame);
+</script>
+<div id="rotateHint" style="display:none;position:fixed;left:50%;top:30%;transform:translate(-50%,-50%);z-index:99;max-width:80vw;padding:12px 16px;border-radius:14px;background:rgba(0,0,0,0.78);color:#fff;font:600 15px system-ui,sans-serif;text-align:center;pointer-events:auto">📱↻ Daha geniş görmek için telefonu yan çevir<br><small style="opacity:.7">(kapatmak için dokun)</small></div>
+<script>
+// Dik tutulan telefonda bir kez "yan çevir" ipucu
+(() => {
+  const el = document.getElementById("rotateHint");
+  if (!matchMedia("(pointer: coarse)").matches) return;
+  let closed = false;
+  const upd = () => { el.style.display = !closed && innerWidth < innerHeight ? "block" : "none"; };
+  el.addEventListener("pointerdown", e => { e.stopPropagation(); closed = true; upd(); });
+  setTimeout(() => { closed = true; upd(); }, 8000);
+  addEventListener("resize", upd); upd();
+})();
+</script>
+</body>
+</html>
