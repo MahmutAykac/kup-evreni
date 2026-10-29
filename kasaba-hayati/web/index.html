@@ -1114,7 +1114,7 @@ function buildAvatar(a) {
   } else if (a.hat === "headphones") {
     mesh(new THREE.TorusGeometry(0.7, 0.07, 8, 20, Math.PI), lambert(hc), 0, 4.75, 0, inner);
     part(0.25, 0.5, 0.5, hc, -0.7, 4.6, 0); part(0.25, 0.5, 0.5, hc, 0.7, 4.6, 0);
-  } else if (a.hat === "helmet") mesh(new THREE.SphereGeometry(0.95, 20, 14), lambert("#cfe8ff", { transparent: true, opacity: 0.35 }), 0, 4.65, 0, inner);
+  } else if (a.hat === "helmet") mesh(new THREE.SphereGeometry(0.95, 20, 14), lambert("#cfe8ff", { transparent: true, opacity: 0.35, depthWrite: false }), 0, 4.65, 0, inner);
   return { group: g, legs, arms };
 }
 function rebuildAvatar() {

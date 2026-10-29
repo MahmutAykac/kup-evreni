@@ -421,7 +421,7 @@ function buildAvatar(a) {
     const band = new THREE.Mesh(new THREE.TorusGeometry(0.7, 0.07, 8, 20, Math.PI), m(hc)); band.position.set(0, 4.75, 0); band.rotation.z = 0; g.add(band);
     part(0.25, 0.5, 0.5, hc, -0.7, 4.6, 0); part(0.25, 0.5, 0.5, hc, 0.7, 4.6, 0);
   } else if (a.hat === "helmet") {
-    const h = new THREE.Mesh(new THREE.SphereGeometry(0.95, 20, 14), new THREE.MeshLambertMaterial({ color: "#cfe8ff", transparent: true, opacity: 0.35 }));
+    const h = new THREE.Mesh(new THREE.SphereGeometry(0.95, 20, 14), new THREE.MeshLambertMaterial({ color: "#cfe8ff", transparent: true, opacity: 0.35, depthWrite: false }));
     h.position.set(0, 4.65, 0); g.add(h);
   }
   g.userData = { legs, arms };
