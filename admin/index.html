@@ -763,7 +763,8 @@ function renderEco() {
 // ================================================================ Duyurular
 let annType = null;
 function renderAnnounce() {
-  const d = cfg().duyuru || { text: "", type: "info", on: false };
+  // Yayında olmayan eski duyurunun metni kutuya gelmesin
+  const saved = cfg().duyuru, d = saved && saved.on ? saved : { text: "", type: "info", on: false };
   if (!annType) annType = d.type || "info";
   const icon = { info: "📢", success: "✅", warn: "⚠️", event: "🎉", fresh: "🆕" };
   $("page").innerHTML = `<div class="stack">
@@ -791,7 +792,7 @@ function renderAnnounce() {
     setCfg(c => c.duyuru = { text: t, type: annType, on: true, at: Date.now() }); logAct(`Duyuru yayınlandı: "${t}"`);
     toast("Duyuru yayınlandı"); render();
   };
-  $("btnAnnOff").onclick = () => { setCfg(c => { if (c.duyuru) c.duyuru.on = false; }); logAct("Duyuru yayından kaldırıldı"); toast("Duyuru kaldırıldı"); render(); };
+  $("btnAnnOff").onclick = () => { setCfg(c => { delete c.duyuru; }); annType = null; logAct("Duyuru yayından kaldırıldı"); toast("Duyuru kaldırıldı"); render(); };
 }
 
 // ================================================================ Promo kodlar
