@@ -90,6 +90,7 @@
   .banner.success { background: linear-gradient(90deg, rgba(0,176,111,0.24), rgba(0,176,111,0.08)); }
   .banner.warn { background: linear-gradient(90deg, rgba(255,209,102,0.24), rgba(255,209,102,0.08)); }
   .banner.event { background: linear-gradient(90deg, rgba(167,112,255,0.3), rgba(255,94,170,0.14)); }
+  .banner.fresh { background: linear-gradient(90deg, rgba(255,59,92,0.28), rgba(255,122,69,0.1)); }
   .price { font-size: 12px; color: var(--gold); font-weight: 700; margin-left: 4px; }
   .thumb .soon { position: absolute; inset: 0; background: rgba(10,10,14,0.6); display: grid; place-items: center; font-size: 16px; font-weight: 700; }
   .game b { display: block; margin-top: 8px; font-size: 16px; }
@@ -577,7 +578,7 @@ function renderHome() {
 }
 
 function renderBanners() {
-  const d = CFG.duyuru, ic = { info: "📢", success: "✅", warn: "⚠️", event: "🎉" };
+  const d = CFG.duyuru, ic = { info: "📢", success: "✅", warn: "⚠️", event: "🎉", fresh: "🆕" };
   const esc = s => String(s).replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
   $("banners").innerHTML = (eco().double ? `<div class="banner event"><span class="bi">💎</span>2x Robux etkinliği! Günlük ödül, oyun ödülü ve rozet ödülleri iki katı.</div>` : "") +
     (d && d.on && d.text ? `<div class="banner ${ic[d.type] ? d.type : "info"}"><span class="bi">${ic[d.type] || "📢"}</span>${esc(d.text)}</div>` : "");

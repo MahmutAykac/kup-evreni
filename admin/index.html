@@ -36,7 +36,7 @@
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; background: var(--bg); color: var(--text); font-family: "Trebuchet MS", system-ui, sans-serif; font-size: 15px; }
-  button, input, select { font: inherit; color: inherit; }
+  button, input, select, textarea { font: inherit; color: inherit; }
   a { color: var(--accent); text-decoration: none; }
   svg.i { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
   .muted { color: var(--muted); }
@@ -247,6 +247,7 @@
   .banner.success { background: linear-gradient(90deg, rgba(0,176,111,0.24), rgba(0,176,111,0.08)); }
   .banner.warn { background: linear-gradient(90deg, rgba(255,209,102,0.24), rgba(255,209,102,0.08)); }
   .banner.event { background: linear-gradient(90deg, rgba(167,112,255,0.3), rgba(255,94,170,0.14)); }
+  .banner.fresh { background: linear-gradient(90deg, rgba(255,59,92,0.28), rgba(255,122,69,0.1)); }
   .swList { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
   .swItem { position: relative; width: 40px; height: 40px; border-radius: 10px; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.15); }
   .swItem button { position: absolute; right: -6px; top: -6px; width: 20px; height: 20px; border-radius: 50%; border: 0; background: var(--red); color: #fff; cursor: pointer; font-size: 12px; line-height: 20px; padding: 0; }
@@ -704,7 +705,7 @@ function renderSettings() {
 const CFG_KEY = "kupEvreniAyar", LOG_KEY = "kupEvreniAdminLog";
 const ECO_DEFAULT = { daily: 100, play: 15, badge: 25, start: 200, double: false };
 const SHAPES = [["cap", "Şapka"], ["crown", "Taç"], ["headphones", "Kulaklık"], ["helmet", "Uzay kaskı"], ["tophat", "Silindir şapka"], ["halo", "Hale"], ["horns", "Boynuz"], ["beanie", "Bere"]];
-const ANN_TYPES = [["info", "📢 Bilgi"], ["success", "✅ Başarı"], ["warn", "⚠️ Uyarı"], ["event", "🎉 Etkinlik"]];
+const ANN_TYPES = [["info", "📢 Bilgi"], ["success", "✅ Başarı"], ["warn", "⚠️ Uyarı"], ["event", "🎉 Etkinlik"], ["fresh", "🆕 Yeni Eklenen"]];
 const cfg = () => load(CFG_KEY, {}) || {};
 function setCfg(fn) { const c = cfg(); fn(c); save(CFG_KEY, c); }
 const eco = () => ({ ...ECO_DEFAULT, ...(cfg().eco || {}) });
@@ -764,7 +765,7 @@ let annType = null;
 function renderAnnounce() {
   const d = cfg().duyuru || { text: "", type: "info", on: false };
   if (!annType) annType = d.type || "info";
-  const icon = { info: "📢", success: "✅", warn: "⚠️", event: "🎉" };
+  const icon = { info: "📢", success: "✅", warn: "⚠️", event: "🎉", fresh: "🆕" };
   $("page").innerHTML = `<div class="stack">
     <div class="card"><div class="cardHead"><h2>Ana sayfa duyurusu</h2>${d.on && d.text ? `<span class="pill green right">Yayında</span>` : `<span class="pill gray right">Yayında değil</span>`}</div><div class="cardBody">
       <label class="lbl" for="annText">Duyuru metni</label>
