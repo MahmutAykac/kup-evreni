@@ -253,6 +253,17 @@ const PETS = {
   baykus: { name: "Kar Baykuşu", icon: "🦉", rarity: "R", power: 800, color: 0xf5f9ff, shape: { wings: true, ears: "tri", beak: true } },
   ayi: { name: "Kuyrukluyıldız Ayısı", icon: "🐻", rarity: "E", power: 2000, color: 0xe8f4ff, shape: { ears: "round" } },
   nebula: { name: "Nebula Ejderi", icon: "🐲", rarity: "L", power: 8000, color: 0x3ad1ff, glow: 0x003050, shape: { wings: true, horns: true, tail: true } },
+  // Kanatlı Yavrular Paketi (Robux): yumurtadan çıkmaz, sadece paketle gelir
+  yavruYesil: { name: "Çimen Yavrusu", icon: "🐥", rarity: "R", power: 50, color: 0x4fd67a, shape: { chick: true } },
+  yavruMavi: { name: "Gök Yavrusu", icon: "🐥", rarity: "R", power: 80, color: 0x3fa9f5, shape: { chick: true } },
+  yavruMor: { name: "Mor Yavru", icon: "🐥", rarity: "R", power: 120, color: 0xb04ff0, shape: { chick: true } },
+  yavruPembe: { name: "Şeker Yavrusu", icon: "🐥", rarity: "E", power: 200, color: 0xff7ac8, shape: { chick: true } },
+  yavruSari: { name: "Güneş Yavrusu", icon: "🐥", rarity: "E", power: 350, color: 0xffd93d, shape: { chick: true } },
+  yavruTuruncu: { name: "Kor Yavrusu", icon: "🐥", rarity: "E", power: 600, color: 0xff8a2a, shape: { chick: true } },
+  yavruKirmizi: { name: "Yakut Yavrusu", icon: "🐥", rarity: "E", power: 1000, color: 0xe8364a, shape: { chick: true } },
+  yavruTurkuaz: { name: "Okyanus Yavrusu", icon: "🐥", rarity: "L", power: 1800, color: 0x2ee6d0, glow: 0x003a35, shape: { chick: true } },
+  yavruGece: { name: "Gece Yavrusu", icon: "🐥", rarity: "L", power: 3000, color: 0x2b2f6b, glow: 0x10124a, shape: { chick: true } },
+  yavruKozmik: { name: "Kozmik Yavru", icon: "🐥", rarity: "L", power: 5000, color: 0xf2f6ff, glow: 0x3a2a6a, shape: { chick: true } },
 };
 const EGGS = {
   ay: { name: "Ay Yumurtası", price: 100, color: 0xdfe3ee, pets: ["tavsan", "fare", "tilki", "kurt", "ejder"] },
@@ -266,7 +277,16 @@ const BASE_SLOTS = 3;
 const PASSES = [
   { id: "double", name: "2x Yıldız Tozu", icon: "✨", jeton: 150, desc: "Kırdığın her kristalden 2 kat yıldız tozu." },
   { id: "slots", name: "+2 Hayvan Slotu", icon: "🐾", jeton: 100, desc: "3 yerine 5 hayvan kuşan." },
+  { id: "yavrular", name: "Kanatlı Yavrular Paketi", icon: "🐥", jeton: 250, desc: "10 boynuzlu, kanatlı yavru (Nadir → Efsanevi). Envanterde 10 boş yer gerekir.",
+    pack: ["yavruYesil", "yavruMavi", "yavruMor", "yavruPembe", "yavruSari", "yavruTuruncu", "yavruKirmizi", "yavruTurkuaz", "yavruGece", "yavruKozmik"] },
 ];
+// Paket hayvanlarını envantere ekler; yer yoksa hiçbirini vermez
+function grantPack(p) {
+  if (save.pets.length + p.pack.length > MAX_PETS) return false;
+  for (const sp of p.pack) { save.pets.push({ uid: save.nextUid++, sp, v: "n", eq: false }); save.seen[sp] = true; }
+  Server.fillSlots();
+  return true;
+}
 const BOT_NAMES = ["YıldızAvcısı", "NebulaKedisi", "AyKaşifi", "MarsKralı", "GalaksiEfe", "UzayKızı_07", "KuyrukluYıldız"];
 const BOT_FACES = ["🧑‍🚀", "😺", "🦊", "👑", "😎", "🌟", "☄️"];
 const PLAYER_SPEED = 9;
@@ -326,7 +346,7 @@ addEventListener("message", e => {
 
 // ================================================================ Küp Evreni hediyeleri (admin panelinden)
 // kup:gift { gifts: [{ gid, items: [{ key, n }] }] } → uygula, kaydet → kup:giftAck { gid, skipped }
-// Desteklenen key'ler: dust · pet:<türId>:<n|g|r> · planet:<1|2> · pass:<double|slots>
+// Desteklenen key'ler: dust · pet:<türId>:<n|g|r> · planet:<1|2> · pass:<double|slots|yavrular>
 const GIFT_MAX_DUST = 1e12;
 function applyGiftItem(key, n) {
   const [kind, a, b] = key.split(":");
@@ -353,6 +373,7 @@ function applyGiftItem(key, n) {
   if (kind === "pass") {
     const p = PASSES.find(x => x.id === a);
     if (!p || save.passes[p.id]) return false;
+    if (p.pack && !grantPack(p)) return false; // envanter dolu → atlanır
     save.passes[p.id] = true;
     if (p.id === "slots") Server.fillSlots(); // satın almadaki yan etkiyle aynı
     return true;
@@ -828,10 +849,23 @@ function makePetMesh(pet) {
   else if (pet.v === "r") mat = lambert(0xff0000, { emissive: 0x202020 });
   else mat = lambert(d.color, { emissive: d.glow || 0x000000 });
   const black = new THREE.MeshBasicMaterial({ color: 0x111111 }), white = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  const sh = d.shape;
+  const wings = [];
+  if (sh.chick) { // tek parça yuvarlak gövde, tepede iki boynuz, uzun yassı kanatlar, kısa kuyruk
+    const body = mesh(new THREE.SphereGeometry(0.62, 20, 16), mat, 0, 0.7, 0, inner); body.scale.set(1, 1.05, 0.95);
+    const hornMat = lambert(0xd9b26b);
+    for (const s of [-1, 1]) {
+      mesh(new THREE.SphereGeometry(0.07, 8, 6), black, s * 0.2, 0.86, 0.55, inner); mesh(new THREE.SphereGeometry(0.028, 6, 4), white, s * 0.18, 0.89, 0.61, inner);
+      const h = mesh(new THREE.ConeGeometry(0.07, 0.24, 8), hornMat, s * 0.14, 1.38, 0.05, inner); h.rotation.z = s * -0.2;
+      const pv = new THREE.Group(); pv.position.set(s * 0.5, 0.62, 0); inner.add(pv);
+      const w = mesh(new THREE.BoxGeometry(1.0, 0.05, 0.38), mat, s * 0.5, 0, 0.05, pv); w.rotation.y = s * 0.15;
+      wings.push({ pv, s });
+    }
+    const t = mesh(new THREE.ConeGeometry(0.12, 0.3, 6), mat, 0, 0.45, -0.62, inner); t.rotation.x = -2.0;
+  } else {
   const body = mesh(new THREE.SphereGeometry(0.5, 16, 12), mat, 0, 0.55, 0, inner); body.scale.set(1, 0.9, 1.1);
   mesh(new THREE.SphereGeometry(0.4, 16, 12), mat, 0, 1.05, 0.32, inner);
   for (const s of [-1, 1]) { mesh(new THREE.SphereGeometry(0.075, 8, 6), black, s * 0.15, 1.12, 0.68, inner); mesh(new THREE.SphereGeometry(0.03, 6, 4), white, s * 0.13, 1.15, 0.745, inner); }
-  const sh = d.shape;
   for (const s of [-1, 1]) {
     if (sh.ears === "long") { const e = mesh(new THREE.BoxGeometry(0.12, 0.55, 0.08), mat, s * 0.16, 1.58, 0.25, inner); e.rotation.z = s * -0.12; }
     if (sh.ears === "tri") { const e = mesh(new THREE.ConeGeometry(0.14, 0.32, 4), mat, s * 0.22, 1.45, 0.28, inner); e.rotation.z = s * -0.3; }
@@ -840,11 +874,11 @@ function makePetMesh(pet) {
   }
   if (sh.beak) { const b = mesh(new THREE.ConeGeometry(0.08, 0.22, 6), lambert(0xffa630), 0, 1.0, 0.78, inner); b.rotation.x = Math.PI / 2; }
   if (sh.tail) { const t = mesh(new THREE.CylinderGeometry(0.05, 0.11, 0.6, 6), mat, 0, 0.55, -0.62, inner); t.rotation.x = -1.0; }
-  const wings = [];
   if (sh.wings) for (const s of [-1, 1]) {
     const pv = new THREE.Group(); pv.position.set(s * 0.4, 0.78, -0.05); inner.add(pv);
     mesh(new THREE.BoxGeometry(0.8, 0.05, 0.45), mat, s * 0.4, 0, 0, pv);
     wings.push({ pv, s });
+  }
   }
   const shadow = mesh(new THREE.CircleGeometry(0.5, 16), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.25 }), 0, 0.03, 0);
   shadow.rotation.x = -Math.PI / 2;
@@ -1268,10 +1302,13 @@ $("shopList").addEventListener("click", e => {
   if (!b) return;
   const p = PASSES.find(x => x.id === b.dataset.pass);
   if (save.passes[p.id]) return;
+  if (p.pack && save.pets.length + p.pack.length > MAX_PETS) { notify(`Envanterde ${p.pack.length} boş yer gerekli. Hayvan sil ya da birleştir`); return; }
   requestPurchase(p, ok => {
     if (!ok) { notify("Satın alma iptal edildi"); return; }
+    if (p.pack && !grantPack(p)) { notify("Envanter dolu, paket verilemedi"); return; }
     save.passes[p.id] = true;
-    if (p.id === "slots") { Server.fillSlots(); syncPetObjs(); }
+    if (p.id === "slots" || p.pack) { Server.fillSlots(); syncPetObjs(); }
+    if (p.pack && $("ovPets").classList.contains("show")) renderPets();
     persist(true);
     notify(`${p.icon} ${p.name} etkin!`);
     renderShop();
