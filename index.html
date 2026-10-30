@@ -82,6 +82,15 @@
     box-shadow: inset 0 0 0 1px var(--line); transition: transform 0.12s; }
   .game:hover .thumb { transform: translateY(-3px); }
   .thumb .tag { position: absolute; left: 8px; top: 8px; background: rgba(0,0,0,0.55); font-size: 12px; padding: 3px 8px; border-radius: 8px; }
+  .thumb .new { position: absolute; right: 8px; top: 8px; background: #ff3b5c; color: #fff; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 8px; letter-spacing: 0.04em; }
+  .banner { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 14px; margin-bottom: 14px; font-weight: 700; line-height: 1.4;
+    border: 1px solid rgba(255,255,255,0.12); }
+  .banner .bi { font-size: 22px; }
+  .banner.info { background: linear-gradient(90deg, rgba(0,162,255,0.22), rgba(0,162,255,0.08)); }
+  .banner.success { background: linear-gradient(90deg, rgba(0,176,111,0.24), rgba(0,176,111,0.08)); }
+  .banner.warn { background: linear-gradient(90deg, rgba(255,209,102,0.24), rgba(255,209,102,0.08)); }
+  .banner.event { background: linear-gradient(90deg, rgba(167,112,255,0.3), rgba(255,94,170,0.14)); }
+  .price { font-size: 12px; color: var(--gold); font-weight: 700; margin-left: 4px; }
   .thumb .soon { position: absolute; inset: 0; background: rgba(10,10,14,0.6); display: grid; place-items: center; font-size: 16px; font-weight: 700; }
   .game b { display: block; margin-top: 8px; font-size: 16px; }
   .game span { display: block; font-size: 13px; color: var(--muted); }
@@ -196,6 +205,7 @@
 </nav>
 <main>
   <section id="home" class="page on">
+    <div id="banners"></div>
     <div id="hello">
       <div id="helloAvatar"></div>
       <div><h1 id="helloTitle" style="margin:0">Merhaba!</h1><div class="muted" id="helloSub"></div></div>
@@ -334,14 +344,36 @@ const BADGES = [
   { id: "shopper", icon: "🛍️", name: "Alışverişçi", desc: "Oyun içinde Robux ile bir şey al" },
 ];
 
-const SKINS = ["#ffdbac", "#f1c27d", "#e0ac69", "#c68642", "#8d5524", "#5c3a21"];
-const COLORS = ["#e63946", "#ff7a45", "#ffd166", "#06d6a0", "#118ab2", "#3a0ca3", "#7b2cbf", "#f72585", "#f2f3f5", "#2b2d42", "#6c757d", "#1b4332"];
-const HATS = [["none", "Yok"], ["cap", "Şapka"], ["crown", "Taç"], ["headphones", "Kulaklık"], ["helmet", "Uzay kaskı"]];
-const FACES = [["smile", "🙂"], ["cool", "😎"], ["wow", "😮"], ["grin", "😁"]];
+let SKINS = ["#ffdbac", "#f1c27d", "#e0ac69", "#c68642", "#8d5524", "#5c3a21"];
+let COLORS = ["#e63946", "#ff7a45", "#ffd166", "#06d6a0", "#118ab2", "#3a0ca3", "#7b2cbf", "#f72585", "#f2f3f5", "#2b2d42", "#6c757d", "#1b4332"];
+let HATS = [["none", "Yok"], ["cap", "Şapka"], ["crown", "Taç"], ["headphones", "Kulaklık"], ["helmet", "Uzay kaskı"]];
+let FACES = [["smile", "🙂"], ["cool", "😎"], ["wow", "😮"], ["grin", "😁"]];
+
+// ================================================================ Admin ayarları (admin/ panelinden yazılır: kupEvreniAyar)
+// eco: ödüller ve 2x etkinlik · duyuru: ana sayfa şeridi · games: gizli / bakımda / yeni · codes: promo kodlar · avatar: eklenen renk, yüz, aksesuar
+const CFG_KEY = "kupEvreniAyar";
+const BASE_AVATAR = { SKINS: [...SKINS], COLORS: [...COLORS], FACES: [...FACES], HATS: [...HATS] };
+let CFG = {};
+function loadCfg() {
+  try { CFG = JSON.parse(localStorage.getItem(CFG_KEY) || "{}") || {}; } catch (e) { CFG = {}; }
+  const av = CFG.avatar || {};
+  SKINS = [...BASE_AVATAR.SKINS, ...(av.skins || [])];
+  COLORS = [...BASE_AVATAR.COLORS, ...(av.colors || [])];
+  FACES = [...BASE_AVATAR.FACES, ...(av.faces || []).map(f => [f.id, f.emoji])];
+  HATS = [...BASE_AVATAR.HATS, ...(av.hats || []).map(h => [h.id, h.name])];
+}
+loadCfg();
+const eco = () => ({ daily: 100, play: 15, badge: 25, start: 200, double: false, ...(CFG.eco || {}) });
+const mult = () => eco().double ? 2 : 1;
+const gameCfg = id => (CFG.games || {})[id] || {};
+const visibleGames = () => GAMES.filter(g => !gameCfg(g.id).hidden);
+const playable = g => !g.soon && !gameCfg(g.id).maint;
+const customItem = id => [...(CFG.avatar?.faces || []), ...(CFG.avatar?.hats || [])].find(x => x.id === id);
+const faceEmoji = id => (FACES.find(f => f[0] === id) || FACES[0])[1];
 
 // ================================================================ Profil (localStorage)
 const KEY = "kupEvreni";
-const DEFAULT = { name: "", jeton: 200, lastDaily: "", joined: new Date().toISOString().slice(0, 10), recent: [], playTime: {},
+const DEFAULT = { name: "", jeton: eco().start, lastDaily: "", joined: new Date().toISOString().slice(0, 10), recent: [], playTime: {},
   badges: { welcome: true }, purchases: [], gameStats: {},
   avatar: { skin: SKINS[0], shirt: "#118ab2", pants: "#2b2d42", hat: "cap", hatColor: "#e63946", face: "smile" } };
 let profile;
@@ -360,9 +392,9 @@ function toast(msg) {
   clearTimeout(toast.h); toast.h = setTimeout(() => t.style.display = "none", 2600);
 }
 // Robux kazanma kuralları (hepsi platformda; oyunlar Robux veremez)
-const DAILY_REWARD = 100;
-const PLAY_REWARD = 15, PLAY_REWARD_SEC = 300;   // her 5 dk oyun
-const BADGE_REWARD = 25;
+// Miktarlar admin panelinden değişebilir (eco), 2x etkinlikte iki katı
+const PLAY_REWARD_SEC = 300;   // her 5 dk oyun
+const dailyR = () => eco().daily * mult(), playR = () => eco().play * mult(), badgeR = () => eco().badge * mult();
 function addRobux(n) {
   profile.jeton += n; persist(); renderTop();
   if (current) sendProfile(); // açık oyundaki bakiye de güncellensin
@@ -371,8 +403,8 @@ function award(id) {
   if (profile.badges[id]) return;
   profile.badges[id] = true;
   const b = BADGES.find(x => x.id === id);
-  addRobux(BADGE_REWARD);
-  toast(`${b.icon} Rozet kazandın: ${b.name} (+R$ ${BADGE_REWARD})`);
+  addRobux(badgeR());
+  toast(`${b.icon} Rozet kazandın: ${b.name} (+R$ ${badgeR()})`);
 }
 function renderEarn() {
   const canDaily = profile.lastDaily !== today();
@@ -381,13 +413,34 @@ function renderEarn() {
   $("earnBal").textContent = `Bakiyen: R$ ${profile.jeton}`;
   $("earnList").innerHTML = `
     <div class="earn"><div class="ico">🎁</div><div><b>Günlük ödül</b><div class="muted">Her gün ana sayfadan al</div></div>
-      ${canDaily ? `<button class="btn blue" id="btnEarnDaily">+R$ ${DAILY_REWARD} al</button>` : `<span class="muted">Yarın tekrar ✓</span>`}</div>
+      ${canDaily ? `<button class="btn blue" id="btnEarnDaily">+R$ ${dailyR()} al</button>` : `<span class="muted">Yarın tekrar ✓</span>`}</div>
     <div class="earn"><div class="ico">⏱️</div><div><b>Oyun oyna</b><div class="muted">Her ${PLAY_REWARD_SEC / 60} dakika oyunda: sıradakine ${Math.ceil((PLAY_REWARD_SEC - sec) / 60)} dk</div>
-      <div class="pbar"><i style="width:${sec / PLAY_REWARD_SEC * 100}%"></i></div></div><span class="amt">+R$ ${PLAY_REWARD}</span></div>
+      <div class="pbar"><i style="width:${sec / PLAY_REWARD_SEC * 100}%"></i></div></div><span class="amt">+R$ ${playR()}</span></div>
     <div class="earn"><div class="ico">🏅</div><div><b>Rozet kazan</b><div class="muted">${got}/${BADGES.length} rozet. Profil sayfasından hangilerinin kaldığını gör</div></div>
-      <span class="amt">+R$ ${BADGE_REWARD} her biri</span></div>`;
+      <span class="amt">+R$ ${badgeR()} her biri</span></div>
+    <div class="earn"><div class="ico">🎟️</div><div><b>Promo kod</b><div style="display:flex;gap:8px;margin-top:6px">
+      <input id="promoInput" maxlength="20" placeholder="KOD" style="flex:1;min-width:0;height:38px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text);padding:0 10px;font:inherit;text-transform:uppercase">
+      <button class="btn blue" id="btnPromo">Kullan</button></div></div><span></span></div>`;
+  $("btnPromo").onclick = () => { redeem($("promoInput").value); renderEarn(); };
+  $("promoInput").onkeydown = e => { if (e.key === "Enter") $("btnPromo").click(); };
   const d = $("btnEarnDaily");
   if (d) d.onclick = () => { $("btnDaily").click(); renderEarn(); };
+}
+function redeem(raw) {
+  const code = String(raw || "").trim().toLocaleUpperCase("tr");
+  if (!code) return;
+  loadCfg(); // admin az önce eklemiş olabilir
+  const c = (CFG.codes || []).find(x => x.code === code);
+  if (!c || c.off) { toast("Geçersiz kod"); return; }
+  if (c.expires && today() > c.expires) { toast("Bu kodun süresi dolmuş"); return; }
+  profile.codes = profile.codes || [];
+  if (profile.codes.includes(code)) { toast("Bu kodu zaten kullandın"); return; }
+  if (c.max && (c.used || 0) >= c.max) { toast("Bu kodun kullanım hakkı doldu"); return; }
+  c.used = (c.used || 0) + 1;
+  try { localStorage.setItem(CFG_KEY, JSON.stringify(CFG)); } catch (e) {}
+  profile.codes.push(code);
+  addRobux(c.amount);
+  toast(`🎟️ ${code}: +R$ ${c.amount}!`);
 }
 const fmtTime = s => s < 60 ? `${Math.round(s)} sn` : s < 3600 ? `${Math.floor(s / 60)} dk` : `${(s / 3600).toFixed(1).replace(".", ",")} sa`;
 const today = () => new Date().toISOString().slice(0, 10);
@@ -409,20 +462,32 @@ function buildAvatar(a) {
   const faceTex = new THREE.CanvasTexture(drawFace(a.face));
   const face = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.9), new THREE.MeshBasicMaterial({ map: faceTex, transparent: true }));
   face.position.set(0, 4.6, 0.63); g.add(face);
-  const hc = a.hatColor || "#e63946";
-  if (a.hat === "cap") {
+  let hat = a.hat, hc = a.hatColor || "#e63946";
+  const ch = customItem(hat);
+  if (ch) { hat = ch.shape; hc = ch.color || hc; } // admin panelinden eklenen aksesuar
+  if (hat === "cap") {
     const c = new THREE.Mesh(new THREE.CylinderGeometry(0.66, 0.66, 0.35, 20), m(hc)); c.position.set(0, 5.3, 0); g.add(c);
     part(1.1, 0.08, 0.6, hc, 0, 5.15, 0.75);
-  } else if (a.hat === "crown") {
+  } else if (hat === "crown") {
     const c = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.55, 0.4, 8, 1, true), new THREE.MeshLambertMaterial({ color: "#ffd166", side: THREE.DoubleSide }));
     c.position.set(0, 5.4, 0); g.add(c);
     for (let i = 0; i < 6; i++) { const s = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.3, 4), m("#ffd166")); const an = i / 6 * Math.PI * 2; s.position.set(Math.cos(an) * 0.55, 5.7, Math.sin(an) * 0.55); g.add(s); }
-  } else if (a.hat === "headphones") {
+  } else if (hat === "headphones") {
     const band = new THREE.Mesh(new THREE.TorusGeometry(0.7, 0.07, 8, 20, Math.PI), m(hc)); band.position.set(0, 4.75, 0); band.rotation.z = 0; g.add(band);
     part(0.25, 0.5, 0.5, hc, -0.7, 4.6, 0); part(0.25, 0.5, 0.5, hc, 0.7, 4.6, 0);
-  } else if (a.hat === "helmet") {
+  } else if (hat === "helmet") {
     const h = new THREE.Mesh(new THREE.SphereGeometry(0.95, 20, 14), new THREE.MeshLambertMaterial({ color: "#cfe8ff", transparent: true, opacity: 0.35, depthWrite: false }));
     h.position.set(0, 4.65, 0); g.add(h);
+  } else if (hat === "tophat") {
+    const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 0.95, 0.06, 24), m(hc)); brim.position.set(0, 5.22, 0); g.add(brim);
+    const top = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 0.9, 24), m(hc)); top.position.set(0, 5.68, 0); g.add(top);
+  } else if (hat === "halo") {
+    const r = new THREE.Mesh(new THREE.TorusGeometry(0.55, 0.07, 10, 28), new THREE.MeshBasicMaterial({ color: hc })); r.rotation.x = Math.PI / 2; r.position.set(0, 5.75, 0); g.add(r);
+  } else if (hat === "horns") {
+    [-1, 1].forEach(sd => { const c = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.55, 10), m(hc)); c.position.set(sd * 0.4, 5.35, 0); c.rotation.z = -sd * 0.45; g.add(c); });
+  } else if (hat === "beanie") {
+    const b = new THREE.Mesh(new THREE.SphereGeometry(0.68, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2), m(hc)); b.position.set(0, 5.0, 0); b.scale.y = 0.9; g.add(b);
+    const p = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 8), m("#ffffff")); p.position.set(0, 5.66, 0); g.add(p);
   }
   g.userData = { legs, arms };
   return g;
@@ -430,6 +495,8 @@ function buildAvatar(a) {
 function drawFace(kind) {
   const c = document.createElement("canvas"); c.width = c.height = 128;
   const x = c.getContext("2d");
+  const cf = customItem(kind);
+  if (cf && cf.emoji) { x.font = "100px serif"; x.textAlign = "center"; x.textBaseline = "middle"; x.fillText(cf.emoji, 64, 70); return c; } // admin yüzü
   x.fillStyle = "#1b1b1b"; x.strokeStyle = "#1b1b1b"; x.lineWidth = 7; x.lineCap = "round";
   if (kind === "cool") { x.fillRect(22, 40, 36, 18); x.fillRect(70, 40, 36, 18); x.fillRect(56, 44, 16, 5); }
   else { x.beginPath(); x.ellipse(44, 50, 7, kind === "wow" ? 12 : 10, 0, 0, 7); x.ellipse(84, 50, 7, kind === "wow" ? 12 : 10, 0, 0, 7); x.fill(); }
@@ -483,14 +550,14 @@ function renderTop() {
   $("jeton").textContent = "R$ " + profile.jeton;
   $("meName").textContent = profile.name;
   $("meFace").style.background = profile.avatar.skin;
-  $("meFace").textContent = FACES.find(f => f[0] === profile.avatar.face)[1];
+  $("meFace").textContent = faceEmoji(profile.avatar.face);
   $("playerJeton").textContent = "R$ " + profile.jeton;
 }
 
 function gameCard(g) {
-  const t = profile.playTime[g.id] || 0;
+  const t = profile.playTime[g.id] || 0, gc = gameCfg(g.id);
   return `<button class="game" data-game="${g.id}">
-    <div class="thumb" style="background:${g.bg}"><span class="tag">${g.genre}</span>${g.icon}${g.soon ? '<div class="soon">Yakında</div>' : ""}</div>
+    <div class="thumb" style="background:${g.bg}"><span class="tag">${g.genre}</span>${gc.isNew ? '<span class="new">YENİ</span>' : ""}${g.icon}${g.soon ? '<div class="soon">Yakında</div>' : gc.maint ? '<div class="soon">🛠️ Bakımda</div>' : ""}</div>
     <b>${g.title}</b><span>${g.soon ? "Geliştiriliyor" : t ? "Oynadın: " + fmtTime(t) : "Tarayıcıda · Tek oyunculu"}</span></button>`;
 }
 function renderHome() {
@@ -498,16 +565,23 @@ function renderHome() {
   const total = Object.values(profile.playTime).reduce((s, v) => s + v, 0);
   $("helloSub").textContent = total ? `Toplam oyun süren: ${fmtTime(total)}` : "Bir oyun seç ve başla!";
   const can = profile.lastDaily !== today();
-  $("dailyTxt").textContent = can ? "+R$ 100 seni bekliyor" : "Yarın yine gel!";
+  $("dailyTxt").textContent = can ? `+R$ ${dailyR()} seni bekliyor` : "Yarın yine gel!";
   $("btnDaily").disabled = !can;
   const q = $("search").value.trim().toLocaleLowerCase("tr");
-  const list = GAMES.filter(g => !q || g.title.toLocaleLowerCase("tr").includes(q) || g.genre.toLocaleLowerCase("tr").includes(q));
+  renderBanners();
+  const list = visibleGames().filter(g => !q || g.title.toLocaleLowerCase("tr").includes(q) || g.genre.toLocaleLowerCase("tr").includes(q));
   $("games").innerHTML = list.map(gameCard).join("") || `<p class="muted">“${q}” için oyun bulunamadı.</p>`;
-  const recent = profile.recent.map(id => GAMES.find(g => g.id === id)).filter(Boolean);
+  const recent = profile.recent.map(id => visibleGames().find(g => g.id === id)).filter(Boolean);
   $("recentWrap").style.display = recent.length && !q ? "block" : "none";
   $("recent").innerHTML = recent.map(gameCard).join("");
 }
 
+function renderBanners() {
+  const d = CFG.duyuru, ic = { info: "📢", success: "✅", warn: "⚠️", event: "🎉" };
+  const esc = s => String(s).replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
+  $("banners").innerHTML = (eco().double ? `<div class="banner event"><span class="bi">💎</span>2x Robux etkinliği! Günlük ödül, oyun ödülü ve rozet ödülleri iki katı.</div>` : "") +
+    (d && d.on && d.text ? `<div class="banner ${ic[d.type] ? d.type : "info"}"><span class="bi">${ic[d.type] || "📢"}</span>${esc(d.text)}</div>` : "");
+}
 function statsFor(g) {
   // Oyunun kendi bildirdiği özet (postMessage) yoksa localStorage'dan okumayı dene (aynı köken ise)
   let s = profile.gameStats[g.id];
@@ -531,14 +605,16 @@ function openGameSheet(id) {
     <p>${g.desc}</p>${statHtml}
     ${g.controls ? `<p class="muted">🎮 ${g.controls}</p>` : ""}
     <div style="display:flex;gap:10px;margin-top:14px"><button class="btn" id="btnSheetClose">Kapat</button>
-    <button class="btn play" id="btnPlay" style="flex:1;font-size:20px" ${g.soon ? "disabled" : ""}>${g.soon ? "Yakında" : "▶ Oyna"}</button></div></div>`;
+    <button class="btn play" id="btnPlay" style="flex:1;font-size:20px" ${playable(g) ? "" : "disabled"}>${g.soon ? "Yakında" : gameCfg(g.id).maint ? "🛠️ Bakımda" : "▶ Oyna"}</button></div></div>`;
   $("gameModal").classList.add("on");
   $("btnSheetClose").onclick = () => $("gameModal").classList.remove("on");
-  if (!g.soon) $("btnPlay").onclick = () => { $("gameModal").classList.remove("on"); launch(g.id); };
+  if (playable(g)) $("btnPlay").onclick = () => { $("gameModal").classList.remove("on"); launch(g.id); };
 }
 
 // ---------------------------------------------------------------- Avatar sayfası
 let avatarPreview = null;
+const owns = id => { const it = customItem(id); return !it || !(it.price > 0) || (profile.owned || []).includes(id); };
+const priceTag = id => owns(id) ? "" : `<span class="price">R$ ${customItem(id).price}</span>`;
 function renderAvatarOpts() {
   const a = profile.avatar;
   const sw = (key, list) => `<div class="swatches">${list.map(c => `<button class="sw ${a[key] === c ? "on" : ""}" data-k="${key}" data-v="${c}" style="background:${c}"></button>`).join("")}</div>`;
@@ -546,14 +622,23 @@ function renderAvatarOpts() {
     <b>Ten rengi</b>${sw("skin", SKINS)}
     <b>Tişört</b>${sw("shirt", COLORS)}
     <b>Pantolon</b>${sw("pants", COLORS)}
-    <b>Yüz</b><div class="swatches">${FACES.map(([id, e]) => `<button class="chip ${a.face === id ? "on" : ""}" data-k="face" data-v="${id}" style="font-size:22px">${e}</button>`).join("")}</div>
-    <b>Aksesuar</b><div class="swatches">${HATS.map(([id, n]) => `<button class="chip ${a.hat === id ? "on" : ""}" data-k="hat" data-v="${id}">${n}</button>`).join("")}</div>
+    <b>Yüz</b><div class="swatches">${FACES.map(([id, e]) => `<button class="chip ${a.face === id ? "on" : ""}" data-k="face" data-v="${id}" style="font-size:22px">${e}${priceTag(id)}</button>`).join("")}</div>
+    <b>Aksesuar</b><div class="swatches">${HATS.map(([id, n]) => `<button class="chip ${a.hat === id ? "on" : ""}" data-k="hat" data-v="${id}">${n}${priceTag(id)}</button>`).join("")}</div>
     <b>Aksesuar rengi</b>${sw("hatColor", COLORS)}
     <p class="muted">Avatarın oyunlara da taşınır (ör. Evcil Hayvan Simülatörü'nde karakterin, Pizza'da tabelan).</p>`;
 }
 $("avatarOpts").addEventListener("click", e => {
   const b = e.target.closest("[data-k]");
   if (!b) return;
+  const it = customItem(b.dataset.v);
+  if (it && !owns(it.id)) { // admin mağazasından fiyatlı öğe
+    if (profile.jeton < it.price) { toast(`Yetersiz Robux: ${it.name} R$ ${it.price}`); return; }
+    if (!confirm(`${it.name} R$ ${it.price} karşılığında satın alınsın mı?`)) return;
+    profile.jeton -= it.price;
+    profile.owned = [...(profile.owned || []), it.id];
+    profile.purchases.push({ game: "avatar", id: it.name, price: it.price, at: Date.now() });
+    award("shopper"); toast(`🛍️ ${it.name} senin!`);
+  }
   profile.avatar[b.dataset.k] = b.dataset.v;
   persist(); award("stylish");
   renderAvatarOpts(); renderTop();
@@ -594,10 +679,11 @@ function showPage(id) {
 let current = null, playTimer = null;
 function launch(id) {
   const g = GAMES.find(x => x.id === id);
+  if (!playable(g)) { toast("🛠️ Bu oyun şu an bakımda"); return; }
   current = g;
   profile.recent = [id, ...profile.recent.filter(x => x !== id)].slice(0, 6);
   award("firstGame");
-  if (GAMES.filter(x => !x.soon).every(x => profile.recent.includes(x.id))) award("explorer");
+  if (visibleGames().filter(playable).every(x => profile.recent.includes(x.id))) award("explorer");
   persist();
   $("playerTitle").textContent = `${g.icon} ${g.title}`;
   $("frame").src = g.url;
@@ -616,8 +702,8 @@ function launch(id) {
     profile.earnSec = (profile.earnSec || 0) + 10;
     if (profile.earnSec >= PLAY_REWARD_SEC) {
       profile.earnSec -= PLAY_REWARD_SEC;
-      addRobux(PLAY_REWARD);
-      toast(`⏱️ ${PLAY_REWARD_SEC / 60} dakika oynadın: +R$ ${PLAY_REWARD}`);
+      addRobux(playR());
+      toast(`⏱️ ${PLAY_REWARD_SEC / 60} dakika oynadın: +R$ ${playR()}`);
     }
     if (Object.values(profile.playTime).reduce((s, v) => s + v, 0) >= 3600) award("hour");
     persist();
@@ -634,7 +720,10 @@ function exitGame() {
 }
 function sendProfile() {
   const w = $("frame").contentWindow;
-  if (w) w.postMessage({ type: "kup:profile", name: profile.name, avatar: profile.avatar, jeton: profile.jeton }, "*");
+  const av = { ...profile.avatar }, ch = customItem(av.hat);
+  if (ch) { av.hat = ["cap", "crown", "headphones", "helmet"].includes(ch.shape) ? ch.shape : "none"; av.hatColor = ch.color || av.hatColor; }
+  if (customItem(av.face)) av.face = "smile";
+  if (w) w.postMessage({ type: "kup:profile", name: profile.name, avatar: av, jeton: profile.jeton }, "*");
 }
 
 // Oyun → platform mesajları
@@ -688,8 +777,8 @@ document.addEventListener("click", e => {
 $("gameModal").addEventListener("click", e => { if (e.target.id === "gameModal") $("gameModal").classList.remove("on"); });
 $("btnDaily").onclick = () => {
   if (profile.lastDaily === today()) return;
-  profile.lastDaily = today(); addRobux(DAILY_REWARD);
-  toast(`🎁 +R$ ${DAILY_REWARD}!`); renderHome();
+  profile.lastDaily = today(); addRobux(dailyR());
+  toast(`🎁 +R$ ${dailyR()}!`); renderHome();
 };
 $("btnExit").onclick = exitGame;
 $("jeton").onclick = () => { renderEarn(); $("earnModal").classList.add("on"); };
@@ -744,7 +833,7 @@ function openSignup() {
 }
 function openLogin() {
   $("loginList").innerHTML = accounts.length
-    ? accounts.map((a, i) => `<button class="accRow" data-login="${i}"><span class="face" style="background:${a.avatar?.skin || SKINS[0]}">${(FACES.find(f => f[0] === a.avatar?.face) || FACES[0])[1]}</span>
+    ? accounts.map((a, i) => `<button class="accRow" data-login="${i}"><span class="face" style="background:${a.avatar?.skin || SKINS[0]}">${faceEmoji(a.avatar?.face)}</span>
         <span><b>${a.name}</b><div class="muted" style="font-size:13px">R$ ${a.jeton} · Katılma: ${a.joined}</div></span></button>`).join("")
     : `<p class="muted">Bu cihazda kayıtlı hesap yok.</p>`;
   $("loginModal").classList.add("on");
@@ -762,13 +851,20 @@ $("loginList").addEventListener("click", e => {
 });
 ["nameModal", "loginModal"].forEach(id => $(id).addEventListener("click", e => { if (e.target.id === id && $("landing").classList.contains("on")) $(id).classList.remove("on"); }));
 
+addEventListener("storage", e => {
+  if (e.key !== CFG_KEY) return;
+  loadCfg(); renderTop(); renderHome();
+  if ($("avatar").classList.contains("on")) renderAvatarOpts();
+  stages.forEach(s => s.update());
+});
+
 // ================================================================ Başlat
 renderTop();
 renderHome();
 avatarStage($("helloAvatar"), { spin: false, zoom: 2.2 });
 if (!profile.name) {
   $("landing").classList.add("on");
-  $("lGameRow").innerHTML = GAMES.filter(g => !g.soon).map(gameCard).join("");
+  $("lGameRow").innerHTML = visibleGames().filter(g => !g.soon).map(gameCard).join("");
   avatarStage($("lAvatar"));
 }
 </script>

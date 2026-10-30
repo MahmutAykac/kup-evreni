@@ -84,12 +84,13 @@
   aside { position: sticky; top: 0; height: 100vh; background: var(--surface); border-right: 1px solid var(--line); display: flex; flex-direction: column; padding: 18px 12px; }
   aside .brand { padding: 0 8px 18px; border-bottom: 1px solid var(--line); margin-bottom: 12px; }
   .navTitle { font-size: 11px; color: var(--muted); font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; padding: 10px 10px 6px; }
+  #nav { flex: 1; overflow-y: auto; min-height: 0; margin: 0 -4px; padding: 0 4px; }
   nav button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; border: 0; background: none; border-radius: 10px;
     cursor: pointer; color: var(--text2); font-weight: 700; text-align: left; }
   nav button:hover { background: var(--surface2); color: var(--text); }
   nav button.on { background: var(--accent-soft); color: var(--accent); }
   nav .count { margin-left: auto; font-size: 12px; background: var(--surface3); color: var(--text2); padding: 1px 8px; border-radius: 20px; }
-  aside .foot { margin-top: auto; display: flex; flex-direction: column; gap: 4px; padding-top: 12px; border-top: 1px solid var(--line); }
+  aside .foot { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; padding-top: 12px; border-top: 1px solid var(--line); }
   aside .foot .btn { justify-content: flex-start; width: 100%; color: var(--text2); }
 
   .content { min-width: 0; }
@@ -222,6 +223,41 @@
   .cBox .acts { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
   .btn.dangerSolid { background: var(--red); border-color: transparent; color: #fff; }
 
+/* Yönetim sayfaları: anahtar, form ızgarası, öğe listeleri */
+  .tg { position: relative; width: 44px; height: 24px; border-radius: 20px; border: 0; background: var(--surface3); cursor: pointer; flex: none; transition: background 0.15s; }
+  .tg::after { content: ""; position: absolute; left: 3px; top: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform 0.15s; }
+  .tg.on { background: var(--play); }
+  .tg.on::after { transform: translateX(20px); }
+  .formGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 4px 14px; }
+  .formGrid .lbl { margin-top: 10px; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .rowLine { display: flex; align-items: center; gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+  .rowLine:last-child { border-bottom: 0; }
+  .rowLine .grow { flex: 1; min-width: 0; }
+  .rowLine b { display: block; }
+  .rowLine small { color: var(--muted); font-size: 13px; }
+  .stack { display: grid; gap: 16px; max-width: 900px; }
+  .seg { display: flex; flex-wrap: wrap; gap: 6px; }
+  .seg button { height: 34px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line2); background: var(--surface2); cursor: pointer; font-weight: 700; font-size: 13px; }
+  .seg button.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+  textarea.field { height: auto; min-height: 84px; padding: 10px 12px; resize: vertical; line-height: 1.5; }
+  .banner { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 14px; font-weight: 700; line-height: 1.4; border: 1px solid rgba(255,255,255,0.12); }
+  .banner .bi { font-size: 22px; }
+  .banner.info { background: linear-gradient(90deg, rgba(0,162,255,0.22), rgba(0,162,255,0.08)); }
+  .banner.success { background: linear-gradient(90deg, rgba(0,176,111,0.24), rgba(0,176,111,0.08)); }
+  .banner.warn { background: linear-gradient(90deg, rgba(255,209,102,0.24), rgba(255,209,102,0.08)); }
+  .banner.event { background: linear-gradient(90deg, rgba(167,112,255,0.3), rgba(255,94,170,0.14)); }
+  .swList { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .swItem { position: relative; width: 40px; height: 40px; border-radius: 10px; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.15); }
+  .swItem button { position: absolute; right: -6px; top: -6px; width: 20px; height: 20px; border-radius: 50%; border: 0; background: var(--red); color: #fff; cursor: pointer; font-size: 12px; line-height: 20px; padding: 0; }
+  .itemIco { width: 44px; height: 44px; border-radius: 12px; background: var(--surface2); display: grid; place-items: center; font-size: 24px; flex: none; }
+  .dot { width: 14px; height: 14px; border-radius: 50%; display: inline-block; vertical-align: -2px; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.2); }
+  .meter { height: 8px; background: var(--surface3); border-radius: 6px; overflow: hidden; width: 140px; }
+  .meter i { display: block; height: 100%; background: var(--play); border-radius: 0 4px 4px 0; }
+  .mono { font-family: Consolas, "Courier New", monospace; font-weight: 700; letter-spacing: 0.04em; }
+  input[type=color].field { padding: 4px; cursor: pointer; }
+  @media (max-width: 760px) { .meter { width: 70px; } }
+
   /* Telefon / dar ekran */
   @media (max-width: 1000px) { .kpis { grid-template-columns: repeat(2, 1fr); } .grid2 { grid-template-columns: 1fr; } }
   @media (max-width: 760px) {
@@ -261,7 +297,6 @@
 <div id="app">
   <aside id="side">
     <div class="brand"><i></i>KÜP EVRENİ <small>ADMIN</small></div>
-    <div class="navTitle">Menü</div>
     <nav id="nav"></nav>
     <div class="foot">
       <a class="btn ghost" href="../index.html" id="siteLink"></a>
@@ -334,6 +369,13 @@ const ICONS = {
   alert: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
   download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
   refresh: '<path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.5 9a9 9 0 0 1 14.9-3.4L23 10M1 14l4.6 4.4A9 9 0 0 0 20.5 15"/>',
+  ticket: '<path d="M2 9a3 3 0 0 0 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 0 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2z"/><path d="M13 5v2M13 17v2M13 11v2"/>',
+  coins: '<circle cx="8" cy="8" r="6"/><path d="M18.1 10.4A6 6 0 1 1 10.3 18"/><path d="M7 6h1v4"/>',
+  megaphone: '<path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>',
+  shirt: '<path d="M20.4 3.5 16 2a4 4 0 0 1-8 0L3.6 3.5a2 2 0 0 0-1.3 2.2l.6 3.5a1 1 0 0 0 1 .8H6v10a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V10h2.2a1 1 0 0 0 1-.8l.6-3.5a2 2 0 0 0-1.3-2.2z"/>',
+  award: '<circle cx="12" cy="8" r="6"/><path d="M15.5 12.9 17 22l-5-3-5 3 1.5-9.1"/>',
+  list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
   chevron: '<path d="m9 18 6-6-6-6"/>',
 };
 const ic = (n, extra = "") => `<svg class="i" viewBox="0 0 24 24" ${extra}>${ICONS[n]}</svg>`;
@@ -440,17 +482,30 @@ function logout() {
 
 // ================================================================ Gezinme
 const PAGES = [
-  { id: "overview", name: "Genel Bakış", icon: "home" },
-  { id: "users", name: "Kullanıcılar", icon: "users" },
-  { id: "purchases", name: "Satın Alımlar", icon: "cart" },
-  { id: "games", name: "Oyunlar", icon: "game" },
-  { id: "settings", name: "Ayarlar", icon: "gear" },
+  { id: "overview", name: "Genel Bakış", icon: "home", group: "Genel" },
+  { id: "users", name: "Kullanıcılar", icon: "users", group: "Genel" },
+  { id: "purchases", name: "Satın Alımlar", icon: "cart", group: "Genel" },
+  { id: "games", name: "Oyunlar", icon: "game", group: "Yönetim" },
+  { id: "eco", name: "Ekonomi", icon: "coins", group: "Yönetim" },
+  { id: "announce", name: "Duyurular", icon: "megaphone", group: "Yönetim" },
+  { id: "codes", name: "Promo Kodlar", icon: "ticket", group: "Yönetim" },
+  { id: "avatarShop", name: "Avatar Mağazası", icon: "shirt", group: "Yönetim" },
+  { id: "badges", name: "Rozetler", icon: "award", group: "Yönetim" },
+  { id: "log", name: "İşlem Kaydı", icon: "list", group: "Sistem" },
+  { id: "settings", name: "Ayarlar", icon: "gear", group: "Sistem" },
 ];
 let page = "overview";
 function renderNav() {
   const u = users(), buys = u.reduce((s, x) => s + (x.a.purchases || []).length, 0);
-  const counts = { users: u.length, purchases: buys, games: GAMES.length };
-  $("nav").innerHTML = PAGES.map(p => `<button data-page="${p.id}" class="${p.id === page ? "on" : ""}">${ic(p.icon)}${p.name}${counts[p.id] != null ? `<span class="count">${counts[p.id]}</span>` : ""}</button>`).join("");
+  const c = cfg(), av = c.avatar || {};
+  const counts = { users: u.length, purchases: buys, games: GAMES.length, codes: (c.codes || []).length, avatarShop: (av.hats || []).length + (av.faces || []).length + (av.colors || []).length + (av.skins || []).length };
+  const live = { eco: c.eco?.double ? "2x" : null, announce: c.duyuru?.on ? "Açık" : null };
+  let group = "";
+  $("nav").innerHTML = PAGES.map(p => {
+    const head = p.group !== group ? `<div class="navTitle">${(group = p.group)}</div>` : "";
+    const badge = live[p.id] ? `<span class="count" style="background:var(--play-soft);color:var(--play)">${live[p.id]}</span>` : counts[p.id] ? `<span class="count">${counts[p.id]}</span>` : "";
+    return head + `<button data-page="${p.id}" class="${p.id === page ? "on" : ""}">${ic(p.icon)}${p.name}${badge}</button>`;
+  }).join("");
 }
 function go(id) {
   page = PAGES.some(p => p.id === id) ? id : "overview";
@@ -462,7 +517,8 @@ function go(id) {
 }
 function render() {
   renderNav();
-  ({ overview: renderOverview, users: renderUsers, purchases: renderPurchases, games: renderGames, settings: renderSettings })[page]();
+  ({ overview: renderOverview, users: renderUsers, purchases: renderPurchases, games: renderGames, eco: renderEco, announce: renderAnnounce,
+     codes: renderCodes, avatarShop: renderAvatarShop, badges: renderBadges, log: renderLog, settings: renderSettings })[page]();
   if (drawerUid) renderDrawer();
 }
 $("nav").addEventListener("click", e => { const b = e.target.closest("[data-page]"); if (b) go(b.dataset.page); });
@@ -551,10 +607,11 @@ function renderUsers() {
 function allPurchases() {
   return users().flatMap(x => (x.a.purchases || []).map(p => ({ ...p, user: x }))).sort((a, b) => b.at - a.at);
 }
+const gameOf = id => id === "avatar" ? { icon: "🧍", title: "Avatar Mağazası" } : GAMES.find(x => x.id === id) || { icon: "🎮", title: id };
 function purchaseTable(rows) {
   return `<div class="tableWrap" style="margin-top:10px"><table>
     <thead><tr><th>Kullanıcı</th><th>Oyun</th><th>Ürün</th><th class="r">Fiyat</th><th class="r hideSm">Tarih</th></tr></thead>
-    <tbody>${rows.map(p => { const g = GAMES.find(x => x.id === p.game) || { icon: "🎮", title: p.game };
+    <tbody>${rows.map(p => { const g = gameOf(p.game);
       return `<tr class="click" data-user="${p.user.uid}"><td><div class="user">${ava(p.user.a)}<b>${esc(p.user.a.name)}</b></div></td>
         <td>${g.icon} ${esc(g.title)}</td><td>${esc(p.id)}</td><td class="r robux num">R$ ${fmtNum(p.price)}</td><td class="r muted hideSm">${fmtDate(p.at)}</td></tr>`; }).join("")}</tbody></table></div>`;
 }
@@ -565,7 +622,7 @@ function renderPurchases() {
   $("page").innerHTML = `<div class="card">
     <div class="cardHead"><h2>Satın alımlar</h2><span class="sub">${rows.length} adet · R$ ${fmtNum(total)}</span>
       <select class="field right" id="buyFilter" style="width:auto;margin-left:auto"><option value="">Tüm oyunlar</option>
-        ${GAMES.map(g => `<option value="${g.id}" ${g.id === buyFilter ? "selected" : ""}>${g.icon} ${esc(g.title)}</option>`).join("")}</select></div>
+        ${GAMES.map(g => `<option value="${g.id}" ${g.id === buyFilter ? "selected" : ""}>${g.icon} ${esc(g.title)}</option>`).join("")}<option value="avatar" ${buyFilter === "avatar" ? "selected" : ""}>🧍 Avatar Mağazası</option></select></div>
     ${rows.length ? purchaseTable(rows) : `<div class="empty"><div class="big">${ic("cart")}</div><h3>Satın alım yok</h3><p>Oyunlarda Robux ile yapılan alışverişler burada listelenir.</p></div>`}
   </div>`;
   $("buyFilter").onchange = e => { buyFilter = e.target.value; renderPurchases(); };
@@ -575,18 +632,26 @@ function renderPurchases() {
 function renderGames() {
   const u = users();
   $("page").innerHTML = `<div class="card">
-    <div class="cardHead"><h2>Oyunlar ve kayıtlar</h2><span class="sub">Kayıt silmek bu cihazdaki tüm oyuncuların o oyundaki ilerlemesini sıfırlar</span></div>
+    <div class="cardHead"><h2>Oyunlar</h2><span class="sub">Gizli oyun ana sayfada görünmez, bakımdaki oyun açılmaz, YENİ etiketi kartın köşesinde çıkar</span></div>
     <div class="tableWrap" style="margin-top:10px"><table>
-      <thead><tr><th>Oyun</th><th class="r">Oyuncu</th><th class="r hideSm">Oynama</th><th class="r hideSm">Satış</th><th class="r">Kayıt</th><th></th></tr></thead>
+      <thead><tr><th>Oyun</th><th>Görünür</th><th>Bakımda</th><th>YENİ</th><th class="r hideSm">Oyuncu</th><th class="r hideSm">Oynama</th><th class="r hideSm">Satış</th><th class="r">Kayıt</th><th></th></tr></thead>
       <tbody>${GAMES.map(g => {
         let raw = null; try { raw = localStorage.getItem(g.saveKey); } catch (e) {}
         const players = u.filter(x => x.a.playTime?.[g.id]).length, sec = u.reduce((s, x) => s + (x.a.playTime?.[g.id] || 0), 0);
         const sales = u.reduce((s, x) => s + (x.a.purchases || []).filter(p => p.game === g.id).reduce((t, p) => t + p.price, 0), 0);
+        const gc = (cfg().games || {})[g.id] || {};
         return `<tr><td><div class="user"><span class="gameIco" style="background:${g.bg}">${g.icon}</span><div><b>${esc(g.title)}</b><small>${g.saveKey}</small></div></div></td>
-          <td class="r num">${players}</td><td class="r num hideSm">${fmtTime(sec)}</td><td class="r robux num hideSm">R$ ${fmtNum(sales)}</td>
+          <td>${tg(!gc.hidden, `data-gtog="${g.id}:hidden"`)}</td><td>${tg(gc.maint, `data-gtog="${g.id}:maint"`)}</td><td>${tg(gc.isNew, `data-gtog="${g.id}:isNew"`)}</td>
+          <td class="r num hideSm">${players}</td><td class="r num hideSm">${fmtTime(sec)}</td><td class="r robux num hideSm">R$ ${fmtNum(sales)}</td>
           <td class="r">${raw ? `<span class="pill gold num">${(raw.length / 1024).toFixed(1)} KB</span>` : `<span class="muted">yok</span>`}</td>
-          <td class="r"><button class="btn sm danger" data-wipe="${g.id}" ${raw ? "" : "disabled"}>${ic("trash")}Sil</button></td></tr>`;
+          <td class="r"><button class="btn sm danger" data-wipe="${g.id}" ${raw ? "" : "disabled"} title="Oyun kaydını sil">${ic("trash")}Kayıt</button></td></tr>`;
       }).join("")}</tbody></table></div></div>`;
+  $("page").querySelectorAll("[data-gtog]").forEach(b => b.onclick = () => {
+    const [id, f] = b.dataset.gtog.split(":"), g = GAMES.find(x => x.id === id);
+    let v; setCfg(c => { c.games = c.games || {}; const o = c.games[id] = c.games[id] || {}; o[f] = !o[f]; v = o[f]; });
+    const txt = { hidden: v ? "gizlendi" : "görünür yapıldı", maint: v ? "bakıma alındı" : "bakımdan çıktı", isNew: v ? "YENİ etiketi eklendi" : "YENİ etiketi kaldırıldı" }[f];
+    logAct(`${g.title} ${txt}`); toast(`${g.icon} ${g.title} ${txt}`); render();
+  });
 }
 
 // ================================================================ Ayarlar
@@ -613,6 +678,7 @@ function renderSettings() {
   $("btnPassReset").onclick = () => {
     if (!confirm("Admin şifresi varsayılana döndürülsün mü?")) return;
     try { localStorage.removeItem(ADMIN_KEY); } catch (e) {}
+    logAct("Admin şifresi varsayılana döndürüldü");
     startSession(); renderSettings(); toast("Şifre varsayılana döndü");
   };
   $("btnPass").onclick = () => {
@@ -621,6 +687,7 @@ function renderSettings() {
     if (p.length < 4) { toast("Yeni şifre en az 4 karakter olmalı", true); return; }
     if (p !== $("pNew2").value) { toast("Yeni şifreler aynı değil", true); return; }
     try { localStorage.setItem(ADMIN_KEY, sha256(p)); } catch (e) {}
+    logAct("Admin şifresi değiştirildi");
     startSession(); renderSettings(); toast("Admin şifresi değişti");
   };
   $("btnExport").onclick = () => {
@@ -631,6 +698,230 @@ function renderSettings() {
     a.download = `kup-evreni-yedek-${new Date().toISOString().slice(0, 10)}.json`;
     a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   };
+}
+
+// ================================================================ Platform ayarları (ana sayfa okur: kupEvreniAyar) ve işlem kaydı
+const CFG_KEY = "kupEvreniAyar", LOG_KEY = "kupEvreniAdminLog";
+const ECO_DEFAULT = { daily: 100, play: 15, badge: 25, start: 200, double: false };
+const SHAPES = [["cap", "Şapka"], ["crown", "Taç"], ["headphones", "Kulaklık"], ["helmet", "Uzay kaskı"], ["tophat", "Silindir şapka"], ["halo", "Hale"], ["horns", "Boynuz"], ["beanie", "Bere"]];
+const ANN_TYPES = [["info", "📢 Bilgi"], ["success", "✅ Başarı"], ["warn", "⚠️ Uyarı"], ["event", "🎉 Etkinlik"]];
+const cfg = () => load(CFG_KEY, {}) || {};
+function setCfg(fn) { const c = cfg(); fn(c); save(CFG_KEY, c); }
+const eco = () => ({ ...ECO_DEFAULT, ...(cfg().eco || {}) });
+const newId = () => "c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+function logAct(text) { const l = load(LOG_KEY, []); l.unshift({ at: Date.now(), text }); save(LOG_KEY, l.slice(0, 300)); }
+const tg = (on, attrs) => `<button class="tg ${on ? "on" : ""}" ${attrs} aria-pressed="${!!on}"></button>`;
+const intVal = (id, min = 0, max = 1000000) => { const v = Math.floor(Number($(id).value)); return $(id).value !== "" && v >= min && v <= max ? v : null; };
+
+// ================================================================ Ekonomi
+function renderEco() {
+  const e = eco(), m = e.double ? 2 : 1;
+  const fields = [["daily", "Günlük ödül", "Her gün ana sayfadan alınır"], ["play", "Oyun ödülü", "Her 5 dakika oyunda"], ["badge", "Rozet ödülü", "Her yeni rozette"], ["start", "Başlangıç Robux", "Yeni açılan hesaba"]];
+  $("page").innerHTML = `<div class="stack">
+    <div class="card"><div class="cardHead"><h2>2x Robux etkinliği</h2></div><div class="cardBody">
+      <div class="rowLine" style="padding-top:0"><div class="grow"><b>${e.double ? "Etkinlik açık" : "Etkinlik kapalı"}</b>
+        <small>Açıkken günlük, oyun ve rozet ödülleri iki katı olur, ana sayfada mor bir şerit görünür.</small></div>${tg(e.double, 'id="tgDouble"')}</div></div></div>
+    <div class="card"><div class="cardHead"><h2>Ödül miktarları</h2><span class="sub right">R$ cinsinden</span></div><div class="cardBody">
+      <div class="formGrid">${fields.map(([k, n, h]) => `<div><label class="lbl" for="eco_${k}">${n}</label>
+        <input class="field num" type="number" min="0" max="100000" id="eco_${k}" value="${e[k]}"><div class="hint">${h} · varsayılan ${ECO_DEFAULT[k]}</div></div>`).join("")}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:18px"><button class="btn primary" id="btnEcoSave">Kaydet</button><button class="btn" id="btnEcoReset">Varsayılana döndür</button></div></div></div>
+    <div class="card"><div class="cardHead"><h2>Şu an oyuncunun aldığı</h2>${e.double ? `<span class="pill gold right">2x etkin</span>` : ""}</div><div class="cardBody">
+      <div class="stats">
+        <div class="stat" style="background:var(--surface2)"><b class="robux num">R$ ${fmtNum(e.daily * m)}</b><span>Günlük ödül</span></div>
+        <div class="stat" style="background:var(--surface2)"><b class="robux num">R$ ${fmtNum(e.play * m)}</b><span>5 dk oyun</span></div>
+        <div class="stat" style="background:var(--surface2)"><b class="robux num">R$ ${fmtNum(e.badge * m)}</b><span>Rozet başına</span></div>
+        <div class="stat" style="background:var(--surface2)"><b class="robux num">R$ ${fmtNum(e.start)}</b><span>Yeni hesap</span></div>
+      </div></div></div></div>`;
+  $("tgDouble").onclick = () => {
+    const on = !eco().double;
+    setCfg(c => c.eco = { ...eco(), double: on }); logAct(`2x Robux etkinliği ${on ? "açıldı" : "kapatıldı"}`);
+    toast(on ? "2x Robux etkinliği açıldı" : "2x Robux etkinliği kapandı"); render();
+  };
+  $("btnEcoSave").onclick = () => {
+    const next = { ...eco() };
+    for (const [k, n] of fields) { const v = intVal("eco_" + k, 0, 100000); if (v === null) { toast(`${n}: 0 ile 100.000 arası bir sayı yaz`, true); return; } next[k] = v; }
+    const old = eco(), diff = fields.filter(([k]) => old[k] !== next[k]).map(([k, n]) => `${n} ${old[k]} → ${next[k]}`);
+    setCfg(c => c.eco = next); if (diff.length) logAct("Ekonomi: " + diff.join(", "));
+    toast("Ekonomi ayarları kaydedildi"); render();
+  };
+  $("btnEcoReset").onclick = () => { setCfg(c => c.eco = { ...ECO_DEFAULT, double: eco().double }); logAct("Ekonomi varsayılana döndürüldü"); toast("Varsayılan değerler geri geldi"); render(); };
+}
+
+// ================================================================ Duyurular
+let annType = null;
+function renderAnnounce() {
+  const d = cfg().duyuru || { text: "", type: "info", on: false };
+  if (!annType) annType = d.type || "info";
+  const icon = { info: "📢", success: "✅", warn: "⚠️", event: "🎉" };
+  $("page").innerHTML = `<div class="stack">
+    <div class="card"><div class="cardHead"><h2>Ana sayfa duyurusu</h2>${d.on && d.text ? `<span class="pill green right">Yayında</span>` : `<span class="pill gray right">Yayında değil</span>`}</div><div class="cardBody">
+      <label class="lbl" for="annText">Duyuru metni</label>
+      <textarea class="field" id="annText" maxlength="200" placeholder="Örn: Hafta sonu yeni oyun geliyor!">${esc(d.text)}</textarea>
+      <div class="hint"><span id="annCount">${(d.text || "").length}</span>/200</div>
+      <label class="lbl">Tür</label>
+      <div class="seg" id="annSeg">${ANN_TYPES.map(([k, n]) => `<button data-t="${k}" class="${k === annType ? "on" : ""}">${n}</button>`).join("")}</div>
+      <label class="lbl">Önizleme</label>
+      <div id="annPrev"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:18px"><button class="btn primary" id="btnAnnPub">Yayınla</button>
+        <button class="btn danger" id="btnAnnOff" ${d.on ? "" : "disabled"}>Yayından kaldır</button></div></div></div></div>`;
+  const prev = () => {
+    const t = $("annText").value.trim();
+    $("annPrev").innerHTML = t ? `<div class="banner ${annType}"><span class="bi">${icon[annType]}</span>${esc(t)}</div>` : `<div class="muted" style="font-size:14px">Metin yazınca burada görünür.</div>`;
+    $("annCount").textContent = $("annText").value.length;
+  };
+  prev();
+  $("annText").oninput = prev;
+  $("annSeg").onclick = e => { const b = e.target.closest("[data-t]"); if (!b) return; annType = b.dataset.t; $("annSeg").querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b)); prev(); };
+  $("btnAnnPub").onclick = () => {
+    const t = $("annText").value.trim();
+    if (!t) { toast("Önce duyuru metnini yaz", true); $("annText").focus(); return; }
+    setCfg(c => c.duyuru = { text: t, type: annType, on: true, at: Date.now() }); logAct(`Duyuru yayınlandı: "${t}"`);
+    toast("Duyuru yayınlandı"); render();
+  };
+  $("btnAnnOff").onclick = () => { setCfg(c => { if (c.duyuru) c.duyuru.on = false; }); logAct("Duyuru yayından kaldırıldı"); toast("Duyuru kaldırıldı"); render(); };
+}
+
+// ================================================================ Promo kodlar
+function codeStatus(c) {
+  if (c.off) return `<span class="pill gray">Pasif</span>`;
+  if (c.expires && new Date().toISOString().slice(0, 10) > c.expires) return `<span class="pill gray">Süresi doldu</span>`;
+  if (c.max && (c.used || 0) >= c.max) return `<span class="pill gold">Doldu</span>`;
+  return `<span class="pill green">Aktif</span>`;
+}
+function renderCodes() {
+  const codes = cfg().codes || [];
+  $("page").innerHTML = `<div class="stack">
+    <div class="card"><div class="cardHead"><h2>Yeni promo kod</h2></div><div class="cardBody">
+      <div class="formGrid">
+        <div><label class="lbl" for="cCode">Kod</label><div style="display:flex;gap:6px"><input class="field mono" id="cCode" maxlength="20" placeholder="KUP100" style="text-transform:uppercase"><button class="btn" id="btnRand" title="Rastgele kod">🎲</button></div><div class="hint">3-20 harf/rakam</div></div>
+        <div><label class="lbl" for="cAmt">Robux</label><input class="field num" type="number" id="cAmt" min="1" value="100"></div>
+        <div><label class="lbl" for="cMax">Kullanım limiti</label><input class="field num" type="number" id="cMax" min="0" value="0"><div class="hint">0 = sınırsız</div></div>
+        <div><label class="lbl" for="cExp">Son tarih</label><input class="field" type="date" id="cExp"><div class="hint">Boş = süresiz</div></div>
+      </div>
+      <button class="btn primary" id="btnCode" style="margin-top:18px">Kod oluştur</button>
+      <p class="hint" style="margin-top:12px">Oyuncular kodu ana sayfada üstteki R$ butonuna basıp "Promo kod" kutusuna yazar. Her oyuncu bir kodu bir kez kullanabilir.</p></div></div>
+    <div class="card"><div class="cardHead"><h2>Kodlar</h2><span class="sub">${codes.length} kod</span></div>
+      ${codes.length ? `<div class="tableWrap" style="margin-top:10px"><table>
+        <thead><tr><th>Kod</th><th class="r">Robux</th><th class="r">Kullanım</th><th class="hideSm">Son tarih</th><th>Durum</th><th></th></tr></thead>
+        <tbody>${codes.map((c, i) => `<tr><td class="mono">${esc(c.code)}</td><td class="r robux num">R$ ${fmtNum(c.amount)}</td>
+          <td class="r num">${c.used || 0}${c.max ? " / " + c.max : " / ∞"}</td><td class="hideSm muted">${esc(c.expires || "—")}</td><td>${codeStatus(c)}</td>
+          <td class="r" style="display:flex;gap:6px;justify-content:flex-end;align-items:center">${tg(!c.off, `data-ctog="${i}" title="Aktif / pasif"`)}<button class="btn sm danger" data-cdel="${i}">${ic("trash")}</button></td></tr>`).join("")}</tbody></table></div>`
+      : `<div class="empty"><div class="big">${ic("ticket")}</div><h3>Henüz kod yok</h3><p>Yukarıdan bir kod oluştur, oyuncular Robux kazansın.</p></div>`}</div></div>`;
+  $("btnRand").onclick = () => { const A = "ABCDEFGHJKLMNPRSTUVYZ23456789"; $("cCode").value = "KUP" + Array.from({ length: 5 }, () => A[Math.floor(Math.random() * A.length)]).join(""); };
+  $("btnCode").onclick = () => {
+    const code = $("cCode").value.trim().toLocaleUpperCase("tr");
+    if (!/^[A-Z0-9ÇĞİÖŞÜ_-]{3,20}$/.test(code)) { toast("Kod 3-20 harf veya rakam olmalı (boşluksuz)", true); return; }
+    if ((cfg().codes || []).some(c => c.code === code)) { toast("Bu kod zaten var", true); return; }
+    const amount = intVal("cAmt", 1, 100000), max = intVal("cMax", 0, 100000);
+    if (amount === null) { toast("Robux 1 ile 100.000 arası olmalı", true); return; }
+    if (max === null) { toast("Kullanım limiti geçerli bir sayı olmalı", true); return; }
+    setCfg(c => c.codes = [{ code, amount, max, expires: $("cExp").value || "", used: 0, at: Date.now() }, ...(c.codes || [])]);
+    logAct(`Promo kod oluşturuldu: ${code} (R$ ${amount}${max ? `, ${max} kullanım` : ""})`); toast(`${code} oluşturuldu`); render();
+  };
+  $("page").querySelectorAll("[data-ctog]").forEach(b => b.onclick = () => {
+    let msg; setCfg(c => { const k = c.codes[+b.dataset.ctog]; k.off = !k.off; msg = `${k.code} ${k.off ? "pasif yapıldı" : "aktif yapıldı"}`; });
+    logAct("Promo kod " + msg); toast(msg); render();
+  });
+  $("page").querySelectorAll("[data-cdel]").forEach(b => b.onclick = () => {
+    const k = (cfg().codes || [])[+b.dataset.cdel]; if (!k || !confirm(`${k.code} kodu silinsin mi?`)) return;
+    setCfg(c => c.codes.splice(+b.dataset.cdel, 1)); logAct(`Promo kod silindi: ${k.code}`); toast("Kod silindi"); render();
+  });
+}
+
+// ================================================================ Avatar mağazası
+function renderAvatarShop() {
+  const av = cfg().avatar || {}, u = users();
+  const owners = id => u.filter(x => (x.a.owned || []).includes(id)).length;
+  const wearing = (id, k) => u.filter(x => x.a.avatar?.[k] === id).length;
+  const swatches = (list, kind) => list.length ? `<div class="swList">${list.map((c, i) => `<div class="swItem" style="background:${esc(c)}" title="${esc(c)}"><button data-sdel="${kind}:${i}" aria-label="Sil">×</button></div>`).join("")}</div>` : `<div class="hint" style="margin-top:8px">Henüz eklenmedi.</div>`;
+  const price = p => p > 0 ? `<span class="robux">R$ ${fmtNum(p)}</span>` : `<span class="pill green">Ücretsiz</span>`;
+  $("page").innerHTML = `<div class="stack">
+    <div class="card"><div class="cardHead"><h2>Yeni aksesuar</h2></div><div class="cardBody">
+      <div class="formGrid">
+        <div><label class="lbl" for="hName">İsim</label><input class="field" id="hName" maxlength="24" placeholder="Altın Taç"></div>
+        <div><label class="lbl" for="hShape">Şekil</label><select class="field" id="hShape">${SHAPES.map(([k, n]) => `<option value="${k}">${n}</option>`).join("")}</select></div>
+        <div><label class="lbl" for="hColor">Renk</label><input class="field" type="color" id="hColor" value="#ffd166"></div>
+        <div><label class="lbl" for="hPrice">Fiyat (R$)</label><input class="field num" type="number" id="hPrice" min="0" value="0"><div class="hint">0 = ücretsiz</div></div>
+      </div><button class="btn primary" id="btnHat" style="margin-top:18px">${ic("plus")}Aksesuar ekle</button></div>
+      ${(av.hats || []).length ? `<div class="cardBody" style="padding-top:0">${av.hats.map((h, i) => `<div class="rowLine"><span class="itemIco"><span class="dot" style="width:22px;height:22px;background:${esc(h.color)}"></span></span>
+        <div class="grow"><b>${esc(h.name)}</b><small>${(SHAPES.find(s => s[0] === h.shape) || [, h.shape])[1]} · ${owners(h.id)} sahip · ${wearing(h.id, "hat")} takıyor</small></div>${price(h.price)}
+        <button class="btn sm danger" data-hdel="${i}">${ic("trash")}</button></div>`).join("")}</div>` : ""}</div>
+    <div class="card"><div class="cardHead"><h2>Yeni yüz</h2></div><div class="cardBody">
+      <div class="formGrid">
+        <div><label class="lbl" for="fName">İsim</label><input class="field" id="fName" maxlength="24" placeholder="Havalı Kedi"></div>
+        <div><label class="lbl" for="fEmoji">Emoji</label><input class="field" id="fEmoji" maxlength="8" placeholder="😺" style="font-size:20px"><div class="hint">Yüz olarak kafaya çizilir</div></div>
+        <div><label class="lbl" for="fPrice">Fiyat (R$)</label><input class="field num" type="number" id="fPrice" min="0" value="0"><div class="hint">0 = ücretsiz</div></div>
+      </div><button class="btn primary" id="btnFace" style="margin-top:18px">${ic("plus")}Yüz ekle</button></div>
+      ${(av.faces || []).length ? `<div class="cardBody" style="padding-top:0">${av.faces.map((f, i) => `<div class="rowLine"><span class="itemIco">${esc(f.emoji)}</span>
+        <div class="grow"><b>${esc(f.name)}</b><small>${owners(f.id)} sahip · ${wearing(f.id, "face")} kullanıyor</small></div>${price(f.price)}
+        <button class="btn sm danger" data-fdel="${i}">${ic("trash")}</button></div>`).join("")}</div>` : ""}</div>
+    <div class="card"><div class="cardHead"><h2>Yeni renk</h2><span class="sub right">Renkler ücretsizdir</span></div><div class="cardBody">
+      <div class="formGrid">
+        <div><label class="lbl" for="sTarget">Nereye</label><select class="field" id="sTarget"><option value="colors">Tişört, pantolon, aksesuar</option><option value="skins">Ten rengi</option></select></div>
+        <div><label class="lbl" for="sColor">Renk</label><input class="field" type="color" id="sColor" value="#00d1ff"></div>
+      </div><button class="btn primary" id="btnColor" style="margin-top:18px">${ic("plus")}Renk ekle</button>
+      <label class="lbl" style="margin-top:20px">Tişört, pantolon, aksesuar renkleri</label>${swatches(av.colors || [], "colors")}
+      <label class="lbl">Ten renkleri</label>${swatches(av.skins || [], "skins")}</div></div>
+    <p class="hint">Yeni öğeler oyuncuların Avatar sayfasında görünür. Fiyatlı öğeler Robux ile satın alınır. Yeni şekiller ve emoji yüzler ana sayfadaki avatarda görünür; oyunların içinde en yakın standart şekle döner.</p></div>`;
+  const price0 = id => intVal(id, 0, 100000);
+  $("btnHat").onclick = () => {
+    const name = $("hName").value.trim(), p = price0("hPrice");
+    if (name.length < 2) { toast("Aksesuara bir isim ver", true); return; }
+    if (p === null) { toast("Fiyat 0 ile 100.000 arası olmalı", true); return; }
+    setCfg(c => { c.avatar = c.avatar || {}; c.avatar.hats = [...(c.avatar.hats || []), { id: newId(), name, shape: $("hShape").value, color: $("hColor").value, price: p }]; });
+    logAct(`Avatar aksesuarı eklendi: ${name} (${p ? "R$ " + p : "ücretsiz"})`); toast(`${name} eklendi`); render();
+  };
+  $("btnFace").onclick = () => {
+    const name = $("fName").value.trim(), emoji = $("fEmoji").value.trim(), p = price0("fPrice");
+    if (name.length < 2) { toast("Yüze bir isim ver", true); return; }
+    if (!emoji) { toast("Bir emoji yaz (ör. 😺)", true); return; }
+    if (p === null) { toast("Fiyat 0 ile 100.000 arası olmalı", true); return; }
+    setCfg(c => { c.avatar = c.avatar || {}; c.avatar.faces = [...(c.avatar.faces || []), { id: newId(), name, emoji, price: p }]; });
+    logAct(`Avatar yüzü eklendi: ${emoji} ${name} (${p ? "R$ " + p : "ücretsiz"})`); toast(`${name} eklendi`); render();
+  };
+  $("btnColor").onclick = () => {
+    const t = $("sTarget").value, col = $("sColor").value;
+    if ((cfg().avatar?.[t] || []).includes(col)) { toast("Bu renk zaten ekli", true); return; }
+    setCfg(c => { c.avatar = c.avatar || {}; c.avatar[t] = [...(c.avatar[t] || []), col]; });
+    logAct(`Avatar rengi eklendi: ${col} (${t === "skins" ? "ten" : "kıyafet"})`); toast("Renk eklendi"); render();
+  };
+  const del = (attr, key, label) => $("page").querySelectorAll(`[${attr}]`).forEach(b => b.onclick = () => {
+    const i = +b.getAttribute(attr), it = (cfg().avatar?.[key] || [])[i];
+    if (!it || !confirm(`${label(it)} silinsin mi? Satın alanlarda da kaybolur.`)) return;
+    setCfg(c => c.avatar[key].splice(i, 1)); logAct(`Avatar öğesi silindi: ${label(it)}`); toast("Silindi"); render();
+  });
+  del("data-hdel", "hats", h => h.name); del("data-fdel", "faces", f => `${f.emoji} ${f.name}`);
+  $("page").querySelectorAll("[data-sdel]").forEach(b => b.onclick = () => {
+    const [k, i] = b.dataset.sdel.split(":"), col = (cfg().avatar?.[k] || [])[+i];
+    setCfg(c => c.avatar[k].splice(+i, 1)); logAct(`Avatar rengi silindi: ${col}`); toast("Renk silindi"); render();
+  });
+}
+
+// ================================================================ Rozetler
+function renderBadges() {
+  const u = users();
+  $("page").innerHTML = `<div class="card"><div class="cardHead"><h2>Rozetler</h2><span class="sub">${u.length} kullanıcı</span></div>
+    ${!u.length ? emptyUsers() : `<div class="tableWrap" style="margin-top:10px"><table>
+      <thead><tr><th>Rozet</th><th>Sahip</th><th class="hideSm"></th><th></th></tr></thead>
+      <tbody>${BADGES.map(b => { const n = u.filter(x => x.a.badges?.[b.id]).length;
+        return `<tr><td><div class="user"><span class="itemIco" style="width:38px;height:38px;font-size:20px">${b.icon}</span><b>${b.name}</b></div></td>
+          <td class="num">${n} / ${u.length}</td><td class="hideSm"><div class="meter"><i style="width:${u.length ? n / u.length * 100 : 0}%"></i></div></td>
+          <td class="r" style="white-space:nowrap"><button class="btn sm" data-ball="${b.id}" ${n === u.length ? "disabled" : ""}>Herkese ver</button>
+            <button class="btn sm danger" data-bnone="${b.id}" ${n ? "" : "disabled"}>Herkesten al</button></td></tr>`; }).join("")}</tbody></table></div>`}
+    <div class="cardBody hint">Panelden verilen rozetler Robux ödülü vermez.</div></div>`;
+  const each = (id, on) => { users().forEach(x => { const a = x.a; a.badges = { ...(a.badges || {}) }; if (on) a.badges[id] = true; else delete a.badges[id]; putUser(x.uid, a); }); };
+  $("page").querySelectorAll("[data-ball]").forEach(b => b.onclick = () => { const r = BADGES.find(x => x.id === b.dataset.ball); each(r.id, true); logAct(`Rozet herkese verildi: ${r.icon} ${r.name}`); toast(`${r.name} herkese verildi`); render(); });
+  $("page").querySelectorAll("[data-bnone]").forEach(b => b.onclick = () => { const r = BADGES.find(x => x.id === b.dataset.bnone); if (!confirm(`${r.name} rozeti herkesten alınsın mı?`)) return; each(r.id, false); logAct(`Rozet herkesten alındı: ${r.icon} ${r.name}`); toast(`${r.name} herkesten alındı`); render(); });
+}
+
+// ================================================================ İşlem kaydı
+function renderLog() {
+  const l = load(LOG_KEY, []);
+  $("page").innerHTML = `<div class="card"><div class="cardHead"><h2>İşlem kaydı</h2><span class="sub">son ${l.length} işlem</span>
+    <button class="btn sm danger right" id="btnLogClear" ${l.length ? "" : "disabled"}>${ic("trash")}Temizle</button></div>
+    ${l.length ? `<div class="cardBody">${l.map(x => `<div class="rowLine" style="padding:10px 0"><span class="muted num" style="width:110px;flex:none;font-size:13px">${fmtDate(x.at)}</span><div class="grow">${esc(x.text)}</div></div>`).join("")}</div>`
+      : `<div class="empty"><div class="big">${ic("list")}</div><h3>Kayıt yok</h3><p>Panelde yapılan her değişiklik (Robux, rozet, kod, duyuru…) burada tarihiyle listelenir.</p></div>`}</div>`;
+  $("btnLogClear").onclick = () => { if (!confirm("İşlem kaydı temizlensin mi?")) return; save(LOG_KEY, []); toast("Kayıt temizlendi"); render(); };
 }
 
 // ================================================================ Kullanıcı çekmecesi
@@ -702,16 +993,17 @@ $("drawer").addEventListener("click", e => {
   const x = getUser(drawerUid);
   if (!x) { closeDrawer(); return; }
   const a = x.a, amt = Math.floor(Number($("amt")?.value));
-  const setBal = v => { a.jeton = Math.max(0, v); putUser(x.uid, a); toast(`${a.name}: R$ ${fmtNum(a.jeton)}`); };
+  const setBal = v => { const old = a.jeton || 0; a.jeton = Math.max(0, v); putUser(x.uid, a); logAct(`${a.name}: Robux R$ ${fmtNum(old)} → R$ ${fmtNum(a.jeton)}`); toast(`${a.name}: R$ ${fmtNum(a.jeton)}`); };
   if (act === "add") setBal((a.jeton || 0) + +b.dataset.n);
   else if (act === "plus" || act === "minus" || act === "set") {
     if ($("amt").value === "" || !(amt >= 0)) { toast("Geçerli bir miktar yaz", true); $("amt").focus(); return; }
     setBal(act === "set" ? amt : (a.jeton || 0) + (act === "plus" ? amt : -amt));
   }
-  else if (act === "badge") { a.badges = { ...(a.badges || {}) }; if (a.badges[b.dataset.b]) delete a.badges[b.dataset.b]; else a.badges[b.dataset.b] = true; putUser(x.uid, a); }
-  else if (act === "badgesAll") { a.badges = Object.fromEntries(BADGES.map(r => [r.id, true])); putUser(x.uid, a); toast("Tüm rozetler verildi (Robux ödülü yok)"); }
-  else if (act === "badgesReset") { a.badges = { welcome: true }; putUser(x.uid, a); toast("Rozetler sıfırlandı"); }
-  else if (act === "daily") { a.lastDaily = ""; putUser(x.uid, a); toast("Günlük ödül tekrar alınabilir"); }
+  else if (act === "badge") { a.badges = { ...(a.badges || {}) }; const on = !a.badges[b.dataset.b]; if (on) a.badges[b.dataset.b] = true; else delete a.badges[b.dataset.b]; putUser(x.uid, a);
+    const r = BADGES.find(q => q.id === b.dataset.b); logAct(`${a.name}: ${r.icon} ${r.name} rozeti ${on ? "verildi" : "alındı"}`); }
+  else if (act === "badgesAll") { a.badges = Object.fromEntries(BADGES.map(r => [r.id, true])); putUser(x.uid, a); logAct(`${a.name}: tüm rozetler verildi`); toast("Tüm rozetler verildi (Robux ödülü yok)"); }
+  else if (act === "badgesReset") { a.badges = { welcome: true }; putUser(x.uid, a); logAct(`${a.name}: rozetler sıfırlandı`); toast("Rozetler sıfırlandı"); }
+  else if (act === "daily") { a.lastDaily = ""; putUser(x.uid, a); logAct(`${a.name}: günlük ödül yenilendi`); toast("Günlük ödül tekrar alınabilir"); }
   else if (act === "delete") {
     askDelete(a.name, () => {
       // Onay penceresi açıkken liste değişmiş olabilir: aynı ada sahip hesabı taze veriden bul
@@ -719,7 +1011,7 @@ $("drawer").addEventListener("click", e => {
       if (!y || y.a.name !== a.name) { toast("Hesap bulunamadı", true); render(); return; }
       if (y.uid === "a") { try { localStorage.removeItem(KEY); } catch (err) {} }
       else { const accounts = load(ACC_KEY, []); accounts.splice(+y.uid, 1); save(ACC_KEY, accounts); }
-      closeDrawer(); toast("Hesap silindi"); render();
+      logAct(`Hesap silindi: ${a.name}`); closeDrawer(); toast("Hesap silindi"); render();
     });
     return;
   }
@@ -738,7 +1030,7 @@ $("page").addEventListener("click", e => {
     try { localStorage.removeItem(g.saveKey); } catch (err) {}
     const active = load(KEY, null);
     if (active && active.gameStats) { delete active.gameStats[g.id]; save(KEY, active); }
-    toast("Kayıt silindi"); render();
+    logAct(`Oyun kaydı silindi: ${g.title}`); toast("Kayıt silindi"); render();
   }
 });
 
