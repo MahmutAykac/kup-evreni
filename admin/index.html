@@ -209,6 +209,19 @@
   #toast.on { transform: none; opacity: 1; }
   #toast.bad { border-left-color: var(--red); }
 
+  /* Silme onayı (DELETE yaz) */
+  #confirm { position: fixed; inset: 0; z-index: 50; background: rgba(0, 0, 0, 0.6); display: none; align-items: center; justify-content: center; padding: 16px; }
+  #confirm.on { display: flex; }
+  .cBox { width: 100%; max-width: 420px; background: var(--surface); border: 1px solid var(--line2); border-radius: 18px; padding: 22px; box-shadow: 0 30px 60px rgba(0, 0, 0, 0.5); }
+  .cBox .warn { width: 44px; height: 44px; border-radius: 12px; background: var(--red-soft); color: var(--red); display: grid; place-items: center; margin-bottom: 14px; }
+  .cBox .warn svg { width: 22px; height: 22px; }
+  .cBox h3 { margin: 0 0 6px; font-size: 18px; }
+  .cBox p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.5; }
+  .cBox code { background: var(--red-soft); color: var(--red); padding: 1px 6px; border-radius: 6px; font-weight: 700; }
+  .cBox .field { margin-top: 14px; font-weight: 700; letter-spacing: 0.06em; }
+  .cBox .acts { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+  .btn.dangerSolid { background: var(--red); border-color: transparent; color: #fff; }
+
   /* Telefon / dar ekran */
   @media (max-width: 1000px) { .kpis { grid-template-columns: repeat(2, 1fr); } .grid2 { grid-template-columns: 1fr; } }
   @media (max-width: 760px) {
@@ -269,6 +282,13 @@
 <div id="drawer"></div>
 <div id="tip"></div>
 <div id="toast"></div>
+<div id="confirm"><form class="cBox" id="cForm" autocomplete="off">
+  <div class="warn" id="cIco"></div>
+  <h3 id="cTitle">Hesabı sil</h3>
+  <p id="cText"></p>
+  <input class="field" id="cInput" placeholder="DELETE" spellcheck="false" autocapitalize="characters">
+  <div class="acts"><button type="button" class="btn" id="cCancel">Vazgeç</button><button type="submit" class="btn dangerSolid" id="cOk" disabled>Kalıcı olarak sil</button></div>
+</form></div>
 
 <script>
 "use strict";
@@ -617,6 +637,26 @@ function renderSettings() {
 let drawerUid = null;
 function openDrawer(uid) { drawerUid = uid; renderDrawer(); $("drawer").classList.add("on"); $("scrim").classList.add("on"); }
 function closeDrawer() { drawerUid = null; $("drawer").classList.remove("on"); $("scrim").classList.remove("on"); }
+
+// Silme onayı: kutuya DELETE yazılmadan buton açılmaz
+let confirmOk = null;
+function askDelete(name, onOk) {
+  confirmOk = onOk;
+  $("cIco").innerHTML = ic("alert");
+  $("cText").innerHTML = `<b style="color:var(--text)">${esc(name)}</b> hesabı kalıcı olarak silinecek: Robux, avatar, rozetler ve süreler gider. Bu işlem geri alınamaz.<br><br>Onaylamak için kutuya <code>DELETE</code> yaz.`;
+  $("cInput").value = ""; $("cOk").disabled = true;
+  $("confirm").classList.add("on");
+  setTimeout(() => $("cInput").focus(), 30);
+}
+function closeConfirm() { confirmOk = null; $("confirm").classList.remove("on"); }
+$("cInput").addEventListener("input", () => $("cOk").disabled = $("cInput").value.trim() !== "DELETE");
+$("cCancel").onclick = closeConfirm;
+$("confirm").addEventListener("click", e => { if (e.target.id === "confirm") closeConfirm(); });
+$("cForm").onsubmit = e => {
+  e.preventDefault();
+  if ($("cInput").value.trim() !== "DELETE" || !confirmOk) return;
+  const fn = confirmOk; closeConfirm(); fn();
+};
 function renderDrawer() {
   const x = getUser(drawerUid);
   if (!x) { closeDrawer(); return; }
@@ -650,7 +690,10 @@ function renderDrawer() {
     </div>`;
 }
 $("scrim").onclick = closeDrawer;
-addEventListener("keydown", e => { if (e.key === "Escape" && drawerUid) closeDrawer(); });
+addEventListener("keydown", e => {
+  if (e.key !== "Escape") return;
+  if ($("confirm").classList.contains("on")) closeConfirm(); else if (drawerUid) closeDrawer();
+});
 $("drawer").addEventListener("click", e => {
   const b = e.target.closest("[data-act]");
   if (!b || !sessionOk()) { if (b) logout(); return; }
@@ -670,10 +713,15 @@ $("drawer").addEventListener("click", e => {
   else if (act === "badgesReset") { a.badges = { welcome: true }; putUser(x.uid, a); toast("Rozetler sıfırlandı"); }
   else if (act === "daily") { a.lastDaily = ""; putUser(x.uid, a); toast("Günlük ödül tekrar alınabilir"); }
   else if (act === "delete") {
-    if (prompt(`"${a.name}" hesabı kalıcı olarak silinecek. Onaylamak için kullanıcı adını yaz:`) !== a.name) { toast("Hesap silinmedi", true); return; }
-    if (x.uid === "a") { try { localStorage.removeItem(KEY); } catch (err) {} }
-    else { const accounts = load(ACC_KEY, []); accounts.splice(+x.uid, 1); save(ACC_KEY, accounts); }
-    closeDrawer(); toast("Hesap silindi");
+    askDelete(a.name, () => {
+      // Onay penceresi açıkken liste değişmiş olabilir: aynı ada sahip hesabı taze veriden bul
+      const y = getUser(x.uid);
+      if (!y || y.a.name !== a.name) { toast("Hesap bulunamadı", true); render(); return; }
+      if (y.uid === "a") { try { localStorage.removeItem(KEY); } catch (err) {} }
+      else { const accounts = load(ACC_KEY, []); accounts.splice(+y.uid, 1); save(ACC_KEY, accounts); }
+      closeDrawer(); toast("Hesap silindi"); render();
+    });
+    return;
   }
   render();
 });
