@@ -1,0 +1,710 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Küp Evreni Admin</title>
+<!--
+  Küp Evreni admin paneli: ayrı sayfa (ana sayfada hiçbir giriş yolu yok).
+  Platformla aynı localStorage'ı okur/yazar: kupEvreni (aktif hesap), kupEvreniHesaplar (diğer hesaplar), oyunların saveKey'leri.
+  localStorage adrese bağlıdır: admin, oyunun oynandığı adresle aynı yerden açılmalı (file:// ≠ localhost ≠ github.io).
+  Değiştirilen şifrenin SHA-256 özeti kupEvreniAdmin anahtarında durur (sadece o cihazda geçerli).
+  Giriş sessionStorage'da tutulur (kupAdminOturum): sayfa yenilenince atmaz, 12 saat ya da Çıkış ile biter.
+  Her şey tarayıcıda çalıştığı için gerçek bir güvenlik değildir.
+-->
+<style>
+  :root {
+    --bg: #0d0e12;
+    --surface: #16181d;
+    --surface2: #1e2128;
+    --surface3: #262a33;
+    --line: rgba(255, 255, 255, 0.08);
+    --line2: rgba(255, 255, 255, 0.14);
+    --text: #f2f3f5;
+    --text2: #c4c7cf;
+    --muted: #8a8f9a;
+    --accent: #00a2ff;
+    --accent-soft: rgba(0, 162, 255, 0.14);
+    --play: #00b06f;
+    --play-soft: rgba(0, 176, 111, 0.14);
+    --gold: #ffd166;
+    --gold-soft: rgba(255, 209, 102, 0.12);
+    --red: #ff4d5e;
+    --red-soft: rgba(255, 77, 94, 0.12);
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font-family: "Trebuchet MS", system-ui, sans-serif; font-size: 15px; }
+  button, input, select { font: inherit; color: inherit; }
+  a { color: var(--accent); text-decoration: none; }
+  svg.i { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+  .muted { color: var(--muted); }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* Butonlar ve alanlar */
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 36px; padding: 0 14px; border-radius: 10px;
+    border: 1px solid var(--line2); background: var(--surface2); cursor: pointer; font-weight: 700; font-size: 14px; white-space: nowrap; }
+  .btn:hover { background: var(--surface3); }
+  .btn.primary { background: var(--accent); border-color: transparent; color: #fff; }
+  .btn.primary:hover { filter: brightness(1.1); }
+  .btn.green { background: var(--play); border-color: transparent; color: #fff; }
+  .btn.danger { background: var(--red-soft); border-color: rgba(255, 77, 94, 0.35); color: var(--red); }
+  .btn.danger:hover { background: var(--red); color: #fff; }
+  .btn.ghost { background: none; border-color: transparent; }
+  .btn.ghost:hover { background: var(--surface2); }
+  .btn.sm { height: 30px; padding: 0 10px; font-size: 13px; }
+  .btn:disabled { opacity: 0.4; cursor: default; pointer-events: none; }
+  .field { height: 38px; border-radius: 10px; border: 1px solid var(--line2); background: var(--bg); padding: 0 12px; width: 100%; }
+  .field:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
+  label.lbl { display: block; font-size: 13px; color: var(--text2); margin: 12px 0 6px; font-weight: 700; }
+
+  /* Giriş ekranı */
+  #login { min-height: 100vh; display: grid; place-items: center; padding: 16px;
+    background: radial-gradient(circle at 20% 10%, rgba(0, 162, 255, 0.16), transparent 45%), radial-gradient(circle at 85% 90%, rgba(0, 176, 111, 0.12), transparent 45%), var(--bg); }
+  .loginCard { width: 100%; max-width: 380px; background: var(--surface); border: 1px solid var(--line); border-radius: 20px; padding: 30px 26px 26px;
+    box-shadow: 0 30px 60px rgba(0, 0, 0, 0.4); }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 17px; letter-spacing: 0.02em; }
+  .brand i { width: 26px; height: 26px; background: var(--text); transform: rotate(14deg); border-radius: 4px; display: grid; place-items: center; }
+  .brand i::after { content: ""; width: 9px; height: 9px; background: var(--surface); }
+  .brand small { font-size: 11px; font-weight: 700; color: var(--accent); background: var(--accent-soft); padding: 3px 7px; border-radius: 6px; letter-spacing: 0.04em; }
+  .loginCard h1 { font-size: 22px; margin: 26px 0 4px; }
+  .pw { position: relative; }
+  .pw .field { padding-right: 44px; height: 44px; }
+  .pw button { position: absolute; right: 4px; top: 4px; height: 36px; width: 36px; border: 0; background: none; color: var(--muted); cursor: pointer; border-radius: 8px; }
+  .pw button:hover { color: var(--text); background: var(--surface2); }
+  .loginCard .btn.primary { width: 100%; height: 44px; margin-top: 16px; font-size: 15px; }
+  .err { color: var(--red); font-size: 13px; min-height: 18px; margin-top: 8px; }
+  .shake { animation: shake 0.35s; }
+  @keyframes shake { 20%, 60% { transform: translateX(-6px); } 40%, 80% { transform: translateX(6px); } }
+
+  /* Uygulama iskeleti */
+  #app { display: none; min-height: 100vh; }
+  #app.on { display: grid; grid-template-columns: 236px minmax(0, 1fr); }
+  aside { position: sticky; top: 0; height: 100vh; background: var(--surface); border-right: 1px solid var(--line); display: flex; flex-direction: column; padding: 18px 12px; }
+  aside .brand { padding: 0 8px 18px; border-bottom: 1px solid var(--line); margin-bottom: 12px; }
+  .navTitle { font-size: 11px; color: var(--muted); font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; padding: 10px 10px 6px; }
+  nav button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; border: 0; background: none; border-radius: 10px;
+    cursor: pointer; color: var(--text2); font-weight: 700; text-align: left; }
+  nav button:hover { background: var(--surface2); color: var(--text); }
+  nav button.on { background: var(--accent-soft); color: var(--accent); }
+  nav .count { margin-left: auto; font-size: 12px; background: var(--surface3); color: var(--text2); padding: 1px 8px; border-radius: 20px; }
+  aside .foot { margin-top: auto; display: flex; flex-direction: column; gap: 4px; padding-top: 12px; border-top: 1px solid var(--line); }
+  aside .foot .btn { justify-content: flex-start; width: 100%; color: var(--text2); }
+
+  .content { min-width: 0; }
+  header { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 12px; padding: 14px 28px; background: rgba(13, 14, 18, 0.85);
+    backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 20px; margin: 0; }
+  header .crumb { font-size: 13px; color: var(--muted); }
+  .search { position: relative; margin-left: auto; width: 260px; }
+  .search svg { position: absolute; left: 11px; top: 10px; color: var(--muted); }
+  .search .field { padding-left: 36px; }
+  #menuBtn { display: none; }
+  .page { padding: 24px 28px 60px; max-width: 1200px; }
+
+  /* Kartlar */
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+  .cardHead { display: flex; align-items: center; gap: 10px; padding: 16px 18px 0; }
+  .cardHead h2 { font-size: 15px; margin: 0; }
+  .cardHead .sub { font-size: 13px; color: var(--muted); }
+  .cardHead .right { margin-left: auto; }
+  .cardBody { padding: 16px 18px 18px; }
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 16px; }
+  .kpi { padding: 16px 18px; display: flex; gap: 14px; align-items: flex-start; }
+  .kpi .ico { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; flex: none; }
+  .kpi .ico svg { width: 20px; height: 20px; }
+  .kpi span { font-size: 13px; color: var(--muted); display: block; }
+  .kpi b { font-size: 24px; display: block; margin-top: 2px; }
+  .kpi small { font-size: 12px; color: var(--muted); }
+  .grid2 { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; margin-bottom: 16px; }
+
+  /* Yatay çubuk grafik (tek seri) */
+  .bars { display: flex; flex-direction: column; gap: 12px; }
+  .barRow { display: grid; grid-template-columns: 170px 1fr 64px; gap: 12px; align-items: center; font-size: 13px; position: relative; cursor: default; }
+  .barRow .lab { color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .barRow .track { height: 22px; display: flex; align-items: center; }
+  .barRow .fill { height: 14px; background: var(--accent); border-radius: 0 4px 4px 0; min-width: 2px; transition: filter 0.1s; }
+  .barRow:hover .fill { filter: brightness(1.25); }
+  .barRow .val { text-align: right; color: var(--text2); }
+  .chartGrid { position: relative; }
+  #tip { position: fixed; pointer-events: none; z-index: 60; background: var(--surface3); border: 1px solid var(--line2); border-radius: 10px; padding: 8px 10px;
+    font-size: 13px; display: none; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4); }
+  #tip b { display: block; margin-bottom: 2px; }
+
+  /* Tablolar */
+  .tableWrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 10px 18px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  td { padding: 12px 18px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  tr:last-child td { border-bottom: 0; }
+  tbody tr.click { cursor: pointer; }
+  tbody tr.click:hover td { background: var(--surface2); }
+  th.r, td.r { text-align: right; }
+  .user { display: flex; align-items: center; gap: 10px; }
+  .ava { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-size: 17px; flex: none; box-shadow: 0 0 0 2px var(--surface); }
+  .user b { display: block; }
+  .user small { color: var(--muted); font-size: 12px; }
+  .pill { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; padding: 3px 9px; border-radius: 20px; }
+  .pill.green { background: var(--play-soft); color: var(--play); }
+  .pill.gray { background: var(--surface3); color: var(--text2); }
+  .pill.gold { background: var(--gold-soft); color: var(--gold); }
+  .pill.green::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .robux { color: var(--gold); font-weight: 700; }
+  .gameIco { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; font-size: 19px; flex: none; }
+
+  /* Boş durum */
+  .empty { text-align: center; padding: 40px 20px; }
+  .empty .big { width: 56px; height: 56px; border-radius: 16px; background: var(--surface2); display: grid; place-items: center; margin: 0 auto 14px; color: var(--muted); }
+  .empty .big svg { width: 26px; height: 26px; }
+  .empty h3 { margin: 0 0 6px; font-size: 17px; }
+  .empty p { margin: 0 auto; max-width: 520px; color: var(--muted); line-height: 1.55; }
+  .empty code { background: var(--surface2); padding: 2px 6px; border-radius: 6px; color: var(--text2); }
+  .empty .btn { margin-top: 16px; }
+
+  /* Kullanıcı çekmecesi */
+  #scrim { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); z-index: 20; opacity: 0; pointer-events: none; transition: opacity 0.18s; }
+  #scrim.on { opacity: 1; pointer-events: auto; }
+  #drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(440px, 100%); background: var(--surface); border-left: 1px solid var(--line); z-index: 21;
+    transform: translateX(100%); transition: transform 0.2s ease; display: flex; flex-direction: column; }
+  #drawer.on { transform: none; }
+  .dHead { padding: 18px 20px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 12px; }
+  .dHead .ava { width: 52px; height: 52px; font-size: 26px; }
+  .dHead h2 { margin: 0; font-size: 19px; }
+  .dHead .btn { margin-left: auto; }
+  .dBody { padding: 18px 20px 30px; overflow-y: auto; flex: 1; }
+  .sec { margin-bottom: 22px; }
+  .sec h3 { font-size: 12px; color: var(--muted); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; margin: 0 0 10px; }
+  .miniStats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .miniStats div { background: var(--surface2); border-radius: 10px; padding: 10px 12px; }
+  .miniStats b { display: block; font-size: 16px; }
+  .miniStats span { font-size: 12px; color: var(--muted); }
+  .balance { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+  .balance b { font-size: 28px; color: var(--gold); }
+  .quick { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .amountRow { display: grid; grid-template-columns: 1fr auto auto auto; gap: 6px; }
+  .chips { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+  .chip { display: flex; align-items: center; gap: 8px; padding: 9px 10px; border-radius: 10px; border: 1px solid var(--line2); background: var(--surface2);
+    cursor: pointer; text-align: left; font-size: 13px; font-weight: 700; color: var(--muted); }
+  .chip .e { font-size: 18px; filter: grayscale(1); opacity: 0.5; }
+  .chip.on { border-color: rgba(0, 176, 111, 0.5); background: var(--play-soft); color: var(--text); }
+  .chip.on .e { filter: none; opacity: 1; }
+  .chip .tick { margin-left: auto; width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--line2); }
+  .chip.on .tick { background: var(--play); border-color: var(--play); }
+  .list div { display: flex; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .list div:last-child { border-bottom: 0; }
+  .dangerZone { border: 1px solid rgba(255, 77, 94, 0.3); border-radius: 12px; padding: 14px; }
+  .dangerZone p { margin: 0 0 10px; font-size: 13px; color: var(--muted); }
+
+  /* Ayarlar */
+  .settings { display: grid; gap: 16px; max-width: 640px; }
+  .kv { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+  .kv:last-child { border-bottom: 0; }
+  .kv code { color: var(--text2); word-break: break-all; text-align: right; }
+
+  /* Bildirim */
+  #toast { position: fixed; right: 20px; bottom: 20px; z-index: 70; display: flex; align-items: center; gap: 10px; background: var(--surface3); border: 1px solid var(--line2);
+    border-left: 4px solid var(--play); padding: 12px 16px; border-radius: 12px; font-weight: 700; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+    transform: translateY(20px); opacity: 0; pointer-events: none; transition: 0.18s; }
+  #toast.on { transform: none; opacity: 1; }
+  #toast.bad { border-left-color: var(--red); }
+
+  /* Telefon / dar ekran */
+  @media (max-width: 1000px) { .kpis { grid-template-columns: repeat(2, 1fr); } .grid2 { grid-template-columns: 1fr; } }
+  @media (max-width: 760px) {
+    #app.on { grid-template-columns: minmax(0, 1fr); }
+    aside { position: fixed; left: 0; top: 0; bottom: 0; width: 250px; z-index: 30; transform: translateX(-100%); transition: transform 0.2s; }
+    aside.open { transform: none; box-shadow: 20px 0 60px rgba(0, 0, 0, 0.5); }
+    #menuBtn { display: inline-flex; }
+    header { padding: 12px 16px; flex-wrap: wrap; }
+    .search { width: 100%; order: 5; margin-left: 0; }
+    .page { padding: 16px 16px 50px; }
+    .kpi { padding: 14px; } .kpi .ico { display: none; } .kpi b { font-size: 19px; white-space: nowrap; }
+    .barRow { grid-template-columns: 100px 1fr 70px; } .barRow .val { white-space: nowrap; }
+    th, td { padding: 10px 12px; }
+    .hideSm { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Giriş -->
+<div id="login">
+  <form class="loginCard" id="loginForm" autocomplete="off">
+    <div class="brand"><i></i>KÜP EVRENİ <small>ADMIN</small></div>
+    <h1>Yönetici girişi</h1>
+    <div class="muted" style="font-size:14px">Devam etmek için admin şifresini gir.</div>
+    <label class="lbl" for="pass">Şifre</label>
+    <div class="pw">
+      <input class="field" type="password" id="pass" placeholder="••••••••" autofocus>
+      <button type="button" id="eye" title="Şifreyi göster"></button>
+    </div>
+    <div class="err" id="loginErr"></div>
+    <button class="btn primary" type="submit">Giriş yap</button>
+  </form>
+</div>
+
+<!-- Panel -->
+<div id="app">
+  <aside id="side">
+    <div class="brand"><i></i>KÜP EVRENİ <small>ADMIN</small></div>
+    <div class="navTitle">Menü</div>
+    <nav id="nav"></nav>
+    <div class="foot">
+      <a class="btn ghost" href="../index.html" id="siteLink"></a>
+      <button class="btn ghost" id="btnLogout"></button>
+    </div>
+  </aside>
+  <div class="content">
+    <header>
+      <button class="btn ghost" id="menuBtn" aria-label="Menü"></button>
+      <div><div class="crumb">Admin</div><h1 id="pageTitle"></h1></div>
+      <div class="search"><span id="searchIco"></span><input class="field" id="search" placeholder="Kullanıcı ara…"></div>
+    </header>
+    <div class="page" id="page"></div>
+  </div>
+</div>
+
+<div id="scrim"></div>
+<div id="drawer"></div>
+<div id="tip"></div>
+<div id="toast"></div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+
+// ================================================================ Veri (ana sayfadaki GAMES / BADGES ile aynı tutulmalı)
+const GAMES = [
+  { id: "pizza", title: "Pizza Kulesi Tycoon", icon: "🍕", saveKey: "pizzaKulesi", bg: "linear-gradient(135deg,#ff7a45,#ffb703)" },
+  { id: "gezegen", title: "Evcil Hayvan Simülatörü: Gezegenler", icon: "🐾", saveKey: "evcilGezegenler", bg: "linear-gradient(135deg,#0b1d51,#2bb5ff)" },
+  { id: "fabrika", title: "Kaçış Parkuru: Çılgın Fabrika", icon: "🏭", saveKey: "cilginFabrika", bg: "linear-gradient(135deg,#3a3a3a,#ff5a1f)" },
+  { id: "ada", title: "Ada Hayatta Kalma: Tekne Kazası", icon: "🏝️", saveKey: "tekneKazasi", bg: "linear-gradient(135deg,#0f7a5a,#7ad7f0)" },
+  { id: "klavye", title: "Klavye Koşusu: +1 Hız", icon: "⌨️", saveKey: "klavyeKosusu", bg: "linear-gradient(135deg,#2a1f3d,#ff9ec7)" },
+  { id: "kasaba", title: "Kasaba Hayatı RP", icon: "🏘️", saveKey: "kasabaHayati", bg: "linear-gradient(135deg,#3a86ff,#8ce99a)" },
+];
+const BADGES = [
+  { id: "welcome", icon: "👋", name: "Hoş geldin" }, { id: "firstGame", icon: "🎮", name: "İlk oyun" },
+  { id: "explorer", icon: "🧭", name: "Kâşif" }, { id: "stylish", icon: "🧢", name: "Tarz sahibi" },
+  { id: "hour", icon: "⏱️", name: "Bir saat" }, { id: "shopper", icon: "🛍️", name: "Alışverişçi" },
+];
+const FACES = { smile: "🙂", cool: "😎", wow: "😮", grin: "😁" };
+const KEY = "kupEvreni", ACC_KEY = "kupEvreniHesaplar", ADMIN_KEY = "kupEvreniAdmin", SESSION_KEY = "kupAdminOturum";
+const ADMIN_DEFAULT_HASH = "0d004a4a238543099c4adb83dd38ef1aed92936620fd7aeeecbbf6bfdc447df3";
+const SESSION_MS = 12 * 3600 * 1000;
+
+// ================================================================ İkonlar (çizgi ikonlar)
+const ICONS = {
+  home: '<rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/>',
+  users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  cart: '<circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.7 13.4a2 2 0 0 0 2 1.6h9.7a2 2 0 0 0 2-1.6L23 6H6"/>',
+  game: '<rect x="2" y="6" width="20" height="12" rx="4"/><path d="M6 12h4M8 10v4"/><circle cx="15.5" cy="11" r="1"/><circle cx="18" cy="13" r="1"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+  gem: '<path d="M6 3h12l4 6-10 12L2 9z"/><path d="M2 9h20M12 21 8 9l4-6 4 6-4 12"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  bag: '<path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><path d="M3 6h18M16 10a4 4 0 0 1-8 0"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
+  logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5M21 12H9"/>',
+  out: '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6M10 14 21 3"/>',
+  menu: '<path d="M3 6h18M3 12h18M3 18h18"/>',
+  x: '<path d="M18 6 6 18M6 6l12 12"/>',
+  eye: '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"/><circle cx="12" cy="12" r="3"/>',
+  eyeOff: '<path d="M17.9 17.9A10 10 0 0 1 12 20C5 20 1 12 1 12a18 18 0 0 1 5.1-5.9M9.9 4.2A9 9 0 0 1 12 4c7 0 11 8 11 8a18 18 0 0 1-2.2 3.2M1 1l22 22"/><path d="M14.1 14.1a3 3 0 1 1-4.2-4.2"/>',
+  trash: '<path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>',
+  alert: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
+  download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
+  refresh: '<path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.5 9a9 9 0 0 1 14.9-3.4L23 10M1 14l4.6 4.4A9 9 0 0 0 20.5 15"/>',
+  chevron: '<path d="m9 18 6-6-6-6"/>',
+};
+const ic = (n, extra = "") => `<svg class="i" viewBox="0 0 24 24" ${extra}>${ICONS[n]}</svg>`;
+
+// ================================================================ Yardımcılar
+function sha256(str) { // crypto.subtle telefonda (http://192.168...) yok, o yüzden elle
+  const K = [], H = [];
+  for (let p = 2, c = 0; c < 64; p++) {
+    let prime = true;
+    for (let d = 2; d * d <= p; d++) if (p % d === 0) { prime = false; break; }
+    if (!prime) continue;
+    if (c < 8) H[c] = (Math.pow(p, 1 / 2) * 2 ** 32) | 0;
+    K[c++] = (Math.pow(p, 1 / 3) * 2 ** 32) | 0;
+  }
+  const b = [...new TextEncoder().encode(str)], len = b.length * 8;
+  b.push(0x80); while (b.length % 64 !== 56) b.push(0);
+  for (let i = 7; i >= 0; i--) b.push(i >= 4 ? 0 : (len >>> (i * 8)) & 255);
+  const rr = (v, n) => (v >>> n) | (v << (32 - n));
+  for (let o = 0; o < b.length; o += 64) {
+    const w = [];
+    for (let i = 0; i < 64; i++) {
+      if (i < 16) w[i] = (b[o + i * 4] << 24) | (b[o + i * 4 + 1] << 16) | (b[o + i * 4 + 2] << 8) | b[o + i * 4 + 3];
+      else {
+        const s0 = rr(w[i - 15], 7) ^ rr(w[i - 15], 18) ^ (w[i - 15] >>> 3), s1 = rr(w[i - 2], 17) ^ rr(w[i - 2], 19) ^ (w[i - 2] >>> 10);
+        w[i] = (w[i - 16] + s0 + w[i - 7] + s1) | 0;
+      }
+    }
+    let [a, bb, c, d, e, f, g, h] = H;
+    for (let i = 0; i < 64; i++) {
+      const t1 = (h + (rr(e, 6) ^ rr(e, 11) ^ rr(e, 25)) + ((e & f) ^ (~e & g)) + K[i] + w[i]) | 0;
+      const t2 = ((rr(a, 2) ^ rr(a, 13) ^ rr(a, 22)) + ((a & bb) ^ (a & c) ^ (bb & c))) | 0;
+      h = g; g = f; f = e; e = (d + t1) | 0; d = c; c = bb; bb = a; a = (t1 + t2) | 0;
+    }
+    [a, bb, c, d, e, f, g, h].forEach((v, i) => H[i] = (H[i] + v) | 0);
+  }
+  return H.map(v => (v >>> 0).toString(16).padStart(8, "0")).join("");
+}
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
+const fmtNum = n => (n || 0).toLocaleString("tr");
+function fmtTime(sec) { const m = Math.floor((sec || 0) / 60); return m < 60 ? `${m} dk` : `${Math.floor(m / 60)} sa ${m % 60} dk`; }
+function fmtDate(t) { return new Date(t).toLocaleString("tr", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }); }
+function toast(msg, bad) {
+  const t = $("toast");
+  t.textContent = msg; t.classList.toggle("bad", !!bad); t.classList.add("on");
+  clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove("on"), 2600);
+}
+function load(key, fallback) { try { return JSON.parse(localStorage.getItem(key) || "null") ?? fallback; } catch (e) { return fallback; } }
+function save(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) {} }
+function adminHash() { try { return localStorage.getItem(ADMIN_KEY) || ADMIN_DEFAULT_HASH; } catch (e) { return ADMIN_DEFAULT_HASH; } }
+const ava = a => `<span class="ava" style="background:${esc(a.avatar?.skin || "#ffdbac")}">${FACES[a.avatar?.face] || "🙂"}</span>`;
+const playSec = a => Object.values(a.playTime || {}).reduce((s, v) => s + v, 0);
+const spentOf = a => (a.purchases || []).reduce((s, p) => s + (p.price || 0), 0);
+
+// Her işlemde localStorage'dan taze oku: ana sayfa başka sekmede açıksa onun yazdıklarını ezmeyelim
+// Kullanıcı kimliği: "a" = aktif hesap, "0", "1"… = kupEvreniHesaplar[i]
+function users() {
+  const active = load(KEY, null), accounts = load(ACC_KEY, []);
+  const list = accounts.map((a, i) => ({ uid: String(i), a, active: false }));
+  if (active && active.name) list.unshift({ uid: "a", a: active, active: true });
+  return list;
+}
+function getUser(uid) { return users().find(u => u.uid === uid) || null; }
+function putUser(uid, acc) {
+  if (uid === "a") { save(KEY, acc); return; }
+  const accounts = load(ACC_KEY, []); accounts[+uid] = acc; save(ACC_KEY, accounts);
+}
+
+// ================================================================ Oturum
+function sessionOk() {
+  try {
+    const s = JSON.parse(sessionStorage.getItem(SESSION_KEY) || "null");
+    return !!s && s.h === adminHash() && Date.now() - s.t < SESSION_MS; // şifre değişirse oturum düşer
+  } catch (e) { return false; }
+}
+function startSession() { try { sessionStorage.setItem(SESSION_KEY, JSON.stringify({ h: adminHash(), t: Date.now() })); } catch (e) {} }
+function endSession() { try { sessionStorage.removeItem(SESSION_KEY); } catch (e) {} }
+
+$("eye").innerHTML = ic("eye");
+$("eye").onclick = () => {
+  const show = $("pass").type === "password";
+  $("pass").type = show ? "text" : "password";
+  $("eye").innerHTML = ic(show ? "eyeOff" : "eye");
+  $("pass").focus();
+};
+$("loginForm").onsubmit = e => {
+  e.preventDefault();
+  if (sha256($("pass").value) !== adminHash()) {
+    $("loginErr").textContent = "Şifre yanlış. Tekrar dene.";
+    const c = $("loginForm"); c.classList.remove("shake"); void c.offsetWidth; c.classList.add("shake");
+    $("pass").select(); return;
+  }
+  startSession(); enterApp();
+};
+function enterApp() {
+  $("login").style.display = "none";
+  $("app").classList.add("on");
+  go(location.hash.slice(1) || "overview");
+}
+function logout() {
+  endSession(); closeDrawer();
+  $("app").classList.remove("on"); $("login").style.display = "";
+  $("pass").value = ""; $("loginErr").textContent = ""; $("pass").focus();
+}
+
+// ================================================================ Gezinme
+const PAGES = [
+  { id: "overview", name: "Genel Bakış", icon: "home" },
+  { id: "users", name: "Kullanıcılar", icon: "users" },
+  { id: "purchases", name: "Satın Alımlar", icon: "cart" },
+  { id: "games", name: "Oyunlar", icon: "game" },
+  { id: "settings", name: "Ayarlar", icon: "gear" },
+];
+let page = "overview";
+function renderNav() {
+  const u = users(), buys = u.reduce((s, x) => s + (x.a.purchases || []).length, 0);
+  const counts = { users: u.length, purchases: buys, games: GAMES.length };
+  $("nav").innerHTML = PAGES.map(p => `<button data-page="${p.id}" class="${p.id === page ? "on" : ""}">${ic(p.icon)}${p.name}${counts[p.id] != null ? `<span class="count">${counts[p.id]}</span>` : ""}</button>`).join("");
+}
+function go(id) {
+  page = PAGES.some(p => p.id === id) ? id : "overview";
+  history.replaceState(null, "", "#" + page);
+  $("pageTitle").textContent = PAGES.find(p => p.id === page).name;
+  $("side").classList.remove("open");
+  render();
+  scrollTo(0, 0);
+}
+function render() {
+  renderNav();
+  ({ overview: renderOverview, users: renderUsers, purchases: renderPurchases, games: renderGames, settings: renderSettings })[page]();
+  if (drawerUid) renderDrawer();
+}
+$("nav").addEventListener("click", e => { const b = e.target.closest("[data-page]"); if (b) go(b.dataset.page); });
+$("menuBtn").innerHTML = ic("menu");
+$("menuBtn").onclick = () => $("side").classList.toggle("open");
+$("siteLink").innerHTML = ic("out") + "Siteye dön";
+$("btnLogout").innerHTML = ic("logout") + "Çıkış yap";
+$("btnLogout").onclick = logout;
+$("searchIco").innerHTML = ic("search");
+$("search").addEventListener("input", () => { if (page !== "users") go("users"); else renderUsers(); });
+// Ana sayfa başka sekmede bir şey kaydederse paneli tazele
+addEventListener("storage", () => { if ($("app").classList.contains("on")) render(); });
+
+// ================================================================ Boş durum (hesap yok)
+function emptyUsers() {
+  const here = location.protocol === "file:" ? "bilgisayardaki dosya (file://)" : location.host;
+  return `<div class="empty"><div class="big">${ic("users")}</div>
+    <h3>Bu adreste kayıtlı hesap yok</h3>
+    <p>Tarayıcı her adresin verisini ayrı tutar. Admin paneli şu an <code>${esc(here)}</code> adresinde açık ve burada henüz hesap oluşturulmamış.
+    Küp Evreni'ni <b>bu adreste</b> açıp giriş yap ya da hesap oluştur, sonra bu sayfayı yenile.</p>
+    ${location.protocol === "file:" ? `<a class="btn primary" href="http://localhost:5173/admin/">Sunucudan aç: localhost:5173/admin</a>
+      <p style="margin-top:10px;font-size:13px">Açılmazsa sunucu kapalıdır: <code>sunucu</code> klasöründeki <code>kur.bat</code> dosyasına çift tıkla.</p>`
+      : `<a class="btn primary" href="../index.html" target="_blank">${ic("out")}Küp Evreni'ni bu adreste aç</a>`}
+  </div>`;
+}
+
+// ================================================================ Genel Bakış
+function renderOverview() {
+  const u = users();
+  const totalRobux = u.reduce((s, x) => s + (x.a.jeton || 0), 0);
+  const spent = u.reduce((s, x) => s + spentOf(x.a), 0);
+  const play = u.reduce((s, x) => s + playSec(x.a), 0);
+  const kpi = (icon, color, soft, label, value, sub) => `<div class="card kpi"><div class="ico" style="background:${soft};color:${color}">${ic(icon)}</div>
+    <div><span>${label}</span><b class="num">${value}</b><small>${sub}</small></div></div>`;
+  // Oyun başına toplam oynama süresi (tüm hesaplar)
+  const perGame = GAMES.map(g => ({ g, sec: u.reduce((s, x) => s + (x.a.playTime?.[g.id] || 0), 0), players: u.filter(x => x.a.playTime?.[g.id]).length }))
+    .sort((a, b) => b.sec - a.sec);
+  const max = Math.max(1, ...perGame.map(x => x.sec));
+  const bars = perGame.map(x => `<div class="barRow" data-tip="<b>${x.g.icon} ${esc(x.g.title)}</b>${fmtTime(x.sec)} · ${x.players} oyuncu">
+      <span class="lab">${x.g.icon} ${esc(x.g.title)}</span>
+      <span class="track"><span class="fill" style="width:${(x.sec / max) * 100}%"></span></span>
+      <span class="val num">${fmtTime(x.sec)}</span></div>`).join("");
+  const top = [...u].sort((a, b) => (b.a.jeton || 0) - (a.a.jeton || 0)).slice(0, 5);
+  const buys = allPurchases().slice(0, 6);
+  $("page").innerHTML = `
+    <div class="kpis">
+      ${kpi("users", "var(--accent)", "var(--accent-soft)", "Kullanıcılar", u.length, u.some(x => x.active) ? "1 aktif oturum" : "aktif oturum yok")}
+      ${kpi("gem", "var(--gold)", "var(--gold-soft)", "Dolaşımdaki Robux", "R$ " + fmtNum(totalRobux), "tüm hesapların bakiyesi")}
+      ${kpi("bag", "var(--play)", "var(--play-soft)", "Harcanan Robux", "R$ " + fmtNum(spent), allPurchases().length + " satın alım")}
+      ${kpi("clock", "var(--text2)", "var(--surface3)", "Toplam oynama", fmtTime(play), "tüm oyunlar")}
+    </div>
+    ${u.length ? "" : `<div class="card" style="margin-bottom:16px">${emptyUsers()}</div>`}
+    <div class="grid2">
+      <div class="card"><div class="cardHead"><h2>Oyunlara göre oynama süresi</h2><span class="sub right">tüm hesaplar</span></div>
+        <div class="cardBody">${play ? `<div class="bars">${bars}</div>` : `<p class="muted" style="margin:0">Henüz oynanan oyun yok.</p>`}</div></div>
+      <div class="card"><div class="cardHead"><h2>En çok Robux</h2><button class="btn sm ghost right" data-goto="users">Tümü ${ic("chevron")}</button></div>
+        <div class="cardBody" style="padding-top:8px">${top.length ? top.map(x => `<div class="user click" data-user="${x.uid}" style="padding:8px 0;cursor:pointer">${ava(x.a)}
+          <div style="flex:1;min-width:0"><b>${esc(x.a.name)}</b><small>${x.active ? "Aktif" : "Kayıtlı"}</small></div><span class="robux num">R$ ${fmtNum(x.a.jeton)}</span></div>`).join("") : `<p class="muted" style="margin:0">Hesap yok.</p>`}</div></div>
+    </div>
+    <div class="card"><div class="cardHead"><h2>Son satın alımlar</h2><button class="btn sm ghost right" data-goto="purchases">Tümü ${ic("chevron")}</button></div>
+      ${buys.length ? purchaseTable(buys) : `<div class="cardBody muted">Henüz satın alım yok.</div>`}</div>`;
+}
+
+// ================================================================ Kullanıcılar
+function renderUsers() {
+  const q = $("search").value.trim().toLocaleLowerCase("tr");
+  const u = users().filter(x => !q || x.a.name.toLocaleLowerCase("tr").includes(q));
+  const all = users().length;
+  $("page").innerHTML = `<div class="card">
+    <div class="cardHead"><h2>Tüm kullanıcılar</h2><span class="sub">${q ? `${u.length} / ${all} sonuç` : `${all} hesap`}</span></div>
+    ${!all ? emptyUsers() : !u.length ? `<div class="empty"><h3>Sonuç yok</h3><p>"${esc(q)}" ile eşleşen kullanıcı bulunamadı.</p></div>` : `
+    <div class="tableWrap" style="margin-top:10px"><table>
+      <thead><tr><th>Kullanıcı</th><th>Durum</th><th class="r">Robux</th><th class="hideSm">Rozet</th><th class="r hideSm">Oynama</th><th class="r hideSm">Harcama</th><th></th></tr></thead>
+      <tbody>${u.map(x => `<tr class="click" data-user="${x.uid}">
+        <td><div class="user">${ava(x.a)}<div><b>${esc(x.a.name)}</b><small>Katılma: ${esc(x.a.joined || "—")}</small></div></div></td>
+        <td>${x.active ? `<span class="pill green">Aktif</span>` : `<span class="pill gray">Kayıtlı</span>`}</td>
+        <td class="r robux num">R$ ${fmtNum(x.a.jeton)}</td>
+        <td class="hideSm">${BADGES.filter(b => x.a.badges?.[b.id]).map(b => b.icon).join(" ") || "—"}</td>
+        <td class="r num hideSm">${fmtTime(playSec(x.a))}</td>
+        <td class="r num hideSm">R$ ${fmtNum(spentOf(x.a))}</td>
+        <td class="r"><button class="btn sm">Yönet</button></td></tr>`).join("")}</tbody></table></div>`}
+  </div>`;
+}
+
+// ================================================================ Satın alımlar
+function allPurchases() {
+  return users().flatMap(x => (x.a.purchases || []).map(p => ({ ...p, user: x }))).sort((a, b) => b.at - a.at);
+}
+function purchaseTable(rows) {
+  return `<div class="tableWrap" style="margin-top:10px"><table>
+    <thead><tr><th>Kullanıcı</th><th>Oyun</th><th>Ürün</th><th class="r">Fiyat</th><th class="r hideSm">Tarih</th></tr></thead>
+    <tbody>${rows.map(p => { const g = GAMES.find(x => x.id === p.game) || { icon: "🎮", title: p.game };
+      return `<tr class="click" data-user="${p.user.uid}"><td><div class="user">${ava(p.user.a)}<b>${esc(p.user.a.name)}</b></div></td>
+        <td>${g.icon} ${esc(g.title)}</td><td>${esc(p.id)}</td><td class="r robux num">R$ ${fmtNum(p.price)}</td><td class="r muted hideSm">${fmtDate(p.at)}</td></tr>`; }).join("")}</tbody></table></div>`;
+}
+let buyFilter = "";
+function renderPurchases() {
+  const rows = allPurchases().filter(p => !buyFilter || p.game === buyFilter);
+  const total = rows.reduce((s, p) => s + p.price, 0);
+  $("page").innerHTML = `<div class="card">
+    <div class="cardHead"><h2>Satın alımlar</h2><span class="sub">${rows.length} adet · R$ ${fmtNum(total)}</span>
+      <select class="field right" id="buyFilter" style="width:auto;margin-left:auto"><option value="">Tüm oyunlar</option>
+        ${GAMES.map(g => `<option value="${g.id}" ${g.id === buyFilter ? "selected" : ""}>${g.icon} ${esc(g.title)}</option>`).join("")}</select></div>
+    ${rows.length ? purchaseTable(rows) : `<div class="empty"><div class="big">${ic("cart")}</div><h3>Satın alım yok</h3><p>Oyunlarda Robux ile yapılan alışverişler burada listelenir.</p></div>`}
+  </div>`;
+  $("buyFilter").onchange = e => { buyFilter = e.target.value; renderPurchases(); };
+}
+
+// ================================================================ Oyunlar
+function renderGames() {
+  const u = users();
+  $("page").innerHTML = `<div class="card">
+    <div class="cardHead"><h2>Oyunlar ve kayıtlar</h2><span class="sub">Kayıt silmek bu cihazdaki tüm oyuncuların o oyundaki ilerlemesini sıfırlar</span></div>
+    <div class="tableWrap" style="margin-top:10px"><table>
+      <thead><tr><th>Oyun</th><th class="r">Oyuncu</th><th class="r hideSm">Oynama</th><th class="r hideSm">Satış</th><th class="r">Kayıt</th><th></th></tr></thead>
+      <tbody>${GAMES.map(g => {
+        let raw = null; try { raw = localStorage.getItem(g.saveKey); } catch (e) {}
+        const players = u.filter(x => x.a.playTime?.[g.id]).length, sec = u.reduce((s, x) => s + (x.a.playTime?.[g.id] || 0), 0);
+        const sales = u.reduce((s, x) => s + (x.a.purchases || []).filter(p => p.game === g.id).reduce((t, p) => t + p.price, 0), 0);
+        return `<tr><td><div class="user"><span class="gameIco" style="background:${g.bg}">${g.icon}</span><div><b>${esc(g.title)}</b><small>${g.saveKey}</small></div></div></td>
+          <td class="r num">${players}</td><td class="r num hideSm">${fmtTime(sec)}</td><td class="r robux num hideSm">R$ ${fmtNum(sales)}</td>
+          <td class="r">${raw ? `<span class="pill gold num">${(raw.length / 1024).toFixed(1)} KB</span>` : `<span class="muted">yok</span>`}</td>
+          <td class="r"><button class="btn sm danger" data-wipe="${g.id}" ${raw ? "" : "disabled"}>${ic("trash")}Sil</button></td></tr>`;
+      }).join("")}</tbody></table></div></div>`;
+}
+
+// ================================================================ Ayarlar
+function renderSettings() {
+  let size = 0; try { for (let i = 0; i < localStorage.length; i++) size += (localStorage.getItem(localStorage.key(i)) || "").length; } catch (e) {}
+  $("page").innerHTML = `<div class="settings">
+    <div class="card"><div class="cardHead"><h2>Admin şifresi</h2></div><div class="cardBody">
+      ${[["pOld", "Mevcut şifre", "current-password", ""], ["pNew", "Yeni şifre", "new-password", "En az 4 karakter"], ["pNew2", "Yeni şifre (tekrar)", "new-password", ""]].map(([id, lab, ac, ph]) =>
+        `<label class="lbl" for="${id}">${lab}</label><div class="pw"><input class="field" type="password" id="${id}" autocomplete="${ac}" placeholder="${ph}"><button type="button" data-eye="${id}" title="Şifreyi göster">${ic("eye")}</button></div>`).join("")}
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px"><button class="btn primary" id="btnPass">Şifreyi değiştir</button>
+        <button class="btn" id="btnPassReset">Varsayılana döndür</button></div>
+      <p class="muted" style="font-size:13px;margin:12px 0 0">${adminHash() === ADMIN_DEFAULT_HASH ? "Şu an varsayılan şifre kullanılıyor." : "Şu an özel bir şifre kullanılıyor."} Şifre sadece bu cihazda ve bu adreste geçerlidir.</p></div></div>
+    <div class="card"><div class="cardHead"><h2>Depolama</h2></div><div class="cardBody">
+      <div class="kv"><span class="muted">Adres</span><code>${esc(location.protocol === "file:" ? "file:// (bilgisayardaki dosya)" : location.origin)}</code></div>
+      <div class="kv"><span class="muted">Kullanılan alan</span><code>${(size / 1024).toFixed(1)} KB</code></div>
+      <div class="kv"><span class="muted">Hesap verisi</span><code>${KEY}, ${ACC_KEY}</code></div>
+      <button class="btn" id="btnExport" style="margin-top:12px">${ic("download")}Yedek indir (JSON)</button></div></div>
+  </div>`;
+  $("page").querySelectorAll("[data-eye]").forEach(b => b.onclick = () => {
+    const f = $(b.dataset.eye), show = f.type === "password";
+    f.type = show ? "text" : "password"; b.innerHTML = ic(show ? "eyeOff" : "eye");
+  });
+  // Zaten giriş yapılmış olduğu için mevcut şifre sorulmaz
+  $("btnPassReset").onclick = () => {
+    if (!confirm("Admin şifresi varsayılana döndürülsün mü?")) return;
+    try { localStorage.removeItem(ADMIN_KEY); } catch (e) {}
+    startSession(); renderSettings(); toast("Şifre varsayılana döndü");
+  };
+  $("btnPass").onclick = () => {
+    if (sha256($("pOld").value) !== adminHash()) { toast("Mevcut şifre yanlış. Göz ikonuyla ne yazdığını kontrol et.", true); return; }
+    const p = $("pNew").value;
+    if (p.length < 4) { toast("Yeni şifre en az 4 karakter olmalı", true); return; }
+    if (p !== $("pNew2").value) { toast("Yeni şifreler aynı değil", true); return; }
+    try { localStorage.setItem(ADMIN_KEY, sha256(p)); } catch (e) {}
+    startSession(); renderSettings(); toast("Admin şifresi değişti");
+  };
+  $("btnExport").onclick = () => {
+    const data = { at: new Date().toISOString(), [KEY]: load(KEY, null), [ACC_KEY]: load(ACC_KEY, []) };
+    GAMES.forEach(g => data[g.saveKey] = load(g.saveKey, null));
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
+    a.download = `kup-evreni-yedek-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+}
+
+// ================================================================ Kullanıcı çekmecesi
+let drawerUid = null;
+function openDrawer(uid) { drawerUid = uid; renderDrawer(); $("drawer").classList.add("on"); $("scrim").classList.add("on"); }
+function closeDrawer() { drawerUid = null; $("drawer").classList.remove("on"); $("scrim").classList.remove("on"); }
+function renderDrawer() {
+  const x = getUser(drawerUid);
+  if (!x) { closeDrawer(); return; }
+  const a = x.a, buys = (a.purchases || []).slice().sort((p, q) => q.at - p.at);
+  const games = GAMES.filter(g => a.playTime?.[g.id]).sort((p, q) => a.playTime[q.id] - a.playTime[p.id]);
+  $("drawer").innerHTML = `
+    <div class="dHead">${ava(a)}<div><h2>${esc(a.name)}</h2>${x.active ? `<span class="pill green">Aktif hesap</span>` : `<span class="pill gray">Kayıtlı hesap</span>`}</div>
+      <button class="btn ghost" data-act="close" aria-label="Kapat">${ic("x")}</button></div>
+    <div class="dBody">
+      <div class="sec"><div class="miniStats">
+        <div><b class="num">${fmtTime(playSec(a))}</b><span>Oynama</span></div>
+        <div><b class="num">R$ ${fmtNum(spentOf(a))}</b><span>Harcama</span></div>
+        <div><b>${esc(a.joined || "—")}</b><span>Katılma</span></div></div></div>
+      <div class="sec"><h3>Robux bakiyesi</h3>
+        <div class="balance"><b class="num">R$ ${fmtNum(a.jeton)}</b></div>
+        <div class="quick">${[100, 500, 1000, 5000].map(n => `<button class="btn sm green" data-act="add" data-n="${n}">+${fmtNum(n)}</button>`).join("")}
+          <button class="btn sm" data-act="add" data-n="-100">−100</button></div>
+        <div class="amountRow"><input class="field num" type="number" min="0" id="amt" placeholder="Miktar">
+          <button class="btn" data-act="plus">Ekle</button><button class="btn" data-act="minus">Çıkar</button><button class="btn primary" data-act="set">Ayarla</button></div></div>
+      <div class="sec"><h3>Rozetler · ${BADGES.filter(b => a.badges?.[b.id]).length}/${BADGES.length}</h3>
+        <div class="chips">${BADGES.map(b => `<button class="chip ${a.badges?.[b.id] ? "on" : ""}" data-act="badge" data-b="${b.id}"><span class="e">${b.icon}</span>${b.name}<span class="tick"></span></button>`).join("")}</div>
+        <div style="display:flex;gap:6px;margin-top:8px"><button class="btn sm" data-act="badgesAll">Hepsini ver</button><button class="btn sm" data-act="badgesReset">Sıfırla</button></div></div>
+      <div class="sec"><h3>Günlük ödül</h3>
+        <div style="display:flex;align-items:center;gap:10px"><span class="muted" style="flex:1;font-size:13px">${a.lastDaily ? `Son alınma: ${esc(a.lastDaily)}` : "Alınabilir durumda"}</span>
+        <button class="btn sm" data-act="daily" ${a.lastDaily ? "" : "disabled"}>${ic("refresh")}Yenile</button></div></div>
+      <div class="sec"><h3>Oyunlar</h3><div class="list">${games.length ? games.map(g => `<div><span>${g.icon} ${esc(g.title)}</span><span class="muted num">${fmtTime(a.playTime[g.id])}</span></div>`).join("") : `<div><span class="muted">Henüz oynamadı</span></div>`}</div></div>
+      <div class="sec"><h3>Satın alımlar</h3><div class="list">${buys.length ? buys.slice(0, 10).map(p => `<div><span>${(GAMES.find(g => g.id === p.game) || {}).icon || "🎮"} ${esc(p.id)} <span class="muted">· ${fmtDate(p.at)}</span></span><span class="robux num">R$ ${fmtNum(p.price)}</span></div>`).join("") : `<div><span class="muted">Satın alım yok</span></div>`}</div></div>
+      <div class="sec"><h3 style="color:var(--red)">Tehlikeli bölge</h3><div class="dangerZone">
+        <p>Hesap kalıcı olarak silinir: Robux, avatar, rozetler ve süreler gider. Oyunların kendi kayıtları kalır.</p>
+        <button class="btn danger" data-act="delete">${ic("trash")}Hesabı sil</button></div></div>
+    </div>`;
+}
+$("scrim").onclick = closeDrawer;
+addEventListener("keydown", e => { if (e.key === "Escape" && drawerUid) closeDrawer(); });
+$("drawer").addEventListener("click", e => {
+  const b = e.target.closest("[data-act]");
+  if (!b || !sessionOk()) { if (b) logout(); return; }
+  const act = b.dataset.act;
+  if (act === "close") { closeDrawer(); return; }
+  const x = getUser(drawerUid);
+  if (!x) { closeDrawer(); return; }
+  const a = x.a, amt = Math.floor(Number($("amt")?.value));
+  const setBal = v => { a.jeton = Math.max(0, v); putUser(x.uid, a); toast(`${a.name}: R$ ${fmtNum(a.jeton)}`); };
+  if (act === "add") setBal((a.jeton || 0) + +b.dataset.n);
+  else if (act === "plus" || act === "minus" || act === "set") {
+    if ($("amt").value === "" || !(amt >= 0)) { toast("Geçerli bir miktar yaz", true); $("amt").focus(); return; }
+    setBal(act === "set" ? amt : (a.jeton || 0) + (act === "plus" ? amt : -amt));
+  }
+  else if (act === "badge") { a.badges = { ...(a.badges || {}) }; if (a.badges[b.dataset.b]) delete a.badges[b.dataset.b]; else a.badges[b.dataset.b] = true; putUser(x.uid, a); }
+  else if (act === "badgesAll") { a.badges = Object.fromEntries(BADGES.map(r => [r.id, true])); putUser(x.uid, a); toast("Tüm rozetler verildi (Robux ödülü yok)"); }
+  else if (act === "badgesReset") { a.badges = { welcome: true }; putUser(x.uid, a); toast("Rozetler sıfırlandı"); }
+  else if (act === "daily") { a.lastDaily = ""; putUser(x.uid, a); toast("Günlük ödül tekrar alınabilir"); }
+  else if (act === "delete") {
+    if (prompt(`"${a.name}" hesabı kalıcı olarak silinecek. Onaylamak için kullanıcı adını yaz:`) !== a.name) { toast("Hesap silinmedi", true); return; }
+    if (x.uid === "a") { try { localStorage.removeItem(KEY); } catch (err) {} }
+    else { const accounts = load(ACC_KEY, []); accounts.splice(+x.uid, 1); save(ACC_KEY, accounts); }
+    closeDrawer(); toast("Hesap silindi");
+  }
+  render();
+});
+
+// Sayfa geneli tıklamalar: kullanıcı satırı, "Tümü" bağlantıları, oyun kaydı silme
+$("page").addEventListener("click", e => {
+  if (!sessionOk()) { logout(); return; }
+  const u = e.target.closest("[data-user]"), to = e.target.closest("[data-goto]"), w = e.target.closest("[data-wipe]");
+  if (to) go(to.dataset.goto);
+  else if (u) openDrawer(u.dataset.user);
+  else if (w) {
+    const g = GAMES.find(x => x.id === w.dataset.wipe);
+    if (!confirm(`${g.title} kaydı silinsin mi? Bu cihazdaki tüm oyuncuların bu oyundaki ilerlemesi gider.`)) return;
+    try { localStorage.removeItem(g.saveKey); } catch (err) {}
+    const active = load(KEY, null);
+    if (active && active.gameStats) { delete active.gameStats[g.id]; save(KEY, active); }
+    toast("Kayıt silindi"); render();
+  }
+});
+
+// Grafik ipucu (çubuklar)
+$("page").addEventListener("mousemove", e => {
+  const r = e.target.closest("[data-tip]"), t = $("tip");
+  if (!r) { t.style.display = "none"; return; }
+  t.innerHTML = r.dataset.tip; t.style.display = "block";
+  t.style.left = Math.min(e.clientX + 14, innerWidth - t.offsetWidth - 8) + "px"; t.style.top = (e.clientY + 14) + "px";
+});
+$("page").addEventListener("mouseleave", () => $("tip").style.display = "none");
+
+// ================================================================ Başlat
+if (sessionOk()) enterApp();
+</script>
+</body>
+</html>
