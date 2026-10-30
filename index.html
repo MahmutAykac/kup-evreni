@@ -698,7 +698,8 @@ function launch(id) {
   if (visibleGames().filter(playable).every(x => profile.recent.includes(x.id))) award("explorer");
   persist();
   $("playerTitle").textContent = `${g.icon} ${g.title}`;
-  $("frame").src = g.url;
+  // Önbellekteki eski oyun sürümü açılmasın (site oyunları 10 dk önbellekte tutuyor; eski sürüm yeni mesajları, ör. hediyeleri, tanımaz)
+  $("frame").src = g.url + "?v=" + Date.now();
   $("player").classList.add("on");
   // Telefonda Roblox gibi: tam ekran + yatay (tarayıcı izin vermezse sessizce geç)
   // Tüm sayfa tam ekran olmalı: yalnız #player olursa satın alma penceresi (#buyModal) görünmez
