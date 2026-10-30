@@ -711,7 +711,19 @@ const eco = () => ({ ...ECO_DEFAULT, ...(cfg().eco || {}) });
 const newId = () => "c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
 function logAct(text) { const l = load(LOG_KEY, []); l.unshift({ at: Date.now(), text }); save(LOG_KEY, l.slice(0, 300)); }
 const tg = (on, attrs) => `<button class="tg ${on ? "on" : ""}" ${attrs} aria-pressed="${!!on}"></button>`;
-const intVal = (id, min = 0, max = 1000000) => { const v = Math.floor(Number($(id).value)); return $(id).value !== "" && v >= min && v <= max ? v : null; };
+// Sayı kutuları (data-num): yazarken binlik nokta konur (19.000.000), okurken noktalar atılır
+const numVal = el => { const d = String(el.value).replace(/\D/g, ""); return d === "" ? null : Number(d); };
+document.addEventListener("input", e => {
+  const el = e.target;
+  if (!el.matches || !el.matches("input[data-num]")) return;
+  const before = el.value.slice(0, el.selectionStart).replace(/\D/g, "").length; // imleçten önceki rakam sayısı
+  const d = el.value.replace(/\D/g, "").replace(/^0+(?=\d)/, "").slice(0, 12);
+  el.value = d ? Number(d).toLocaleString("tr") : "";
+  let i = 0;
+  for (let n = 0; i < el.value.length && n < before; i++) if (/\d/.test(el.value[i])) n++;
+  el.setSelectionRange(i, i);
+});
+const intVal = (id, min = 0, max = 1000000) => { const v = numVal($(id)); return v !== null && v >= min && v <= max ? v : null; };
 
 // ================================================================ Ekonomi
 function renderEco() {
@@ -723,7 +735,7 @@ function renderEco() {
         <small>Açıkken günlük, oyun ve rozet ödülleri iki katı olur, ana sayfada mor bir şerit görünür.</small></div>${tg(e.double, 'id="tgDouble"')}</div></div></div>
     <div class="card"><div class="cardHead"><h2>Ödül miktarları</h2><span class="sub right">R$ cinsinden</span></div><div class="cardBody">
       <div class="formGrid">${fields.map(([k, n, h]) => `<div><label class="lbl" for="eco_${k}">${n}</label>
-        <input class="field num" type="number" min="0" max="100000" id="eco_${k}" value="${e[k]}"><div class="hint">${h} · varsayılan ${ECO_DEFAULT[k]}</div></div>`).join("")}</div>
+        <input class="field num" type="text" inputmode="numeric" data-num id="eco_${k}" value="${fmtNum(e[k])}"><div class="hint">${h} · varsayılan ${ECO_DEFAULT[k]}</div></div>`).join("")}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:18px"><button class="btn primary" id="btnEcoSave">Kaydet</button><button class="btn" id="btnEcoReset">Varsayılana döndür</button></div></div></div>
     <div class="card"><div class="cardHead"><h2>Şu an oyuncunun aldığı</h2>${e.double ? `<span class="pill gold right">2x etkin</span>` : ""}</div><div class="cardBody">
       <div class="stats">
@@ -794,8 +806,8 @@ function renderCodes() {
     <div class="card"><div class="cardHead"><h2>Yeni promo kod</h2></div><div class="cardBody">
       <div class="formGrid">
         <div><label class="lbl" for="cCode">Kod</label><div style="display:flex;gap:6px"><input class="field mono" id="cCode" maxlength="20" placeholder="KUP100" style="text-transform:uppercase"><button class="btn" id="btnRand" title="Rastgele kod">🎲</button></div><div class="hint">3-20 harf/rakam</div></div>
-        <div><label class="lbl" for="cAmt">Robux</label><input class="field num" type="number" id="cAmt" min="1" value="100"></div>
-        <div><label class="lbl" for="cMax">Kullanım limiti</label><input class="field num" type="number" id="cMax" min="0" value="0"><div class="hint">0 = sınırsız</div></div>
+        <div><label class="lbl" for="cAmt">Robux</label><input class="field num" type="text" inputmode="numeric" data-num id="cAmt" value="100"></div>
+        <div><label class="lbl" for="cMax">Kullanım limiti</label><input class="field num" type="text" inputmode="numeric" data-num id="cMax" value="0"><div class="hint">0 = sınırsız</div></div>
         <div><label class="lbl" for="cExp">Son tarih</label><input class="field" type="date" id="cExp"><div class="hint">Boş = süresiz</div></div>
       </div>
       <button class="btn primary" id="btnCode" style="margin-top:18px">Kod oluştur</button>
@@ -841,7 +853,7 @@ function renderAvatarShop() {
         <div><label class="lbl" for="hName">İsim</label><input class="field" id="hName" maxlength="24" placeholder="Altın Taç"></div>
         <div><label class="lbl" for="hShape">Şekil</label><select class="field" id="hShape">${SHAPES.map(([k, n]) => `<option value="${k}">${n}</option>`).join("")}</select></div>
         <div><label class="lbl" for="hColor">Renk</label><input class="field" type="color" id="hColor" value="#ffd166"></div>
-        <div><label class="lbl" for="hPrice">Fiyat (R$)</label><input class="field num" type="number" id="hPrice" min="0" value="0"><div class="hint">0 = ücretsiz</div></div>
+        <div><label class="lbl" for="hPrice">Fiyat (R$)</label><input class="field num" type="text" inputmode="numeric" data-num id="hPrice" value="0"><div class="hint">0 = ücretsiz</div></div>
       </div><button class="btn primary" id="btnHat" style="margin-top:18px">${ic("plus")}Aksesuar ekle</button></div>
       ${(av.hats || []).length ? `<div class="cardBody" style="padding-top:0">${av.hats.map((h, i) => `<div class="rowLine"><span class="itemIco"><span class="dot" style="width:22px;height:22px;background:${esc(h.color)}"></span></span>
         <div class="grow"><b>${esc(h.name)}</b><small>${(SHAPES.find(s => s[0] === h.shape) || [, h.shape])[1]} · ${owners(h.id)} sahip · ${wearing(h.id, "hat")} takıyor</small></div>${price(h.price)}
@@ -850,7 +862,7 @@ function renderAvatarShop() {
       <div class="formGrid">
         <div><label class="lbl" for="fName">İsim</label><input class="field" id="fName" maxlength="24" placeholder="Havalı Kedi"></div>
         <div><label class="lbl" for="fEmoji">Emoji</label><input class="field" id="fEmoji" maxlength="8" placeholder="😺" style="font-size:20px"><div class="hint">Yüz olarak kafaya çizilir</div></div>
-        <div><label class="lbl" for="fPrice">Fiyat (R$)</label><input class="field num" type="number" id="fPrice" min="0" value="0"><div class="hint">0 = ücretsiz</div></div>
+        <div><label class="lbl" for="fPrice">Fiyat (R$)</label><input class="field num" type="text" inputmode="numeric" data-num id="fPrice" value="0"><div class="hint">0 = ücretsiz</div></div>
       </div><button class="btn primary" id="btnFace" style="margin-top:18px">${ic("plus")}Yüz ekle</button></div>
       ${(av.faces || []).length ? `<div class="cardBody" style="padding-top:0">${av.faces.map((f, i) => `<div class="rowLine"><span class="itemIco">${esc(f.emoji)}</span>
         <div class="grow"><b>${esc(f.name)}</b><small>${owners(f.id)} sahip · ${wearing(f.id, "face")} kullanıyor</small></div>${price(f.price)}
@@ -965,7 +977,7 @@ function renderDrawer() {
         <div class="balance"><b class="num">R$ ${fmtNum(a.jeton)}</b></div>
         <div class="quick">${[100, 500, 1000, 5000].map(n => `<button class="btn sm green" data-act="add" data-n="${n}">+${fmtNum(n)}</button>`).join("")}
           <button class="btn sm" data-act="add" data-n="-100">−100</button></div>
-        <div class="amountRow"><input class="field num" type="number" min="0" id="amt" placeholder="Miktar">
+        <div class="amountRow"><input class="field num" type="text" inputmode="numeric" data-num id="amt" placeholder="Miktar">
           <button class="btn" data-act="plus">Ekle</button><button class="btn" data-act="minus">Çıkar</button><button class="btn primary" data-act="set">Ayarla</button></div></div>
       <div class="sec"><h3>Rozetler · ${BADGES.filter(b => a.badges?.[b.id]).length}/${BADGES.length}</h3>
         <div class="chips">${BADGES.map(b => `<button class="chip ${a.badges?.[b.id] ? "on" : ""}" data-act="badge" data-b="${b.id}"><span class="e">${b.icon}</span>${b.name}<span class="tick"></span></button>`).join("")}</div>
@@ -992,11 +1004,11 @@ $("drawer").addEventListener("click", e => {
   if (act === "close") { closeDrawer(); return; }
   const x = getUser(drawerUid);
   if (!x) { closeDrawer(); return; }
-  const a = x.a, amt = Math.floor(Number($("amt")?.value));
+  const a = x.a, amt = $("amt") ? numVal($("amt")) : null;
   const setBal = v => { const old = a.jeton || 0; a.jeton = Math.max(0, v); putUser(x.uid, a); logAct(`${a.name}: Robux R$ ${fmtNum(old)} → R$ ${fmtNum(a.jeton)}`); toast(`${a.name}: R$ ${fmtNum(a.jeton)}`); };
   if (act === "add") setBal((a.jeton || 0) + +b.dataset.n);
   else if (act === "plus" || act === "minus" || act === "set") {
-    if ($("amt").value === "" || !(amt >= 0)) { toast("Geçerli bir miktar yaz", true); $("amt").focus(); return; }
+    if (amt === null) { toast("Geçerli bir miktar yaz", true); $("amt").focus(); return; }
     setBal(act === "set" ? amt : (a.jeton || 0) + (act === "plus" ? amt : -amt));
   }
   else if (act === "badge") { a.badges = { ...(a.badges || {}) }; const on = !a.badges[b.dataset.b]; if (on) a.badges[b.dataset.b] = true; else delete a.badges[b.dataset.b]; putUser(x.uid, a);
