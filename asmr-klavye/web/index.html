@@ -193,8 +193,9 @@ const PASSES = [
   { id: "pack", name: "+1.000 Hız Paketi", icon: "🚀", jeton: 30, consumable: true, desc: "Anında +1.000 Hız. Tekrar alınabilir." },
 ];
 const rebirthReq = reb => 1000 * (Math.pow(2, reb + 1) - 1);   // 1.000, 3.000, 7.000, 15.000…
-const BASE_SPEED = 10, MAX_SPEED = 120;
-const moveSpeed = h => Math.min(MAX_SPEED, BASE_SPEED + 2 * Math.sqrt(h));
+// 3.025 Hıza kadar karekök (10 → 120 m/sn), sonra her 10 katta +150 m/sn (1 Mn ≈ 498, 1 Mr ≈ 948, 1 T ≈ 1.398), en fazla 2.000
+const BASE_SPEED = 10, SOFT_SPEED = 120, TOP_SPEED = 2000, SOFT_HIZ = ((SOFT_SPEED - BASE_SPEED) / 2) ** 2;
+const moveSpeed = h => h <= SOFT_HIZ ? BASE_SPEED + 2 * Math.sqrt(h) : Math.min(TOP_SPEED, SOFT_SPEED + 150 * Math.log10(h / SOFT_HIZ));
 const GRAVITY = 45, JUMP_V = 16, PAD_V = 27;
 
 // ================================================================ Kayıt
@@ -836,8 +837,8 @@ function input() {
 }
 function physics(dt) {
   const sp = moveSpeed(save.hiz), inp = input();
-  const tvz = -inp.fwd * sp, tvx = inp.side * Math.min(sp, 12 + sp * 0.12);
-  const n = Math.min(14, Math.max(1, Math.ceil(Math.max(Math.abs(pl.vz), Math.abs(tvz), Math.abs(pl.vy)) * dt / 0.45)));
+  const tvz = -inp.fwd * sp, tvx = inp.side * Math.min(sp, 12 + Math.min(sp, SOFT_SPEED) * 0.12);   // yan hız 120 m/snden sonra artmaz
+  const n = Math.min(150, Math.max(1, Math.ceil(Math.max(Math.abs(pl.vz), Math.abs(tvz), Math.abs(pl.vy)) * dt / 0.45)));
   const h = dt / n;
   pl.jumpBuf = Math.max(0, pl.jumpBuf - dt);
   pl.knockT = Math.max(0, pl.knockT - dt);
@@ -1046,8 +1047,9 @@ const camPos = new THREE.Vector3(0, 6, START_Z + 12), camLook = new THREE.Vector
 let zoom = 1;
 const skyCol = new THREE.Color(ZONES[0].sky), tmpCol = new THREE.Color();
 function syncCamera(dt) {
-  const hv = Math.hypot(pl.vx, pl.vz), sf = clamp((hv - BASE_SPEED) / (MAX_SPEED - BASE_SPEED), 0, 1);
-  const back = (10 + sf * 4) * zoom, up = (5 + sf * 1.2) * zoom;
+  const hv = Math.hypot(pl.vx, pl.vz), sf = clamp((hv - BASE_SPEED) / (SOFT_SPEED - BASE_SPEED), 0, 1);
+  const hyper = hv > SOFT_SPEED ? clamp(Math.log10(hv / SOFT_SPEED) / Math.log10(TOP_SPEED / SOFT_SPEED), 0, 1) : 0;   // 120 m/snden sonrası için ek efekt
+  const back = (10 + sf * 4 + hyper * 3) * zoom, up = (5 + sf * 1.2) * zoom;
   const k = Math.min(1, dt * 7);
   camPos.x += (pl.x * 0.6 - camPos.x) * k;
   camPos.y += (pl.y * 0.6 + up - camPos.y) * k;
@@ -1055,7 +1057,7 @@ function syncCamera(dt) {
   camera.position.copy(camPos);
   camLook.set(pl.x * 0.7, pl.y * 0.6 + 1.6, pl.z - 8);
   camera.lookAt(camLook);
-  const fov = fitFov(60 + sf * 22);
+  const fov = fitFov(60 + sf * 22 + hyper * 16);
   if (Math.abs(camera.fov - fov) > 0.05) { camera.fov += (fov - camera.fov) * Math.min(1, dt * 4); camera.updateProjectionMatrix(); }
   $("speedFx").style.opacity = (sf * sf * 0.9).toFixed(2);
   if (wind) { wind.g.gain.setTargetAtTime(sf * sf * 0.22, actx.currentTime, 0.1); wind.f.frequency.setTargetAtTime(350 + sf * 900, actx.currentTime, 0.1); }
