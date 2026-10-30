@@ -86,6 +86,8 @@
   .banner { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 14px; margin-bottom: 14px; font-weight: 700; line-height: 1.4;
     border: 1px solid rgba(255,255,255,0.12); }
   .banner .bi { font-size: 22px; }
+  .banner .bx { margin-left: auto; flex: none; width: 32px; height: 32px; border-radius: 8px; border: 0; background: rgba(255,255,255,0.08); cursor: pointer; font-size: 15px; opacity: 0.8; }
+  .banner .bx:hover { background: rgba(255,255,255,0.18); opacity: 1; }
   .banner.info { background: linear-gradient(90deg, rgba(0,162,255,0.22), rgba(0,162,255,0.08)); }
   .banner.success { background: linear-gradient(90deg, rgba(0,176,111,0.24), rgba(0,176,111,0.08)); }
   .banner.warn { background: linear-gradient(90deg, rgba(255,209,102,0.24), rgba(255,209,102,0.08)); }
@@ -581,8 +583,14 @@ function renderBanners() {
   const d = CFG.duyuru, ic = { info: "📢", success: "✅", warn: "⚠️", event: "🎉", fresh: "🆕" };
   const esc = s => String(s).replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
   $("banners").innerHTML = (eco().double ? `<div class="banner event"><span class="bi">💎</span>2x Robux etkinliği! Günlük ödül, oyun ödülü ve rozet ödülleri iki katı.</div>` : "") +
-    (d && d.on && d.text ? `<div class="banner ${ic[d.type] ? d.type : "info"}"><span class="bi">${ic[d.type] || "📢"}</span>${esc(d.text)}</div>` : "");
+    (d && d.on && d.text && !annClosed(d) ? `<div class="banner ${ic[d.type] ? d.type : "info"}"><span class="bi">${ic[d.type] || "📢"}</span><span>${esc(d.text)}</span>
+      <button class="bx" id="btnAnnClose" title="Kapat" aria-label="Duyuruyu kapat">✕</button></div>` : "");
+  const x = $("btnAnnClose");
+  if (x) x.onclick = () => { try { localStorage.setItem(ANN_CLOSED_KEY, String(d.at || d.text)); } catch (e) {} renderBanners(); };
 }
+// Oyuncunun kapattığı duyuru (yayın zamanıyla) hatırlanır; admin yeni duyuru yayınlayınca tekrar görünür
+const ANN_CLOSED_KEY = "kupEvreniDuyuruKapali";
+function annClosed(d) { try { return localStorage.getItem(ANN_CLOSED_KEY) === String(d.at || d.text); } catch (e) { return false; } }
 function statsFor(g) {
   // Oyunun kendi bildirdiği özet (postMessage) yoksa localStorage'dan okumayı dene (aynı köken ise)
   let s = profile.gameStats[g.id];
