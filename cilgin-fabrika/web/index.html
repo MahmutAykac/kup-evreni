@@ -166,12 +166,15 @@ const TRAILS = [
   { id: "gold", icon: "✨", name: "Altın", color: 0xffd166, need: s => s.bestTime != null && s.bestTime < 240, hint: "4 dakikanın altında bitir" },
 ];
 const HARDHAT = { need: s => s.bestStage >= 10, hint: "Patron bölümüne ulaş" };
+// Açık mı? Koşulu sağlamak ya da hediye (admin) olarak almak yeter
+const hasTrail = (t, s = save) => t.need(s) || !!(s.giftTrails && s.giftTrails[t.id]);
+const hasHardhat = (s = save) => HARDHAT.need(s) || !!s.giftHardhat;
 const BOTS = [["ParkurUstası", 151], ["Zıpzıp_44", 188], ["FabrikaKaçkını", 214], ["TestereAvcısı", 262], ["LavYürüyücü", 305], ["ObbyKralı", 356], ["Yavaşİlerleyen", 448]];
 
 // ================================================================ Kayıt
 const SAVE_KEY = "cilginFabrika";
 let save = { cp: 0, runTime: 0, runSkipped: false, runDeaths: 0, bestTime: null, bestStage: 0, deaths: 0, finishes: 0,
-  trail: "none", hardhat: false, passes: {}, helpSeen: false };
+  trail: "none", hardhat: false, passes: {}, helpSeen: false, giftTrails: {}, giftHardhat: false, giftIds: [] };
 try { const s = JSON.parse(localStorage.getItem(SAVE_KEY) || "null"); if (s) save = { ...save, ...s }; } catch (e) {}
 let lastSave = 0;
 function persist(force) {
@@ -204,8 +207,52 @@ addEventListener("message", e => {
     if (done) done(!!m.ok);
     renderShop();
   }
+  else if (m.type === "kup:gift") receiveGifts(m.gifts);
 });
 if (platform.inside) parent.postMessage({ type: "kup:ready" }, "*");
+
+// ================================================================ Küp Evreni hediyeleri (admin panelinden)
+// kup:gift { gifts: [{ gid, items: [{ key, n }] }] } → uygula, kaydet → kup:giftAck { gid, skipped }
+// Desteklenen: pass:speed (kalıcı geçiş), trail:<id> (iz sahipliği → save.giftTrails), cosmetic:hardhat (Fabrika Kaskı → save.giftHardhat).
+// "Bölüm Atla" ilerleme hilesi olduğu için hediye edilmez.
+function applyGiftItem(key, n) {
+  const [kind, id] = key.split(":");
+  if (kind === "pass") {
+    const p = PASSES.find(x => x.id === id);
+    if (!p || p.consumable) return false;
+    save.passes[p.id] = true; // satın almadaki gibi
+    return true;
+  }
+  if (kind === "trail") {
+    const t = TRAILS.find(x => x.id === id);
+    if (!t || t.id === "none") return false;
+    save.giftTrails[t.id] = true;
+    return true;
+  }
+  if (kind === "cosmetic" && id === "hardhat") { save.giftHardhat = true; return true; }
+  return false;
+}
+function receiveGifts(gifts) {
+  save.giftIds = save.giftIds || [];
+  save.giftTrails = save.giftTrails || {};
+  let got = false;
+  for (const g of Array.isArray(gifts) ? gifts : []) {
+    if (!g || !g.gid) continue;
+    const skipped = [];
+    if (!save.giftIds.includes(g.gid)) { // aynı hediye iki kez gelirse bir kez uygula
+      for (const it of g.items || []) { const n = Math.max(1, Math.floor(Number(it.n) || 1)); if (applyGiftItem(String(it.key), n)) got = true; else skipped.push(String(it.key)); }
+      save.giftIds = [g.gid, ...save.giftIds].slice(0, 200);
+    }
+    parent.postMessage({ type: "kup:giftAck", gid: g.gid, skipped }, "*");
+  }
+  // kaydı zorla yaz + ilgili arayüzü yenile
+  persist(true);
+  if (got) {
+    notify("🎁 Hediye alındı!");
+    if (pl.group) rebuildAvatar();
+    renderShop(); renderRewards();
+  }
+}
 
 // ================================================================ Ses
 const A = { ctx: null };
@@ -664,7 +711,7 @@ function buildAvatar(a, withHardhat) {
 }
 function rebuildAvatar() {
   if (pl.group) { scene.remove(pl.group); scene.remove(pl.parts.shadow); }
-  const built = buildAvatar((platform.profile && platform.profile.avatar) || DEFAULT_AVATAR, save.hardhat && HARDHAT.need(save));
+  const built = buildAvatar((platform.profile && platform.profile.avatar) || DEFAULT_AVATAR, save.hardhat && hasHardhat());
   pl.group = built.group; pl.parts = built;
   scene.add(pl.group);
 }
@@ -769,7 +816,7 @@ function die(msg) {
   SFX.die();
   $("dead").style.opacity = 1; setTimeout(() => $("dead").style.opacity = 0, 300);
   setText($("deaths"), `💀 ${save.runDeaths}`);
-  if (save.deaths === 50) notify("💚 Zehir izi açıldı! (Ödüller)");
+  if (save.deaths === 50 && !save.giftTrails.toxic) notify("💚 Zehir izi açıldı! (Ödüller)");
   persist();
 }
 function respawn() {
@@ -787,8 +834,8 @@ function reachCheckpoint(i) {
   flag.flagM.color.setHex(0x00d084); flag.flagM.emissive.setHex(0x004020);
   banner(`✅ Bölüm ${i + 1}`, STAGES[i].name);
   if (STAGES[i].boss) setTimeout(() => banner("👹 PATRON!", "Dönen kolun ve şok dalgalarının üstünden zıpla"), 1900);
-  for (const t of TRAILS) if (t.need(save) && !t.need({ ...save, bestStage: before })) notify(`${t.icon} Yeni ödül: ${t.name} izi! (🎁 Ödüller)`);
-  if (HARDHAT.need(save) && !HARDHAT.need({ ...save, bestStage: before })) notify("🪖 Yeni kostüm: Fabrika Kaskı! (🎁 Ödüller)");
+  for (const t of TRAILS) if (hasTrail(t) && !hasTrail(t, { ...save, bestStage: before })) notify(`${t.icon} Yeni ödül: ${t.name} izi! (🎁 Ödüller)`);
+  if (hasHardhat() && !hasHardhat({ ...save, bestStage: before })) notify("🪖 Yeni kostüm: Fabrika Kaskı! (🎁 Ödüller)");
   persist(true);
 }
 let finished = false;
@@ -804,7 +851,7 @@ function finishRun() {
   if (save.runSkipped) note = "Bu koşuda bölüm atladın, süre sıralamaya girmedi.";
   else if (prevBest == null || time < prevBest) { save.bestTime = time; note = prevBest == null ? "İlk bitirişin! 🎉" : `Yeni rekor! Önceki: ${fmtTime(prevBest)}`; }
   else note = `Rekorun: ${fmtTime(prevBest)}`;
-  const unlocked = TRAILS.filter(t => t.need(save) && !t.need(was)).map(t => `${t.icon} ${t.name}`);
+  const unlocked = TRAILS.filter(t => hasTrail(t) && !hasTrail(t, was)).map(t => `${t.icon} ${t.name}`);
   if (unlocked.length) note += ` · Yeni iz: ${unlocked.join(", ")}`;
   SFX.finish();
   $("fTime").textContent = fmtTime(time);
@@ -875,11 +922,11 @@ function renderLeader() {
 }
 function renderRewards() {
   $("rewardList").innerHTML = TRAILS.map(t => {
-    const ok = t.need(save), on = save.trail === t.id;
+    const ok = hasTrail(t), on = save.trail === t.id;
     return `<div class="item ${ok ? "" : "locked"}"><div class="ic">${t.icon}</div><div><b>${t.name}</b><div class="muted">${ok ? (t.id === "none" ? "İzi kapat" : "Açıldı") : "🔒 " + t.hint}</div></div>
       <button class="btn ${on ? "" : "go"}" data-trail="${t.id}" ${ok && !on ? "" : "disabled"}>${on ? "✓ Takılı" : "Tak"}</button></div>`;
   }).join("") + (() => {
-    const ok = HARDHAT.need(save);
+    const ok = hasHardhat();
     return `<div class="item ${ok ? "" : "locked"}"><div class="ic">🪖</div><div><b>Fabrika Kaskı (kostüm)</b><div class="muted">${ok ? "Avatarının şapkası yerine geçer" : "🔒 " + HARDHAT.hint}</div></div>
       <button class="btn ${save.hardhat ? "" : "go"}" data-hat="1" ${ok ? "" : "disabled"}>${save.hardhat ? "Çıkar" : "Tak"}</button></div>`;
   })();

@@ -321,7 +321,65 @@ addEventListener("message", e => {
     if (done) done(!!m.ok);
     renderShop();
   }
+  else if (m.type === "kup:gift") receiveGifts(m.gifts);
 });
+
+// ================================================================ Küp Evreni hediyeleri (admin panelinden)
+// kup:gift { gifts: [{ gid, items: [{ key, n }] }] } → uygula, kaydet → kup:giftAck { gid, skipped }
+// Desteklenen key'ler: dust · pet:<türId>:<n|g|r> · planet:<1|2> · pass:<double|slots>
+const GIFT_MAX_DUST = 1e12;
+function applyGiftItem(key, n) {
+  const [kind, a, b] = key.split(":");
+  if (key === "dust") { // hediye net miktardır, 2x geçişiyle çarpılmaz
+    const v = Math.min(n, GIFT_MAX_DUST);
+    save.dust = Math.max(save.dust, Math.min(save.dust + v, GIFT_MAX_DUST)); save.totalDust += v;
+    return true;
+  }
+  if (kind === "pet") {
+    if (!PETS.hasOwnProperty(a) || !VARIANTS.hasOwnProperty(b)) return false;
+    const fit = Math.min(n, MAX_PETS - save.pets.length); // sığmayanlar atlanır
+    if (fit <= 0) return false;
+    for (let i = 0; i < fit; i++) save.pets.push({ uid: save.nextUid++, sp: a, v: b, eq: false });
+    save.seen[a] = true;
+    Server.fillSlots();
+    return true;
+  }
+  if (kind === "planet") {
+    const i = Number(a);
+    if (!Number.isInteger(i) || i < 0 || i >= PLANETS.length || save.unlocked[i]) return false;
+    for (let k = 0; k <= i; k++) save.unlocked[k] = true; // öncekiler de açılır (kapı zinciri kopmasın)
+    return true;
+  }
+  if (kind === "pass") {
+    const p = PASSES.find(x => x.id === a);
+    if (!p || save.passes[p.id]) return false;
+    save.passes[p.id] = true;
+    if (p.id === "slots") Server.fillSlots(); // satın almadaki yan etkiyle aynı
+    return true;
+  }
+  return false;
+}
+function receiveGifts(gifts) {
+  save.giftIds = save.giftIds || [];
+  let applied = 0;
+  for (const g of Array.isArray(gifts) ? gifts : []) {
+    if (!g || !g.gid) continue;
+    const skipped = [];
+    if (!save.giftIds.includes(g.gid)) { // aynı hediye iki kez gelirse bir kez uygula
+      for (const it of g.items || []) {
+        const n = Math.max(1, Math.floor(Number(it.n) || 1));
+        if (applyGiftItem(String(it.key), n)) applied++; else skipped.push(String(it.key));
+      }
+      save.giftIds = [g.gid, ...save.giftIds].slice(0, 200);
+    }
+    parent.postMessage({ type: "kup:giftAck", gid: g.gid, skipped }, "*");
+  }
+  // kaydı zorla yaz + ilgili arayüzü yenile
+  persist(true);
+  syncPetObjs(); refreshGates(); renderTravel(); renderShop();
+  if ($("ovPets").classList.contains("show")) renderPets();
+  if (applied) notify("🎁 Hediye alındı!");
+}
 if (platform.inside) parent.postMessage({ type: "kup:ready" }, "*");
 
 // ================================================================ Server (Roblox: sunucu servisleri + RemoteFunction)

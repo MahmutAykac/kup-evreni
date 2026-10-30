@@ -255,8 +255,67 @@ addEventListener("message", e => {
     if (done) done(!!m.ok);
     renderShop();
   }
+  else if (m.type === "kup:gift") receiveGifts(m.gifts);
 });
 if (platform.inside) parent.postMessage({ type: "kup:ready" }, "*");
+
+// ================================================================ Küp Evreni hediyeleri (admin panelinden)
+// kup:gift { gifts: [{ gid, items: [{ key, n }] }] } → uygula, kaydet → kup:giftAck { gid, skipped }
+// Desteklenen: inv:<ITEMS id>, tool:<alet tarifi id>, flask (matarayı doldur), heal (can/açlık/susuzluk), pass:<PASSES id>
+function applyGiftItem(key, n) {
+  const [kind, id] = key.split(":");
+  if (kind === "inv") {
+    if (!ITEMS[id]) return false;
+    save.inv[id] = (save.inv[id] || 0) + n; // envanterde üst sınır yok
+    return true;
+  }
+  if (kind === "tool") {
+    const r = RECIPES.find(x => x.id === id && x.tool);
+    if (!r || save.tools[id]) return false; // bilinmiyor ya da zaten sende
+    save.tools[id] = true; // elde alet modeli kare döngüsünde save.tools'a göre görünür olur
+    return true;
+  }
+  if (key === "flask") {
+    if (!save.tools.matara || save.flask >= 3) return false; // matara yoksa ya da doluysa
+    save.flask = 3;
+    return true;
+  }
+  if (key === "heal") {
+    if (pl.dead) return false;
+    save.hp = 100; save.food = 100; save.water = 100;
+    return true;
+  }
+  if (kind === "pass") {
+    const p = PASSES.find(x => x.id === id);
+    if (!p) return false;
+    if (p.id === "starter") { for (let i = 0; i < n; i++) Server.give({ odun: 10, tas: 6, ip: 4, meyve: 5 }); return true; } // satın almadaki gibi
+    if (save.passes[p.id]) return false; // kalıcı geçiş zaten sende
+    save.passes[p.id] = true;
+    return true;
+  }
+  return false;
+}
+function receiveGifts(gifts) {
+  save.giftIds = save.giftIds || [];
+  let applied = false;
+  for (const g of Array.isArray(gifts) ? gifts : []) {
+    if (!g || !g.gid) continue;
+    const skipped = [];
+    if (!save.giftIds.includes(g.gid)) { // aynı hediye iki kez gelirse bir kez uygula
+      for (const it of g.items || []) {
+        const n = Math.max(1, Math.floor(Number(it.n) || 1));
+        if (applyGiftItem(String(it.key), n)) applied = true; else skipped.push(String(it.key));
+      }
+      save.giftIds = [g.gid, ...save.giftIds].slice(0, 200);
+    }
+    persist(true); // ack'ten önce kaydı zorla yaz
+    if (platform.inside) parent.postMessage({ type: "kup:giftAck", gid: g.gid, skipped }, "*");
+  }
+  renderHotbar();
+  if ($("ovCraft").classList.contains("show")) renderCraft();
+  if ($("ovShop").classList.contains("show")) renderShop();
+  if (applied) { SFX.craft(); notify("🎁 Hediye alındı!"); }
+}
 
 // ================================================================ Server (Roblox: Inventory/Craft/Boat servisleri)
 const Server = {
@@ -888,7 +947,7 @@ function escape() {
   persist(true);
 }
 $("btnNewIsland").onclick = () => {
-  const keep = { escapes: save.escapes, bestDay: save.bestDay, passes: save.passes, helpSeen: true };
+  const keep = { escapes: save.escapes, bestDay: save.bestDay, passes: save.passes, giftIds: save.giftIds, helpSeen: true }; // hediye kimlikleri korunur, tekrar uygulanmaz
   save = { ...freshSave(), ...keep };
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) {}
   location.reload();

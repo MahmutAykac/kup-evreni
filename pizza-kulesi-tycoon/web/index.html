@@ -213,6 +213,7 @@ const state = {
   dayOver: false,
   stats: { earned: 0, served: 0, angry: 0 },
   started: false,
+  giftIds: [],             // uygulanmış Küp Evreni hediyeleri (aynı hediye iki kez uygulanmasın)
 };
 
 const $ = id => document.getElementById(id);
@@ -231,13 +232,13 @@ function formatMoney(n) {
 }
 
 function save() {
-  try { localStorage.setItem("pizzaKulesi", JSON.stringify({ money: state.money, owned: state.owned, day: state.day, passes: state.passes })); } catch (e) {}
+  try { localStorage.setItem("pizzaKulesi", JSON.stringify({ money: state.money, owned: state.owned, day: state.day, passes: state.passes, giftIds: state.giftIds })); } catch (e) {}
   reportStats();
 }
 
 // ---------------------------------------------------------------- Küp Evreni köprüsü (postMessage)
 // Platform: kullanıcı adı + jeton. Jetonla satın alma platformda onaylanır ve düşülür.
-const platform = { inside: window.parent !== window, profile: null, reqs: {}, lastStats: 0 };
+const platform = { inside: window.parent !== window, profile: null, reqs: {}, lastStats: 0, loaded: false, giftQueue: [] };
 function reportStats() {
   if (!platform.inside || performance.now() - platform.lastStats < 3000) return;
   platform.lastStats = performance.now();
@@ -263,6 +264,9 @@ addEventListener("message", e => {
     delete platform.reqs[m.reqId];
     if (done) done(!!m.ok);
     renderShop();
+  } else if (m.type === "kup:gift") {
+    // Kayıt yüklenmeden gelirse kuyruğa al; kayıt yükleme hediyeyi ezmesin
+    if (platform.loaded) receiveGifts(m.gifts); else platform.giftQueue.push(m.gifts);
   }
 });
 if (platform.inside) parent.postMessage({ type: "kup:ready" }, "*");
@@ -793,13 +797,17 @@ function buy(b) {
   if (state.owned[u.id]) return;
   if (u.requires && !state.owned[u.requires]) return;
   if (!spend(u.price)) { notify(`${u.name} için 💰 ${u.price} gerekli`); return; }
-  state.owned[u.id] = true;
-  buttons.splice(buttons.indexOf(b), 1);
-  scene.remove(b.mesh, b.label.sprite);
-  applyEffect(u.id);
+  grantUpgrade(u);
   notify(u.name + " satın alındı!");
-  refreshButtons();
   save();
+}
+// Yükseltmeyi sahiplen: butonu kaldır, etkiyi uygula, sıradaki butonları aç (satın alma + hediye ortak)
+function grantUpgrade(u) {
+  state.owned[u.id] = true;
+  const b = buttons.find(x => x.id === u.id);
+  if (b) { buttons.splice(buttons.indexOf(b), 1); scene.remove(b.mesh, b.label.sprite); }
+  applyEffect(u.id);
+  refreshButtons();
 }
 
 function checkButtons() {
@@ -894,6 +902,48 @@ $("passList").addEventListener("click", e => {
     renderShop();
   });
 });
+
+// ================================================================ Küp Evreni hediyeleri (admin panelinden)
+// kup:gift { gifts: [{ gid, items: [{ key, n }] }] } → uygula, kaydet → kup:giftAck { gid, skipped }
+const GIFT_MONEY_MAX = 1e12;
+function applyGiftItem(key, n) {
+  if (key === "money") { state.money = Math.min(GIFT_MONEY_MAX, state.money + n); return true; } // 2x geçişiyle çarpılmaz
+  const [kind, id] = key.split(":");
+  if (kind === "pass") { // kalıcı geçişler (tüketilen cash500 hariç; onun yerine "money")
+    const p = Config.PASSES.find(x => x.id === id && !x.consumable);
+    if (!p || state.passes[id]) return false;
+    state.passes[id] = true;
+    applyPass(id);
+    return true;
+  }
+  if (kind === "upgrade") {
+    const u = Config.UPGRADES.find(x => x.id === id);
+    if (!u || state.owned[id]) return false;
+    if (u.requires && !state.owned[u.requires]) return false; // önkoşul yoksa (Hızlı Fırın → 2. Fırın) uygulanmaz
+    grantUpgrade(u);
+    return true;
+  }
+  return false;
+}
+// Aynı hediyede önkoşul da varsa önce o uygulansın: yükseltmeleri Config sırasına diz
+const giftOrder = key => { const i = Config.UPGRADES.findIndex(u => "upgrade:" + u.id === key); return i < 0 ? -1 : i; };
+function receiveGifts(gifts) {
+  state.giftIds = state.giftIds || [];
+  let applied = false;
+  for (const g of Array.isArray(gifts) ? gifts : []) {
+    if (!g || !g.gid) continue;
+    const skipped = [];
+    if (!state.giftIds.includes(g.gid)) { // aynı hediye iki kez gelirse bir kez uygula
+      const items = (g.items || []).slice().sort((a, b) => giftOrder(String(a.key)) - giftOrder(String(b.key)));
+      for (const it of items) { const n = Math.max(1, Math.floor(Number(it.n) || 1)); if (!applyGiftItem(String(it.key), n)) skipped.push(String(it.key)); }
+      state.giftIds = [g.gid, ...state.giftIds].slice(0, 200);
+      applied = true;
+    }
+    save(); // ack'ten önce kaydet
+    parent.postMessage({ type: "kup:giftAck", gid: g.gid, skipped }, "*");
+  }
+  if (applied) { updateHud(); renderShop(); notify("🎁 Hediye alındı!"); }
+}
 
 // ---------------------------------------------------------------- Oyuncu hareketi (1. şahıs)
 const keys = new Set();
@@ -1227,7 +1277,7 @@ buildWorld();
 setupStations();
 try {
   const saved = JSON.parse(localStorage.getItem("pizzaKulesi") || "null");
-  if (saved) { state.money = saved.money | 0; state.owned = saved.owned || {}; state.day = saved.day || 1; state.passes = saved.passes || {}; }
+  if (saved) { state.money = saved.money | 0; state.owned = saved.owned || {}; state.day = saved.day || 1; state.passes = saved.passes || {}; state.giftIds = saved.giftIds || []; }
 } catch (e) {}
 for (const id of Object.keys(state.passes)) applyPass(id);
 for (const u of Config.UPGRADES) if (state.owned[u.id]) applyEffect(u.id); // Config sırasıyla
@@ -1235,6 +1285,8 @@ refreshButtons();
 resize();
 updateHud();
 updateDayLabel();
+platform.loaded = true;
+for (const gifts of platform.giftQueue.splice(0)) receiveGifts(gifts); // kayıt yüklendikten sonra bekleyen hediyeler
 requestAnimationFrame(frame);
 </script>
 <div id="rotateHint" style="display:none;position:fixed;left:50%;top:30%;transform:translate(-50%,-50%);z-index:99;max-width:80vw;padding:12px 16px;border-radius:14px;background:rgba(0,0,0,0.78);color:#fff;font:600 15px system-ui,sans-serif;text-align:center;pointer-events:auto">📱↻ Daha geniş görmek için telefonu yan çevir<br><small style="opacity:.7">(kapatmak için dokun)</small></div>

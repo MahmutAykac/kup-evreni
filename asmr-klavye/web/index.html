@@ -239,8 +239,52 @@ addEventListener("message", e => {
     if (done) done(!!m.ok);
     renderShop();
   }
+  else if (m.type === "kup:gift") receiveGifts(m.gifts);
 });
 if (platform.inside) parent.postMessage({ type: "kup:ready" }, "*");
+
+// ================================================================ Küp Evreni hediyeleri (admin panelinden)
+// kup:gift { gifts: [{ gid, items: [{ key, n }] }] } → uygula, kaydet → kup:giftAck { gid, skipped }
+// Yeniden doğuş sadece hiz/reb'i değiştirir; giftIds kayıtta kalır (passes gibi).
+const GIFT_MAX = 1e15; // Hız/Kupa üst sınırı
+function applyGiftItem(key, n) {
+  const [kind, id] = key.split(":");
+  if (key === "hiz") { save.hiz = Math.min(GIFT_MAX, save.hiz + n); return true; } // 2x geçişiyle çarpılmaz
+  if (key === "kupa") { save.kupa = Math.min(GIFT_MAX, save.kupa + n); return true; }
+  if ((kind === "switch" || kind === "trail") && id) {
+    const item = CATS[kind].find(x => x.id === id);
+    if (!item || item.robux || save.owned[id]) return false; // gökkuşağı izi pass:gokkusagi ile verilir
+    save.owned[id] = true;
+    return true;
+  }
+  if (kind === "pass" && id) {
+    const p = PASSES.find(x => x.id === id);
+    if (!p || p.consumable) return false; // "pack" tüketilir, hiz ile karşılanır
+    if (id === "gokkusagi" ? save.owned.gokkusagi : save.passes[id]) return false;
+    Server.grantPass(id); // gökkuşağını takar, geçişi açar, bildirir, kaydeder
+    return true;
+  }
+  return false;
+}
+function receiveGifts(gifts) {
+  save.giftIds = save.giftIds || [];
+  let applied = 0;
+  for (const g of Array.isArray(gifts) ? gifts : []) {
+    if (!g || !g.gid) continue;
+    const skipped = [];
+    if (!save.giftIds.includes(g.gid)) { // aynı hediye iki kez gelirse bir kez uygula
+      for (const it of g.items || []) { const n = Math.max(1, Math.floor(Number(it.n) || 1)); if (!applyGiftItem(String(it.key), n)) skipped.push(String(it.key)); else applied++; }
+      save.giftIds = [g.gid, ...save.giftIds].slice(0, 200);
+    }
+    if (platform.inside) parent.postMessage({ type: "kup:giftAck", gid: g.gid, skipped }, "*");
+  }
+  // kaydı zorla yaz + ilgili arayüzü yenile
+  persist(true);
+  walls.forEach(w => w.ok = null);
+  if ($("ovShop").classList.contains("show")) renderShop();
+  if ($("ovReb").classList.contains("show")) renderReb();
+  if (applied) { notify("🎁 Hediye alındı!"); chime(); }
+}
 
 // ================================================================ Server (Roblox: SpeedService + ShopService)
 // Roblox'ta: adım sunucuda hız sınırıyla doğrulanır (karakterin gerçek hızına göre en fazla adım/sn), Hız ve Kupa sadece sunucuda değişir.

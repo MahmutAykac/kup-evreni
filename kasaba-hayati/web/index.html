@@ -29,6 +29,8 @@
   #menu { position: fixed; right: 14px; top: 12px; display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; max-width: 46vw; }
   #menu button { border: 2px solid var(--line); background: var(--panel); border-radius: 14px; padding: 8px 12px; cursor: pointer; font-size: 15px; }
   #hint { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); pointer-events: none; text-align: center; font-size: 15px; max-width: calc(100vw - 32px); }
+  #fade { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; transition: opacity 1s; z-index: 8; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 28px; font-weight: 700; }
+  #fade.on { opacity: 1; }
   #toasts { position: fixed; top: 96px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 6px; align-items: center; pointer-events: none; z-index: 5; }
   .toast { background: rgba(242,244,248,0.95); color: #1b2130; padding: 6px 14px; border-radius: 10px; font-size: 15px; animation: fade 2.8s forwards; text-align: center; }
   @keyframes fade { 0%, 80% { opacity: 1; } 100% { opacity: 0; transform: translateY(-8px); } }
@@ -89,6 +91,7 @@
   <button id="bHelp">❓</button>
 </div>
 <div id="toasts"></div>
+<div id="fade">💤 Zzz…</div>
 <div id="hint" class="pill"></div>
 <div id="actions">
   <button id="btnAct"><b>E</b><span></span></button>
@@ -278,8 +281,55 @@ addEventListener("message", e => {
     if (done) done(!!m.ok);
     rerenderOpen();
   }
+  else if (m.type === "kup:gift") receiveGifts(m.gifts);
 });
 if (platform.inside) parent.postMessage({ type: "kup:ready" }, "*");
+
+// ================================================================ Küp Evreni hediyeleri (admin panelinden)
+// kup:gift { gifts: [{ gid, items: [{ key, n }] }] } → uygula, kaydet → kup:giftAck { gid, skipped }
+// Robux ürünleri (spor araba, villa) normal satın almadaki gibi save.passes altına yazılır.
+const GIFT_MONEY_MAX = 1e9;
+function applyGiftItem(key, n) {
+  const [kind, id] = key.split(":");
+  if (key === "money") { // ₺ para (üst sınırlı)
+    const add = Math.min(n, GIFT_MONEY_MAX);
+    save.money += add; flashMoney(add); return true;
+  }
+  if (kind === "car") { // araç: ₺ ile satılanlar cars, Robux ile satılanlar passes
+    const v = VEH[id];
+    if (!v || v.job || !v.price && !v.pass) return false; // meslek aracı / ücretsiz bisiklet verilmez
+    if (v.pass ? save.passes[v.pass] : save.cars[id]) return false; // zaten sahip
+    if (v.pass) save.passes[v.pass] = true; else save.cars[id] = true;
+    return true;
+  }
+  if (kind === "style") { // ev stili: ₺ ile satılanlar styles, Robux ile satılanlar passes
+    const st = STYLE[id];
+    if (!st || !st.pass && !st.price) return false; // ücretsiz küçük ev zaten açık
+    if (st.pass ? save.passes[st.pass] : save.styles[id]) return false;
+    if (st.pass) save.passes[st.pass] = true; else save.styles[id] = true;
+    return true;
+  }
+  return false;
+}
+function receiveGifts(gifts) {
+  save.giftIds = save.giftIds || [];
+  let any = false;
+  for (const g of Array.isArray(gifts) ? gifts : []) {
+    if (!g || !g.gid) continue;
+    const skipped = [];
+    if (!save.giftIds.includes(g.gid)) { // aynı hediye iki kez gelirse bir kez uygula
+      for (const it of g.items || []) {
+        const n = Math.max(1, Math.floor(Number(it.n) || 1));
+        if (applyGiftItem(String(it.key), n)) any = true; else skipped.push(String(it.key));
+      }
+      save.giftIds = [g.gid, ...save.giftIds].slice(0, 200);
+    }
+    if (platform.inside) parent.postMessage({ type: "kup:giftAck", gid: g.gid, skipped }, "*");
+  }
+  // kaydı zorla yaz + ilgili arayüzü yenile
+  persist(true);
+  if (any) { SFX.money(); notify("🎁 Hediye alındı!"); rerenderOpen(); }
+}
 
 // ================================================================ Server (Roblox: Economy/Job/House/Vehicle servisleri)
 const Server = {
@@ -593,6 +643,9 @@ function buildHouse(plot, h) {
   const solidsLocal = [[0, -D / 2 + T / 2, W / 2, T / 2], [-W / 2 + T / 2, 0, T / 2, D / 2], [W / 2 - T / 2, 0, T / 2, D / 2],
     [-(DOOR / 2 + seg / 2), D / 2 - T / 2, seg / 2, T / 2], [DOOR / 2 + seg / 2, D / 2 - T / 2, seg / 2, T / 2]];
   const glow = c => new THREE.MeshBasicMaterial({ color: c });
+  const tvCv = document.createElement("canvas"); tvCv.width = 128; tvCv.height = 72;
+  const tvTex = new THREE.CanvasTexture(tvCv), screenMat = new THREE.MeshBasicMaterial({ map: tvTex });
+  let bedL, wakeL, tvL;   // yerel konumlar: yatak [x, yatış y, yatış z, merkez z], kalkış noktası, TV etkileşim noktası
   // Mobilya
   if (st.id !== "villa") {
     part(1.8, 0.5, 2.6, 0x8d99ae, -W / 2 + 1.3, 0.35, -D / 2 + 1.6);
@@ -601,6 +654,8 @@ function buildHouse(plot, h) {
     part(2.4, 0.5, 0.9, 0x6d597a, W / 2 - 1.8, 0.35, D / 2 - 1.6);
     part(2.4, 0.6, 0.25, 0x6d597a, W / 2 - 1.8, 0.75, D / 2 - 1.15);
     part(1.6, 0.9, 0.12, 0x111111, W / 2 - 1.8, 1.5, -D / 2 + 0.35);
+    part(1.45, 0.78, 0.02, screenMat, W / 2 - 1.8, 1.5, -D / 2 + 0.42);
+    bedL = [-W / 2 + 1.3, 0.75, -D / 2 + 2.3, -D / 2 + 1.6]; wakeL = [-W / 2 + 2.7, -D / 2 + 2]; tvL = [W / 2 - 1.8, -D / 2 + 2.2];
     part(1.8, 0.4, 0.5, 0x6b4422, W / 2 - 1.8, 0.3, -D / 2 + 0.6);
     part(1.2, 0.08, 1.2, 0xc19a6b, 0, 0.75, 0); part(0.12, 0.7, 0.12, 0x6b4422, 0, 0.38, 0);
     part(2.6, 0.02, 2, 0xe9c46a, 0, 0.13, 0.3);
@@ -635,6 +690,7 @@ function buildHouse(plot, h) {
       part(0.3, 0.3, 0.3, glow(0xfff1c4), nx, 1.18, -ID + 0.45);
     }
     solidsLocal.push([bx, bz, 1.3, 1.4]);
+    bedL = [bx, 0.95, bz + 0.85, bz]; wakeL = [bx, bz + 2.1];
     // Şömine (sağ arka duvar)
     const fx = IW / 2 + PX / 2 + 0.3;
     part(2.4, 1.6, 0.6, 0xd9d2c5, fx, 0.9, -ID + 0.3);
@@ -655,7 +711,8 @@ function buildHouse(plot, h) {
     part(3.4, 0.02, 2.8, 0x2b2d42, sx0 - 1.6, 0.15, sz0); part(3.0, 0.025, 2.4, 0x7b1e3a, sx0 - 1.6, 0.155, sz0);
     // Duvar TV'si (bölmenin salona bakan yüzü, koltuğun karşısı)
     part(0.08, 1.1, 2.0, 0x111111, PX + 0.15, 1.8, sz0 - 2.2);
-    part(0.04, 0.95, 1.85, 0x1d3557, PX + 0.2, 1.8, sz0 - 2.2);
+    part(0.04, 0.95, 1.85, screenMat, PX + 0.2, 1.8, sz0 - 2.2);
+    tvL = [PX + 1.6, sz0 - 2.2];
     // Kuyruklu piyano (sol ön)
     const pnx = -IW + 1.3, pnz = ID - 2.3;
     part(1.5, 0.45, 1.9, 0x111111, pnx, 0.95, pnz);
@@ -694,7 +751,10 @@ function buildHouse(plot, h) {
   if (st.id === "villa") { light.distance = 16; light.decay = 1; }
   const label = makeLabel(5, 1.25, `🏠 ${rpName()}`, "#ffd166"); label.position.set(cx, H + 3.6, cz);
   const [dx, dz] = w2(0, D / 2 + 0.2);
-  return { g, roof, door, light, label, hs, cx, cz, s, W, D, H, doorX: dx, doorZ: dz, open: 0 };
+  const [bedX, bedZ] = w2(bedL[0], bedL[3]), [lieX, lieZ] = w2(bedL[0], bedL[2]), [wakeX, wakeZ] = w2(...wakeL), [tvX, tvZ] = w2(...tvL);
+  const tv = { cv: tvCv, tex: tvTex, ch: 0, t: 0 }; drawTv(tv);
+  return { g, roof, door, light, label, hs, cx, cz, s, W, D, H, doorX: dx, doorZ: dz, open: 0,
+    bed: { x: bedX, z: bedZ, lieX, lieZ, y: bedL[1], wakeX, wakeZ, face: s === 1 ? 0 : Math.PI }, tv, tvX, tvZ };
 }
 function syncHouse() {
   if (house) { scene.remove(house.g); dropLabel(house.label); house = null; }
@@ -722,6 +782,71 @@ function updateHouse(dt) {
   const lx = (pl.x - house.cx) * house.s, lz = (pl.z - house.cz) * house.s;
   house.roof.visible = Math.abs(lx) > house.W / 2 + 1.5 || Math.abs(lz) > house.D / 2 + 1.5;
   house.light.intensity = isNight ? 0.9 : 0;
+  if (house.tv.ch && (house.tv.t += dt) > 0.08) { house.tv.t = 0; drawTv(house.tv); }
+}
+// ---- Televizyon: 0 = kapalı, sonra kanallar
+const TV_CH = ["", "📰 Haber", "🐱 Çizgi Film", "⚽ Spor", "🎵 Müzik"];
+function drawTv(tv) {
+  const c = tv.cv.getContext("2d"), W = 128, H = 72, t = now;
+  if (!tv.ch) { c.fillStyle = "#0b0d12"; c.fillRect(0, 0, W, H); c.fillStyle = "#1c2230"; c.fillRect(8, 6, 40, 4); tv.tex.needsUpdate = true; return; }
+  if (tv.ch === 1) {
+    c.fillStyle = "#1d3557"; c.fillRect(0, 0, W, H);
+    c.fillStyle = "#457b9d"; c.fillRect(70, 10, 48, 30);
+    c.fillStyle = "#f1c27d"; c.beginPath(); c.arc(40, 30, 10, 0, 7); c.fill();
+    c.fillStyle = "#222"; c.fillRect(26, 40, 28, 20); c.fillStyle = "#e63946"; c.fillRect(38, 42, 4, 10);
+    c.fillStyle = "#c1121f"; c.fillRect(0, 56, W, 16);
+    c.fillStyle = "#fff"; c.font = "bold 10px sans-serif";
+    c.fillText("SON DAKİKA: Kasabada güneşli bir gün bekleniyor!", W - (t * 30 % 400), 67);
+  } else if (tv.ch === 2) {
+    c.fillStyle = "#8ecae6"; c.fillRect(0, 0, W, H); c.fillStyle = "#90be6d"; c.fillRect(0, 52, W, 20);
+    c.fillStyle = "#ffd166"; c.beginPath(); c.arc(108, 14, 9, 0, 7); c.fill();
+    const x = (t * 25) % (W + 30) - 15, y = 44 - Math.abs(Math.sin(t * 4)) * 18;
+    c.fillStyle = "#f4a261"; c.beginPath(); c.arc(x, y, 8, 0, 7); c.fill();
+    c.beginPath(); c.moveTo(x - 7, y - 4); c.lineTo(x - 4, y - 13); c.lineTo(x - 1, y - 6); c.moveTo(x + 7, y - 4); c.lineTo(x + 4, y - 13); c.lineTo(x + 1, y - 6); c.fill();
+    c.fillStyle = "#000"; c.fillRect(x - 4, y - 2, 2, 2); c.fillRect(x + 2, y - 2, 2, 2);
+  } else if (tv.ch === 3) {
+    c.fillStyle = "#2d6a4f"; c.fillRect(0, 0, W, H); c.strokeStyle = "#fff"; c.lineWidth = 1;
+    c.strokeRect(4, 4, W - 8, H - 8); c.beginPath(); c.moveTo(W / 2, 4); c.lineTo(W / 2, H - 4); c.stroke();
+    c.beginPath(); c.arc(W / 2, H / 2, 10, 0, 7); c.stroke();
+    const bx = W / 2 + Math.sin(t * 1.7) * 50, by = H / 2 + Math.sin(t * 2.3) * 24;
+    c.fillStyle = "#fff"; c.beginPath(); c.arc(bx, by, 3, 0, 7); c.fill();
+    c.fillStyle = "#e63946"; c.fillRect(bx - 20, by + 8, 4, 8); c.fillStyle = "#1d3557"; c.fillRect(bx + 16, by - 14, 4, 8);
+    c.fillStyle = "rgba(0,0,0,.6)"; c.fillRect(4, 4, 50, 12); c.fillStyle = "#fff"; c.font = "bold 9px sans-serif";
+    c.fillText("KSB " + (Math.floor(t / 20) % 4) + " - " + (Math.floor(t / 27) % 3) + " ŞHR", 7, 13);
+  } else {
+    c.fillStyle = `hsl(${t * 60 % 360},70%,25%)`; c.fillRect(0, 0, W, H);
+    for (let i = 0; i < 12; i++) {
+      const h = 8 + Math.abs(Math.sin(t * 6 + i * 1.3)) * 40;
+      c.fillStyle = `hsl(${(t * 60 + i * 30) % 360},80%,60%)`; c.fillRect(6 + i * 10, H - 6 - h, 7, h);
+    }
+  }
+  c.fillStyle = "rgba(255,255,255,.75)"; c.font = "8px sans-serif"; c.fillText(String(tv.ch), W - 10, 10);
+  tv.tex.needsUpdate = true;
+}
+function tvNext() {
+  const tv = house.tv; tv.ch = (tv.ch + 1) % TV_CH.length; drawTv(tv); SFX.click();
+  notify(tv.ch ? `📺 ${TV_CH[tv.ch]}` : "📺 Televizyon kapandı");
+}
+// ---- Uyku: gece yatağa yat, sabah 07:00'de uyan
+let sleep = null;
+const sleepyHour = () => { const h = hourOf(); return h >= 20 || h < 6; };
+function goSleep() {
+  if (!sleepyHour()) { notify("🛏️ Henüz uykun yok. Saat 20:00'den sonra gel."); SFX.bad(); return; }
+  sleep = { t: 0, woke: false }; keys.clear(); $("fade").classList.add("on"); SFX.click();
+}
+function updateSleep(dt) {
+  sleep.t += dt;
+  if (!sleep.woke && sleep.t > 1.3) {
+    sleep.woke = true;
+    const wake = 1 / 24;   // faz 1/24 = 07:00
+    if (save.phase > wake) save.day++;
+    save.phase = wake; lastHour = Math.floor(save.phase * 24); applyLighting(); persist(true);
+  }
+  if (sleep.t > 2.6) $("fade").classList.remove("on");
+  if (sleep.t > 3.4) {
+    const b = house.bed; pl.x = b.wakeX; pl.z = b.wakeZ; pl.y = 0; pl.vy = 0; sleep = null;
+    notify(`☀️ Günaydın! Gün ${save.day} başladı`); SFX.bell();
+  }
 }
 function homeSpawn() {
   const p = PLOTS[save.house.plot];
@@ -1120,7 +1245,7 @@ function buildAvatar(a) {
 function rebuildAvatar() {
   if (pl.group) scene.remove(pl.group);
   const b = buildAvatar((platform.profile && platform.profile.avatar) || DEFAULT_AVATAR);
-  pl.group = b.group; pl.parts = b;
+  pl.group = b.group; pl.parts = b; pl.group.rotation.order = "YXZ";
   scene.add(pl.group);
 }
 const rpName = () => (save.rpName || (platform.profile && platform.profile.name) || "Oyuncu").slice(0, 16);
@@ -1202,6 +1327,10 @@ function nearestAction() {
   if (!inCar) for (const p of PLOTS) {
     const mine = save.house && save.house.plot === p.id;
     add(p.ex, p.ez, 2.6, mine ? "🏠 Evini düzenle" : save.house ? "🏠 Buraya taşın" : "🏠 Ev al", () => openHouseMenu(p.id));
+  }
+  if (!inCar && house && !sleep) {
+    add(house.bed.x, house.bed.z, 2.4, sleepyHour() ? "🛏️ Uyu (sabaha kadar)" : "🛏️ Uyu (20:00'den sonra)", goSleep);
+    add(house.tvX, house.tvZ, 2.6, house.tv.ch === 0 ? "📺 Televizyonu aç" : house.tv.ch === TV_CH.length - 1 ? "📺 Televizyonu kapat" : "📺 Sonraki kanal", tvNext);
   }
   if (!inCar && pcar) add(pcar.x, pcar.z, 3.6, `${pcar.def.icon} ${pcar.def.name}: bin (F)`, enterCar);
   let best = null, bd = 1e9;
@@ -1493,8 +1622,12 @@ function syncScene(dt) {
     const pd = now * Math.abs(pcar.speed) * 0.8;
     pl.parts.legs[0].rotation.x = -1.2 + Math.sin(pd) * 0.4; pl.parts.legs[1].rotation.x = -1.2 - Math.sin(pd) * 0.4;
     pl.parts.arms[0].rotation.x = pl.parts.arms[1].rotation.x = -1.1;
+  } else if (sleep) {   // yatakta sırtüstü yat
+    const b = house.bed;
+    pl.group.position.set(b.lieX, b.y, b.lieZ); pl.group.rotation.set(-Math.PI / 2, b.face, 0);
+    for (const l of [...pl.parts.legs, ...pl.parts.arms]) l.rotation.x = 0;
   } else {
-    pl.group.position.set(pl.x, pl.y, pl.z); pl.group.rotation.y = pl.face;
+    pl.group.position.set(pl.x, pl.y, pl.z); pl.group.rotation.x = 0; pl.group.rotation.y = pl.face;
     const sw = pl.moving ? Math.sin(pl.walk) * 0.7 : 0;
     pl.parts.legs[0].rotation.x = sw; pl.parts.legs[1].rotation.x = -sw;
     pl.parts.arms[0].rotation.x = -sw; pl.parts.arms[1].rotation.x = sw;
@@ -1597,7 +1730,8 @@ addEventListener("resize", resize);
 let now = 0, last = performance.now();
 function update(dt) {
   now += dt;
-  if (pl.inCar) updateCar(dt, !anyOverlay());
+  if (sleep) updateSleep(dt);
+  else if (pl.inCar) updateCar(dt, !anyOverlay());
   else if (!anyOverlay()) updatePlayer(dt);
   if (!blocking()) { updateDayNight(dt); updateTraffic(dt); updatePeds(dt); updateJobs(dt); }
   updateHouse(dt);

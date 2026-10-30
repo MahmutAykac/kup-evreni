@@ -376,6 +376,7 @@ const ICONS = {
   shirt: '<path d="M20.4 3.5 16 2a4 4 0 0 1-8 0L3.6 3.5a2 2 0 0 0-1.3 2.2l.6 3.5a1 1 0 0 0 1 .8H6v10a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V10h2.2a1 1 0 0 0 1-.8l.6-3.5a2 2 0 0 0-1.3-2.2z"/>',
   award: '<circle cx="12" cy="8" r="6"/><path d="M15.5 12.9 17 22l-5-3-5 3 1.5-9.1"/>',
   list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+  gift: '<rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7"/><path d="M7.5 8a2.5 2.5 0 0 1 0-5C11 3 12 8 12 8s1-5 4.5-5a2.5 2.5 0 0 1 0 5"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   chevron: '<path d="m9 18 6-6-6-6"/>',
 };
@@ -487,6 +488,7 @@ const PAGES = [
   { id: "users", name: "Kullanıcılar", icon: "users", group: "Genel" },
   { id: "purchases", name: "Satın Alımlar", icon: "cart", group: "Genel" },
   { id: "games", name: "Oyunlar", icon: "game", group: "Yönetim" },
+  { id: "gifts", name: "Oyun Hediyeleri", icon: "gift", group: "Yönetim" },
   { id: "eco", name: "Ekonomi", icon: "coins", group: "Yönetim" },
   { id: "announce", name: "Duyurular", icon: "megaphone", group: "Yönetim" },
   { id: "codes", name: "Promo Kodlar", icon: "ticket", group: "Yönetim" },
@@ -499,7 +501,7 @@ let page = "overview";
 function renderNav() {
   const u = users(), buys = u.reduce((s, x) => s + (x.a.purchases || []).length, 0);
   const c = cfg(), av = c.avatar || {};
-  const counts = { users: u.length, purchases: buys, games: GAMES.length, codes: (c.codes || []).length, avatarShop: (av.hats || []).length + (av.faces || []).length + (av.colors || []).length + (av.skins || []).length };
+  const counts = { users: u.length, purchases: buys, games: GAMES.length, codes: (c.codes || []).length, gifts: (load(GIFT_KEY, {})?.pending || []).length, avatarShop: (av.hats || []).length + (av.faces || []).length + (av.colors || []).length + (av.skins || []).length };
   const live = { eco: c.eco?.double ? "2x" : null, announce: c.duyuru?.on ? "Açık" : null };
   let group = "";
   $("nav").innerHTML = PAGES.map(p => {
@@ -518,7 +520,7 @@ function go(id) {
 }
 function render() {
   renderNav();
-  ({ overview: renderOverview, users: renderUsers, purchases: renderPurchases, games: renderGames, eco: renderEco, announce: renderAnnounce,
+  ({ overview: renderOverview, users: renderUsers, purchases: renderPurchases, games: renderGames, gifts: renderGifts, eco: renderEco, announce: renderAnnounce,
      codes: renderCodes, avatarShop: renderAvatarShop, badges: renderBadges, log: renderLog, settings: renderSettings })[page]();
   if (drawerUid) renderDrawer();
 }
@@ -938,6 +940,191 @@ function renderLog() {
   $("btnLogClear").onclick = () => { if (!confirm("İşlem kaydı temizlensin mi?")) return; save(LOG_KEY, []); toast("Kayıt temizlendi"); render(); };
 }
 
+// ================================================================ Oyun hediyeleri (oyun içi eşya ve paketler)
+// Bekleyenler kupEvreniHediye.pending'e yazılır; oyuncu o oyunu açınca ana sayfa kup:gift ile oyuna iletir, oyun kup:giftAck döner.
+// Katalog: her oyunun verilebilir eşyaları. key'deki {param} seçilen değerle dolar; own / ownList oyun kaydında sahipliği gösterir.
+// kind: amount = miktar, count = adet, once = kalıcı (tek sefer)
+const GIFT_KEY = "kupEvreniHediye", PACK_KEY = "kupEvreniPaketler";
+const GIFT_CATALOG = {
+  pizza: [
+    { key: "money", name: "Para", icon: "💰", kind: "amount", def: 1000, max: 1000000000 },
+    { key: "upgrade:{id}", name: "Yükseltme", icon: "🛠️", kind: "once", own: "owned.{id}", paramNames: { id: "Yükseltme" },
+      params: { id: [["Oven2", "🔥 2. Fırın"], ["Karisik", "🍕 Karışık Pizza"], ["Tables", "🪑 Masalar (+2 müşteri)"], ["FastOven", "⚡ Hızlı Fırın (2. Fırın gerekir)"]] } },
+    { key: "pass:double", name: "2x Para (kalıcı)", icon: "💰", kind: "once", own: "passes.double" },
+    { key: "pass:chef", name: "Yardımcı Aşçı (kalıcı)", icon: "👨‍🍳", kind: "once", own: "passes.chef" },
+  ],
+  gezegen: [
+    { key: "dust", name: "Yıldız tozu", icon: "💫", kind: "amount", def: 1000, max: 1000000000 },
+    { key: "pet:{sp}:{v}", name: "Hayvan", icon: "🐾", kind: "count", def: 1, max: 10, paramNames: { sp: "Tür", v: "Çeşit" },
+      ownList: { path: "pets", match: { sp: "{sp}", v: "{v}" } },
+      params: {
+        sp: [["tavsan", "🐰 Uzay Tavşanı"], ["fare", "🐭 Krater Faresi"], ["tilki", "🦊 Yıldız Tilkisi"], ["kurt", "🐺 Ay Kurdu"], ["ejder", "🐉 Galaksi Ejderi"],
+          ["akrep", "🦂 Kızıl Akrep"], ["kertenkele", "🦎 Toz Kertenkelesi"], ["kartal", "🦅 Mars Kartalı"], ["golem", "🗿 Lav Golemi"], ["anka", "🔥 Phobos Ankası"],
+          ["penguen", "🐧 Buz Pengueni"], ["kristalTilki", "🦊 Kristal Tilki"], ["baykus", "🦉 Kar Baykuşu"], ["ayi", "🐻 Kuyrukluyıldız Ayısı"], ["nebula", "🐲 Nebula Ejderi"]],
+        v: [["n", "Normal"], ["g", "Altın"], ["r", "Gökkuşağı"]],
+      } },
+    { key: "planet:{i}", name: "Gezegen kilidi", icon: "🪐", kind: "once", own: "unlocked.{i}", paramNames: { i: "Gezegen" }, params: { i: [["1", "🔴 Mars"], ["2", "❄️ Kriyo"]] } },
+    { key: "pass:double", name: "2x Yıldız Tozu (kalıcı)", icon: "✨", kind: "once", own: "passes.double" },
+    { key: "pass:slots", name: "+2 Hayvan Slotu (kalıcı)", icon: "🐾", kind: "once", own: "passes.slots" },
+  ],
+  ada: [
+    { key: "inv:{id}", name: "Malzeme", icon: "🪵", kind: "count", def: 10, max: 999, own: "inv.{id}", paramNames: { id: "Malzeme" },
+      params: { id: [["odun", "🪵 Odun"], ["tas", "🪨 Taş"], ["lif", "🌾 Lif"], ["ip", "🧵 İp"], ["meyve", "🍓 Meyve"], ["cevizi", "🥥 Hindistan Cevizi"], ["ates", "🔥 Kamp Ateşi"], ["barinak", "⛺ Barınak"]] } },
+    { key: "tool:{id}", name: "Alet", icon: "🪓", kind: "once", own: "tools.{id}", paramNames: { id: "Alet" },
+      params: { id: [["balta", "🪓 Taş Balta"], ["kazma", "⛏️ Taş Kazma"], ["mizrak", "🔱 Mızrak"], ["matara", "🫙 Matara"]] } },
+    { key: "flask", name: "Matarayı doldur (matara gerekir)", icon: "🫙", kind: "once" },
+    { key: "heal", name: "Can, açlık ve susuzluğu doldur", icon: "❤️", kind: "once" },
+    { key: "pass:starter", name: "Başlangıç Paketi (10 odun, 6 taş, 4 ip, 5 meyve)", icon: "🎒", kind: "count", def: 1, max: 99 },
+    { key: "pass:gold", name: "Altın Alet Seti (kalıcı)", icon: "🪓", kind: "once", own: "passes.gold" },
+  ],
+  klavye: [
+    { key: "hiz", name: "Hız", icon: "⚡", kind: "amount", def: 1000, max: 1000000000 },
+    { key: "kupa", name: "Kupa", icon: "🏆", kind: "amount", def: 100, max: 1000000000 },
+    { key: "switch:{id}", name: "Switch", icon: "🔊", kind: "once", own: "owned.{id}", paramNames: { id: "Switch" },
+      params: { id: [["kahve", "🟤 Tactile Kahverengi"], ["mavi", "🔵 Clicky Mavi"], ["krema", "🍦 Kremalı Thock"], ["cam", "🫧 Cam Pop"]] } },
+    { key: "trail:{id}", name: "İz", icon: "✨", kind: "once", own: "owned.{id}", paramNames: { id: "İz" },
+      params: { id: [["beyaz", "☁️ Bulut İzi"], ["ates", "🔥 Ateş İzi"], ["neon", "💠 Neon Mavi"], ["altin", "✨ Altın İz"]] } },
+    { key: "pass:x2hiz", name: "2x Hız (kalıcı)", icon: "⚡", kind: "once", own: "passes.x2hiz" },
+    { key: "pass:x2kupa", name: "2x Kupa (kalıcı)", icon: "🏆", kind: "once", own: "passes.x2kupa" },
+    { key: "pass:gokkusagi", name: "Gökkuşağı İzi (kalıcı)", icon: "🌈", kind: "once", own: "owned.gokkusagi" },
+  ],
+  kasaba: [
+    { key: "money", name: "Para (₺)", icon: "💵", kind: "amount", def: 1000, max: 1000000000 },
+    { key: "car:{id}", name: "Araç", icon: "🚗", kind: "once", own: "cars.{id}", paramNames: { id: "Araç" }, params: { id: [["sedan", "🚗 Sedan"], ["kamyonet", "🛻 Kamyonet"]] } },
+    { key: "car:spor", name: "Spor Araba", icon: "🏎️", kind: "once", own: "passes.spor" },
+    { key: "style:{id}", name: "Ev stili", icon: "🏢", kind: "once", own: "styles.{id}", paramNames: { id: "Stil" }, params: { id: [["modern", "🏢 Modern Ev"]] } },
+    { key: "style:villa", name: "Villa", icon: "🏰", kind: "once", own: "passes.villa" },
+  ],
+  fabrika: [
+    { key: "pass:speed", name: "Hız Botları (kalıcı, +%15 hız)", icon: "👟", kind: "once", own: "passes.speed" },
+    { key: "trail:{id}", name: "İz", icon: "✨", kind: "once", own: "giftTrails.{id}", paramNames: { id: "İz" },
+      params: { id: [["blue", "💙 Mavi Kıvılcım"], ["fire", "🔥 Ateş"], ["toxic", "💚 Zehir"], ["rainbow", "🌈 Gökkuşağı"], ["gold", "✨ Altın"]] } },
+    { key: "cosmetic:hardhat", name: "Fabrika Kaskı (kostüm)", icon: "🪖", kind: "once", own: "giftHardhat" },
+  ],
+};
+const giftStore = () => { const g = load(GIFT_KEY, {}) || {}; return { pending: g.pending || [], done: g.done || [] }; };
+const fillTpl = (tpl, vals) => String(tpl).replace(/\{(\w+)\}/g, (_, k) => vals[k] ?? "");
+const getPath = (obj, p) => p.split(".").reduce((o, k) => o == null ? undefined : o[k], obj);
+// Oyun kaydında bu eşyadan kaç tane var (bilinmiyorsa null). Oyun kayıtları hesaba değil cihaza bağlıdır.
+function ownedCount(gameId, item, vals) {
+  const g = GAMES.find(x => x.id === gameId), sv = g && load(g.saveKey, null);
+  if (!sv) return item.own || item.ownList ? 0 : null;
+  if (item.own) { const v = getPath(sv, fillTpl(item.own, vals)); return typeof v === "number" ? v : v ? 1 : 0; }
+  if (item.ownList) {
+    const arr = getPath(sv, item.ownList.path);
+    if (!Array.isArray(arr)) return 0;
+    return arr.filter(x => x && Object.entries(item.ownList.match).every(([k, t]) => String(x[k]) === fillTpl(t, vals))).length;
+  }
+  return null;
+}
+function itemLabel(item, vals, n) {
+  const ps = Object.keys(item.params || {});
+  const name = ps.length ? ps.map(p => (item.params[p].find(o => o[0] === vals[p]) || [, vals[p]])[1]).join(" · ") : `${item.icon} ${item.name}`;
+  return name + (item.kind === "once" ? "" : ` ×${fmtNum(n)}`);
+}
+let gift = { to: "*", game: null, item: 0, vals: {}, basket: [] };
+function renderGifts() {
+  const u = users(), st = giftStore(), packs = load(PACK_KEY, []);
+  const games = GAMES.filter(g => (GIFT_CATALOG[g.id] || []).length);
+  if (!gift.game || !GIFT_CATALOG[gift.game]) gift.game = games[0]?.id || null;
+  if (gift.to !== "*" && !u.some(x => x.a.name === gift.to)) gift.to = "*";
+  const cat = GIFT_CATALOG[gift.game] || [], item = cat[gift.item] || cat[0];
+  if (item) for (const [p, opts] of Object.entries(item.params || {})) if (!opts.some(o => o[0] === gift.vals[p])) gift.vals[p] = opts[0][0];
+  const own = item ? ownedCount(gift.game, item, gift.vals) : null;
+  const key = item ? fillTpl(item.key, gift.vals) : "";
+  const waitingFor = [...new Set(st.pending.filter(p => p.game === gift.game && (gift.to === "*" || p.to === gift.to) && p.items.some(it => it.key === key)).map(p => p.to))];
+  const inBasket = gift.basket.some(b => b.key === key && b.game === gift.game);
+  const ownedOnce = item && item.kind === "once" && own > 0;
+  const status = !item ? "" : ownedOnce ? `<span class="pill green">✅ Zaten verildi</span>` : waitingFor.length ? `<span class="pill gold">⏳ ${esc(waitingFor.join(", "))} için gönderildi, oyunu açması bekleniyor</span>`
+    : own != null && item.kind !== "once" ? `<span class="pill gray">Oyunda şu an: ${fmtNum(own)}</span>` : "";
+  const gName = id => { const g = GAMES.find(x => x.id === id); return g ? `${g.icon} ${esc(g.title)}` : esc(id); };
+  const itemsTxt = (items, skipped = []) => items.map(it => skipped.includes(it.key) ? `<s class="muted" title="Oyuncuda zaten vardı">${esc(it.label)}</s>` : esc(it.label)).join(", ");
+  $("page").innerHTML = `<div class="stack" style="max-width:1000px">
+    <div class="card"><div class="cardHead"><h2>Hediye hazırla</h2><span class="sub right">Birden fazla eşya = paket</span></div><div class="cardBody">
+      ${!games.length ? `<p class="muted" style="margin:0">Oyun kataloğu henüz yok.</p>` : `
+      <div class="formGrid">
+        <div><label class="lbl" for="gTo">Kime</label><select class="field" id="gTo"><option value="*">👥 Herkes (${u.length} hesap)</option>
+          ${u.map(x => `<option value="${esc(x.a.name)}" ${x.a.name === gift.to ? "selected" : ""}>${esc(x.a.name)}</option>`).join("")}</select></div>
+        <div><label class="lbl" for="gGame">Oyun</label><select class="field" id="gGame">${games.map(g => `<option value="${g.id}" ${g.id === gift.game ? "selected" : ""}>${g.icon} ${esc(g.title)}</option>`).join("")}</select></div>
+        <div><label class="lbl" for="gItem">Eşya</label><select class="field" id="gItem">${cat.map((c, i) => `<option value="${i}" ${c === item ? "selected" : ""}>${c.icon} ${esc(c.name)}</option>`).join("")}</select></div>
+        ${Object.entries(item.params || {}).map(([p, opts]) => `<div><label class="lbl" for="gp_${p}">${esc(item.paramNames?.[p] || "Seçim")}</label>
+          <select class="field" id="gp_${p}" data-param="${p}">${opts.map(o => `<option value="${esc(o[0])}" ${o[0] === gift.vals[p] ? "selected" : ""}>${esc(o[1])}</option>`).join("")}</select></div>`).join("")}
+        ${item.kind === "once" ? "" : `<div><label class="lbl" for="gN">${item.kind === "amount" ? "Miktar" : "Adet"}</label>
+          <input class="field num" type="text" inputmode="numeric" data-num id="gN" value="${fmtNum(item.def || 1)}"><div class="hint">en fazla ${fmtNum(item.max || 1000000000)}</div></div>`}
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:16px">
+        <button class="btn" id="gAdd" ${ownedOnce || (inBasket && item.kind === "once") ? "disabled" : ""}>${ic("plus")}Pakete ekle</button>${status}</div>
+      <p class="hint" style="margin-top:10px">"Zaten verildi" bilgisi bu cihazdaki oyun kaydından okunur.</p>`}
+    </div>
+    ${gift.basket.length ? `<div class="cardBody" style="border-top:1px solid var(--line)">
+      <label class="lbl" style="margin-top:0">Paket (${gift.basket.length} eşya)</label>
+      ${gift.basket.map((b, i) => `<div class="rowLine" style="padding:8px 0"><span>${gName(b.game)}</span><div class="grow"><b>${esc(b.label)}</b></div>
+        <button class="btn sm ghost" data-bdel="${i}" aria-label="Çıkar">${ic("x")}</button></div>`).join("")}
+      <div class="formGrid" style="margin-top:6px"><div><label class="lbl" for="gNote">Not (oyuncu görmez, kayıtta durur)</label><input class="field" id="gNote" maxlength="60" placeholder="Örn: Yarışma ödülü"></div>
+        <div><label class="lbl" for="gPackName">Paketi kaydetmek için isim</label><input class="field" id="gPackName" maxlength="30" placeholder="Örn: Başlangıç Paketi"></div></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px"><button class="btn primary" id="gSend">🎁 ${gift.to === "*" ? `Herkese gönder (${u.length})` : `${esc(gift.to)} adlı oyuncuya gönder`}</button>
+        <button class="btn" id="gSavePack">Paketi kaydet</button><button class="btn ghost" id="gClear">Temizle</button></div></div>` : ""}
+    </div>
+    ${packs.length ? `<div class="card"><div class="cardHead"><h2>Kayıtlı paketler</h2></div><div class="cardBody" style="padding-top:6px">
+      ${packs.map((p, i) => `<div class="rowLine"><span class="itemIco">📦</span><div class="grow"><b>${esc(p.name)}</b><small>${p.items.map(b => esc(b.label)).join(", ")}</small></div>
+        <button class="btn sm" data-pload="${i}">Pakete yükle</button><button class="btn sm danger" data-pdel="${i}">${ic("trash")}</button></div>`).join("")}</div></div>` : ""}
+    <div class="card"><div class="cardHead"><h2>Bekleyen hediyeler</h2><span class="sub">${st.pending.length} hediye · oyuncu oyunu açınca teslim edilir</span></div>
+      ${st.pending.length ? `<div class="tableWrap" style="margin-top:10px"><table><thead><tr><th>Kime</th><th>Oyun</th><th>Eşyalar</th><th class="hideSm">Gönderilme</th><th></th></tr></thead>
+        <tbody>${st.pending.map(p => `<tr><td><b>${esc(p.to)}</b></td><td>${gName(p.game)}</td><td style="white-space:normal">${itemsTxt(p.items)}</td>
+          <td class="muted hideSm">${fmtDate(p.at)}</td><td class="r"><button class="btn sm danger" data-gcancel="${esc(p.gid)}">İptal</button></td></tr>`).join("")}</tbody></table></div>`
+        : `<div class="cardBody muted">Bekleyen hediye yok.</div>`}</div>
+    <div class="card"><div class="cardHead"><h2>Teslim edilenler</h2><span class="sub">son ${st.done.length}</span></div>
+      ${st.done.length ? `<div class="tableWrap" style="margin-top:10px"><table><thead><tr><th>Kime</th><th>Oyun</th><th>Eşyalar</th><th>Durum</th><th class="hideSm">Teslim</th></tr></thead>
+        <tbody>${st.done.map(d => `<tr><td><b>${esc(d.to)}</b></td><td>${gName(d.game)}</td><td style="white-space:normal">${itemsTxt(d.items, d.skipped || [])}</td>
+          <td>${(d.skipped || []).length === d.items.length ? `<span class="pill gray">Zaten vardı</span>` : `<span class="pill green">✅ Verildi</span>`}</td>
+          <td class="muted hideSm">${fmtDate(d.got)}</td></tr>`).join("")}</tbody></table></div>`
+        : `<div class="cardBody muted">Henüz teslim edilen hediye yok.</div>`}</div>
+  </div>`;
+  if (!games.length) return;
+  $("gTo").onchange = e => { gift.to = e.target.value; renderGifts(); };
+  $("gGame").onchange = e => { gift.game = e.target.value; gift.item = 0; gift.vals = {}; renderGifts(); };
+  $("gItem").onchange = e => { gift.item = +e.target.value; gift.vals = {}; renderGifts(); };
+  $("page").querySelectorAll("[data-param]").forEach(s => s.onchange = () => { gift.vals[s.dataset.param] = s.value; renderGifts(); });
+  $("gAdd").onclick = () => {
+    let n = 1;
+    if (item.kind !== "once") { n = intVal("gN", 1, item.max || 1000000000); if (n === null) { toast(`1 ile ${fmtNum(item.max || 1000000000)} arası bir sayı yaz`, true); return; } }
+    const same = gift.basket.find(b => b.key === key && b.game === gift.game);
+    if (same && item.kind !== "once") { same.n += n; same.label = itemLabel(item, gift.vals, same.n); }
+    else if (!same) gift.basket.push({ game: gift.game, key, n, label: itemLabel(item, gift.vals, n) });
+    renderGifts();
+  };
+  $("page").querySelectorAll("[data-bdel]").forEach(b => b.onclick = () => { gift.basket.splice(+b.dataset.bdel, 1); renderGifts(); });
+  if ($("gClear")) $("gClear").onclick = () => { gift.basket = []; renderGifts(); };
+  if ($("gSend")) $("gSend").onclick = () => {
+    const targets = gift.to === "*" ? u.map(x => x.a.name) : [gift.to];
+    if (!targets.length) { toast("Gönderilecek hesap yok", true); return; }
+    const note = $("gNote").value.trim(), store = giftStore(), at = Date.now();
+    // Her oyun için ayrı hediye: oyuncu hangi oyunu açarsa o oyunun eşyaları gider
+    const byGame = {};
+    for (const b of gift.basket) (byGame[b.game] = byGame[b.game] || []).push({ key: b.key, n: b.n, label: b.label });
+    for (const to of targets) for (const [game, items] of Object.entries(byGame)) store.pending.push({ gid: "g_" + newId(), to, game, items, note, at });
+    save(GIFT_KEY, store);
+    logAct(`Hediye gönderildi → ${gift.to === "*" ? "herkes" : gift.to}: ${gift.basket.map(b => b.label).join(", ")}${note ? ` (${note})` : ""}`);
+    toast(`🎁 Hediye gönderildi (${targets.length} hesap)`); gift.basket = []; render();
+  };
+  if ($("gSavePack")) $("gSavePack").onclick = () => {
+    const name = $("gPackName").value.trim();
+    if (name.length < 2) { toast("Pakete bir isim ver", true); $("gPackName").focus(); return; }
+    save(PACK_KEY, [{ id: newId(), name, items: gift.basket.map(b => ({ ...b })) }, ...load(PACK_KEY, [])]);
+    logAct(`Paket kaydedildi: ${name}`); toast(`${name} kaydedildi`); renderGifts();
+  };
+  $("page").querySelectorAll("[data-pload]").forEach(b => b.onclick = () => { const p = load(PACK_KEY, [])[+b.dataset.pload]; if (!p) return; gift.basket = p.items.map(x => ({ ...x })); toast(`${p.name} pakete yüklendi`); renderGifts(); });
+  $("page").querySelectorAll("[data-pdel]").forEach(b => b.onclick = () => {
+    const list = load(PACK_KEY, []), p = list[+b.dataset.pdel]; if (!p || !confirm(`${p.name} paketi silinsin mi?`)) return;
+    list.splice(+b.dataset.pdel, 1); save(PACK_KEY, list); logAct(`Paket silindi: ${p.name}`); renderGifts();
+  });
+  $("page").querySelectorAll("[data-gcancel]").forEach(b => b.onclick = () => {
+    const store = giftStore(), p = store.pending.find(x => x.gid === b.dataset.gcancel); if (!p || !confirm(`${p.to} için bekleyen hediye iptal edilsin mi?`)) return;
+    store.pending = store.pending.filter(x => x.gid !== p.gid); save(GIFT_KEY, store);
+    logAct(`Hediye iptal edildi → ${p.to}: ${p.items.map(it => it.label).join(", ")}`); toast("Hediye iptal edildi"); render();
+  });
+}
+
 // ================================================================ Kullanıcı çekmecesi
 let drawerUid = null;
 function openDrawer(uid) { drawerUid = uid; renderDrawer(); $("drawer").classList.add("on"); $("scrim").classList.add("on"); }
@@ -984,6 +1171,7 @@ function renderDrawer() {
       <div class="sec"><h3>Rozetler · ${BADGES.filter(b => a.badges?.[b.id]).length}/${BADGES.length}</h3>
         <div class="chips">${BADGES.map(b => `<button class="chip ${a.badges?.[b.id] ? "on" : ""}" data-act="badge" data-b="${b.id}"><span class="e">${b.icon}</span>${b.name}<span class="tick"></span></button>`).join("")}</div>
         <div style="display:flex;gap:6px;margin-top:8px"><button class="btn sm" data-act="badgesAll">Hepsini ver</button><button class="btn sm" data-act="badgesReset">Sıfırla</button></div></div>
+      <div class="sec"><button class="btn green" data-act="gift" style="width:100%">${ic("gift")}Bu oyuncuya oyun içi hediye gönder</button></div>
       <div class="sec"><h3>Günlük ödül</h3>
         <div style="display:flex;align-items:center;gap:10px"><span class="muted" style="flex:1;font-size:13px">${a.lastDaily ? `Son alınma: ${esc(a.lastDaily)}` : "Alınabilir durumda"}</span>
         <button class="btn sm" data-act="daily" ${a.lastDaily ? "" : "disabled"}>${ic("refresh")}Yenile</button></div></div>
@@ -1004,6 +1192,7 @@ $("drawer").addEventListener("click", e => {
   if (!b || !sessionOk()) { if (b) logout(); return; }
   const act = b.dataset.act;
   if (act === "close") { closeDrawer(); return; }
+  if (act === "gift") { const y = getUser(drawerUid); if (y) gift.to = y.a.name; closeDrawer(); go("gifts"); return; }
   const x = getUser(drawerUid);
   if (!x) { closeDrawer(); return; }
   const a = x.a, amt = $("amt") ? numVal($("amt")) : null;
