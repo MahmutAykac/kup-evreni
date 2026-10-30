@@ -597,6 +597,29 @@ ZONES.forEach((Z, z) => {
   x.fillStyle = "#ffd166"; x.font = "bold 58px 'Trebuchet MS', sans-serif"; x.textAlign = "center"; x.textBaseline = "middle"; x.fillText("⌨️ BAŞLA ▶", 256, 50);
   mesh(new THREE.BoxGeometry(COLS * ROW + 2, 1.6, 0.6), [lambert("#33304a"), lambert("#33304a"), lambert("#33304a"), lambert("#33304a"), basic(0xffffff, { map: new THREE.CanvasTexture(cv) }), lambert("#33304a")], 0, 7.4, 0, g);
 })();
+// Hız çizgileri: dünyada sabit, rastgele yerleşen ince çubuklar. Tuşlar her 2 m de tekrarladığı için çok hızlıyken pist
+// duruyor gibi görünür (araba tekerleği yanılsaması); bu çizgiler rastgele olduğundan hız gözle görülür
+const streakMat = basic(0xffffff, { transparent: true, opacity: 0, depthWrite: false, fog: false });
+const streaks = [];
+for (let i = 0; i < 90; i++) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 1), streakMat);
+  m.visible = false; scene.add(m); streaks.push(m);
+}
+streaks.forEach(m => placeStreak(m, -220, -40));
+function placeStreak(m, zFrom, zTo) {
+  const side = Math.random() < 0.5 ? -1 : 1;
+  m.position.set(side * rand(HALF_W - 1, HALF_W + 14), rand(0.4, 11), rand(zFrom, zTo));
+}
+function updateStreaks(hv, dt, amt) {
+  streakMat.opacity = amt * 0.75;
+  const len = clamp(hv * 0.035, 1, 60);
+  for (const m of streaks) {
+    m.visible = amt > 0.01;
+    if (!m.visible) continue;
+    m.scale.z = len;
+    if (m.position.z > pl.z + 25 || m.position.z < pl.z - 220) placeStreak(m, pl.z - 220, pl.z - 40);
+  }
+}
 // Bitiş kapısı
 const finishGate = new THREE.Group(); scene.add(finishGate); finishGate.position.set(0, 0, FINISH_Z);
 [-1, 1].forEach(s => mesh(new THREE.BoxGeometry(0.9, 9, 0.9), lambert("#ffd166"), s * (HALF_W + 0.6), 4.5, 0, finishGate));
@@ -1059,7 +1082,11 @@ function syncCamera(dt) {
   camera.lookAt(camLook);
   const fov = fitFov(60 + sf * 22 + hyper * 16);
   if (Math.abs(camera.fov - fov) > 0.05) { camera.fov += (fov - camera.fov) * Math.min(1, dt * 4); camera.updateProjectionMatrix(); }
-  $("speedFx").style.opacity = (sf * sf * 0.9).toFixed(2);
+  const fx = $("speedFx");
+  fx.style.opacity = Math.min(1, sf * sf * 0.9 + hyper * 0.3).toFixed(2);
+  fx.style.transform = sf > 0.3 ? `rotate(${rand(-6, 6).toFixed(1)}deg) scale(${(1 + rand(0, 0.08) * (sf + hyper)).toFixed(3)})` : "";   // çizgiler titrer
+  updateStreaks(hv, dt, clamp((hv - 40) / 120, 0, 1));
+  if (hyper > 0) camera.position.add(new THREE.Vector3(rand(-1, 1), rand(-1, 1), 0).multiplyScalar(hyper * 0.12));   // hafif sarsıntı
   if (wind) { wind.g.gain.setTargetAtTime(sf * sf * 0.22, actx.currentTime, 0.1); wind.f.frequency.setTargetAtTime(350 + sf * 900, actx.currentTime, 0.1); }
   // Gökyüzü bölgeye göre yumuşakça değişir
   const zi = Math.min(ZONES.length - 1, zoneOf(Math.floor(-pl.z / ROW)));
