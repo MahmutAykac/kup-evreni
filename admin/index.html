@@ -338,6 +338,7 @@ const GAMES = [
   { id: "ada", title: "Ada Hayatta Kalma: Tekne Kazası", icon: "🏝️", saveKey: "tekneKazasi", bg: "linear-gradient(135deg,#0f7a5a,#7ad7f0)" },
   { id: "klavye", title: "Klavye Koşusu: +1 Hız", icon: "⌨️", saveKey: "klavyeKosusu", bg: "linear-gradient(135deg,#2a1f3d,#ff9ec7)" },
   { id: "kasaba", title: "Kasaba Hayatı RP", icon: "🏘️", saveKey: "kasabaHayati", bg: "linear-gradient(135deg,#3a86ff,#8ce99a)" },
+  { id: "limonata", title: "Limonata Standı", icon: "🍋", saveKey: "limonataStandi", bg: "linear-gradient(135deg,#ffe259,#ffa751)" },
 ];
 const BADGES = [
   { id: "welcome", icon: "👋", name: "Hoş geldin" }, { id: "firstGame", icon: "🎮", name: "İlk oyun" },
@@ -990,6 +991,16 @@ const GIFT_CATALOG = {
     { key: "pass:x2hiz", name: "2x Hız (kalıcı)", icon: "⚡", kind: "once", own: "passes.x2hiz" },
     { key: "pass:x2kupa", name: "2x Kupa (kalıcı)", icon: "🏆", kind: "once", own: "passes.x2kupa" },
     { key: "pass:gokkusagi", name: "Gökkuşağı İzi (kalıcı)", icon: "🌈", kind: "once", own: "owned.gokkusagi" },
+  ],
+  limonata: [
+    { key: "money", name: "Para", icon: "💰", kind: "amount", def: 1000, max: 1000000000 },
+    { key: "lemon", name: "Limon (sepet sınırına kadar)", icon: "🍋", kind: "count", def: 10, max: 20, own: "lemons" },
+    { key: "upgrade:{id}", name: "Yükseltme", icon: "🛠️", kind: "once", own: "owned.{id}", paramNames: { id: "Yükseltme" }, params: { id: [
+      ["basket", "🧺 Büyük Sepet"], ["tree2", "🌳 2. Ağaç Sırası"], ["pitcher", "🫗 Büyük Sürahi"], ["sign", "🪧 Renkli Tabela"],
+      ["ice", "🧊 Buz Makinesi"], ["kiosk", "🏪 Stand: Kiosk"], ["mint", "🌿 Naneli Tarif"], ["tree3", "🌳 3. Ağaç Sırası (2. sıra gerekir)"],
+      ["picker", "🤖 Otomatik Limon Toplayıcı"], ["berry", "🍓 Çilekli Tarif"], ["cafe", "☕ Stand: Kafe (Kiosk gerekir)"]] } },
+    { key: "pass:double", name: "2x Para (kalıcı)", icon: "💰", kind: "once", own: "passes.double" },
+    { key: "pass:waiter", name: "Yardımcı Garson (kalıcı)", icon: "🧑‍🍳", kind: "once", own: "passes.waiter" },
   ],
   kasaba: [
     { key: "money", name: "Para (₺)", icon: "💵", kind: "amount", def: 1000, max: 1000000000 },

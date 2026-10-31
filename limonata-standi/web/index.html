@@ -1,0 +1,1512 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Limonata Standı</title>
+<!--
+  Limonata Standı: limon topla, limonata yap, müşterilere sat, standını büyüt (tycoon / simülatör).
+  Küp Evreni platformunda çalışır (tek başına da açılır). Kayıt anahtarı: limonataStandi.
+  Döngü: ağaç → limon → sıkacak (3 limon = 1 sürahi) → tezgâh → para → yükseltme.
+  Her gün DAY_LENGTH sn (2,5 dk), son LAST_ORDER sn yeni müşteri gelmez, gün sonunda özet.
+  Kontroller: WASD yürü · Shift koş · E / Space etkileşim · Q / R fiyat − / + · U yükseltmeler · sürükle: kamera · tekerlek: yakınlaş
+  Dokunmatik: sol yarı joystick (sonuna kadar it = koş) · sağ yarı sürükle-bak · butonlar.
+  Test kancası: window.step(sn) oyun mantığını elle ilerletir.
+-->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+  :root { --panel: rgba(30, 32, 44, 0.8); --line: rgba(255,255,255,0.18); --text: #fff; --lemon: #ffd23f; --ok: #6ee7a0; --bad: #ff6b6b; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #87cdf5; color: var(--text); font-family: "Trebuchet MS", system-ui, sans-serif;
+    overflow: hidden; -webkit-user-select: none; user-select: none; touch-action: none; }
+  button { font: inherit; color: inherit; }
+  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  .pill { background: var(--panel); border-radius: 14px; padding: 8px 12px; }
+  #top { position: fixed; left: 14px; top: 12px; }
+  #money { font-size: 20px; font-weight: 700; color: var(--lemon); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #moneyAdd { font-size: 14px; margin-left: 6px; }
+  #inv { font-size: 14px; margin-top: 2px; white-space: nowrap; }
+  #priceRow { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 14px; white-space: nowrap; }
+  #priceRow button { width: 34px; height: 34px; padding: 0; border-radius: 10px; border: 2px solid var(--line); background: #444a60;
+    font-size: 20px; font-weight: 700; line-height: 1; cursor: pointer; touch-action: none; }
+  #priceTxt { min-width: 54px; text-align: center; font-size: 17px; color: var(--lemon); }
+  #clock { position: fixed; left: 50%; top: 12px; transform: translateX(-50%); text-align: center; pointer-events: none; white-space: nowrap; }
+  #dayTxt { font-size: 17px; font-weight: 700; }
+  #dayTxt.late { color: var(--bad); }
+  #moodTxt { font-size: 13px; color: #e4e9f2; }
+  #menu { position: fixed; right: 14px; top: 12px; display: flex; gap: 6px; }
+  #menu button { border: 2px solid var(--line); background: var(--panel); border-radius: 14px; padding: 8px 12px; cursor: pointer; font-size: 15px; white-space: nowrap; }
+  #hint { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); pointer-events: none; text-align: center; font-size: 15px; max-width: 46vw; }
+  #toasts { position: fixed; top: 100px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 6px;
+    align-items: center; pointer-events: none; z-index: 5; width: max-content; max-width: calc(100vw - 32px); }
+  .toast { background: rgba(255,251,234,0.96); color: #2b2b2b; padding: 6px 14px; border-radius: 10px; font-size: 15px; animation: fade 3s forwards; text-align: center; }
+  @keyframes fade { 0%, 82% { opacity: 1; } 100% { opacity: 0; transform: translateY(-8px); } }
+  .pop { position: fixed; left: 50%; top: 40%; transform: translateX(-50%); font-size: 32px; font-weight: 700; color: var(--lemon);
+    text-shadow: 0 2px 0 rgba(0,0,0,0.5); pointer-events: none; animation: rise 1.2s forwards; z-index: 4; }
+  @keyframes rise { to { opacity: 0; transform: translate(-50%, -70px); } }
+  #actions { position: fixed; right: 14px; bottom: 14px; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
+  #btnAct { display: none; min-width: 170px; max-width: 42vw; text-align: left; border: 2px solid var(--lemon); background: var(--panel);
+    border-radius: 14px; padding: 12px 14px; cursor: pointer; font-size: 15px; touch-action: none; }
+  #btnAct b { display: inline-block; background: #fff; color: #222; border-radius: 6px; width: 22px; text-align: center; margin-right: 6px; }
+  #stick { position: fixed; width: 110px; height: 110px; margin: -55px 0 0 -55px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.45);
+    background: rgba(0,0,0,0.22); display: none; pointer-events: none; }
+  #stick div { position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px; border-radius: 50%; background: rgba(255,255,255,0.75); }
+  .overlay { position: fixed; inset: 0; display: none; align-items: flex-start; justify-content: center; background: rgba(10,12,20,0.55);
+    padding: 16px; overflow-y: auto; touch-action: pan-y; z-index: 10; }
+  .overlay.show { display: flex; }
+  .card { background: #fffbea; color: #2b2b2b; border-radius: 18px; padding: 18px 22px; width: 100%; max-width: 520px; margin: auto 0; line-height: 1.45;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
+  .card h1 { margin: 0 0 8px; font-size: 24px; color: #b86e00; }
+  .card ol { padding-left: 22px; margin: 8px 0; }
+  .card li { margin: 4px 0; }
+  .muted { color: #6b6455; font-size: 14px; }
+  .btn { border: 0; border-radius: 12px; padding: 10px 14px; cursor: pointer; font-weight: 700; background: #ece4c8; color: #3a3426; }
+  .btn.go { background: #2bb673; color: #fff; }
+  .btn.lemon { background: var(--lemon); color: #3a3426; }
+  .btn:disabled { opacity: 0.5; cursor: default; }
+  .rowb { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  .rowb .btn { flex: 1; }
+  .rec { display: grid; grid-template-columns: 40px 1fr auto; gap: 10px; align-items: center; padding: 9px 0; border-bottom: 1px solid #ece4c8; }
+  .rec .ic { font-size: 28px; text-align: center; }
+  .rec .btn { max-width: 150px; white-space: normal; font-size: 14px; }
+  .recipes { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-top: 10px; }
+  .recipes .btn { font-size: 22px; padding: 12px 8px; }
+  .recipes small { display: block; font-size: 13px; font-weight: 400; }
+  #sumTable { width: 100%; font-size: 17px; margin: 8px 0; border-collapse: collapse; }
+  #sumTable td { padding: 4px 0; border-bottom: 1px solid #f0e8cc; }
+  #sumTable td:last-child { text-align: right; font-weight: 700; }
+  #noWebgl { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 16px; text-align: center; font-size: 18px; color: #222; }
+  @media (max-width: 760px), (max-height: 480px) {
+    #top { padding: 6px 10px; }
+    #money { font-size: 16px; }
+    #inv { font-size: 12px; }
+    #priceRow { font-size: 12px; margin-top: 4px; }
+    #priceRow button { width: 30px; height: 30px; font-size: 18px; }
+    #priceTxt { font-size: 15px; min-width: 46px; }
+    #dayTxt { font-size: 14px; }
+    #moodTxt { font-size: 11px; }
+    #menu button { padding: 6px 9px; font-size: 14px; }
+    #menu span { display: none; }
+    #hint { font-size: 13px; padding: 6px 10px; left: 14px; transform: none; bottom: 14px; text-align: left; max-width: calc(100vw - 300px); }
+    #toasts { top: 84px; }
+    .toast { font-size: 13px; }
+    #btnAct { min-width: 140px; padding: 10px 12px; font-size: 14px; }
+    .card { padding: 14px 16px; }
+    .card h1 { font-size: 20px; }
+  }
+  @media (max-width: 560px) {
+    #clock { left: 14px; transform: none; top: 128px; text-align: left; }
+    #hint { bottom: 84px; max-width: calc(100vw - 32px); }
+    #toasts { top: 190px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="top" class="pill">
+  <div id="money">💰 0<span id="moneyAdd"></span></div>
+  <div id="inv"></div>
+  <div id="priceRow"><span>🏷️ Fiyat</span><button id="bMinus" title="Fiyatı düşür (Q)">−</button><b id="priceTxt">5</b><button id="bPlus" title="Fiyatı artır (R)">+</button></div>
+</div>
+<div id="clock" class="pill"><div id="dayTxt"></div><div id="moodTxt"></div></div>
+<div id="menu">
+  <button id="bUp">🛠️ <span>Yükseltmeler</span></button>
+  <button id="bShop">R$ <span>Mağaza</span></button>
+  <button id="bHelp" title="Nasıl oynanır">❓</button>
+  <button id="bMute" title="Ses aç / kapat">🔊</button>
+</div>
+<div id="toasts"></div>
+<div id="hint" class="pill"></div>
+<div id="actions"><button id="btnAct"><b>E</b><span></span></button></div>
+<div id="stick"><div></div></div>
+
+<div id="ovHelp" class="overlay show"><div class="card">
+  <h1>🍋 Limonata Standı</h1>
+  <p style="margin:4px 0">Kendi limonata standını kur, en çok satan limonatacı ol!</p>
+  <ol>
+    <li>🌳 Bahçedeki <b>limon ağaçlarına</b> git, <b>E</b> ile limon topla.</li>
+    <li>🧃 Standdaki <b>sıkacakta</b> <b>E</b>: 3 limon = 1 sürahi = 6 bardak limonata.</li>
+    <li>🥤 Kuyruktaki müşteriye <b>tezgâhta E</b> ile sat. Fiyatı <b>− / +</b> ile ayarla: havaya göre çok pahalıysa müşteri 😠 deyip gider!</li>
+    <li>🛠️ Parayla <b>yükseltme</b> al: yeni ağaçlar, buz makinesi, naneli ve çilekli tarif, kiosk ve kafe.</li>
+  </ol>
+  <p class="muted">Her gün 2,5 dakika sürer. Son 15 saniyede yeni müşteri gelmez, gün sonunda özetini görürsün.<br>
+    Klavye: WASD yürü · Shift koş · E / Space etkileşim · Q / R fiyat − / + · U yükseltmeler · fareyle sürükle: kamera · tekerlek: yakınlaş.<br>
+    Dokunmatik: sol yarı joystick (sonuna kadar it = koş) · sağ yarı sürükle · butonlar.</p>
+  <div class="rowb"><button class="btn go" data-close>Hadi başlayalım!</button></div>
+</div></div>
+<div id="ovUp" class="overlay"><div class="card">
+  <h1>🛠️ Yükseltmeler</h1>
+  <div class="muted" id="upMoney"></div>
+  <div id="upList"></div>
+  <div class="rowb"><button class="btn" data-close>Kapat</button></div>
+</div></div>
+<div id="ovShop" class="overlay"><div class="card">
+  <h1>R$ Robux Mağazası</h1>
+  <div id="shopJeton" style="font-weight:700;color:#b07800"></div>
+  <div id="passList"></div>
+  <div class="muted" id="shopNote" style="margin-top:8px"></div>
+  <div class="rowb"><button class="btn" data-close>Kapat</button></div>
+</div></div>
+<div id="ovRecipe" class="overlay"><div class="card">
+  <h1>🧃 Hangi limonatayı yapalım?</h1>
+  <div class="muted" id="recInfo"></div>
+  <div class="recipes" id="recList"></div>
+  <div class="rowb"><button class="btn" data-close>Vazgeç</button></div>
+</div></div>
+<div id="ovSum" class="overlay"><div class="card">
+  <h1 id="sumTitle">🌙 Gün 1 bitti!</h1>
+  <table id="sumTable"></table>
+  <div class="muted" id="sumTip"></div>
+  <div class="rowb"><button class="btn go" id="btnNextDay">☀️ Sonraki gün</button></div>
+</div></div>
+<div id="noWebgl">3D için WebGL gerekli; bu tarayıcıda açılamadı. Chrome / Edge ile dosyayı açmayı dene.</div>
+
+<script>
+"use strict";
+// ================================================================ Yardımcılar
+const $ = id => document.getElementById(id);
+const rand = (a, b) => a + Math.random() * (b - a);
+const pick = l => l[Math.floor(Math.random() * l.length)];
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const dist = (ax, az, bx, bz) => Math.hypot(ax - bx, az - bz);
+const fmt = n => Math.round(n).toLocaleString("tr-TR");
+function angDiff(a, b) { let d = (b - a) % (Math.PI * 2); if (d > Math.PI) d -= Math.PI * 2; if (d < -Math.PI) d += Math.PI * 2; return d; }
+function setText(el, t) { if (el._t !== t) { el._t = t; el.textContent = t; } }
+function notify(msg) {
+  const el = document.createElement("div");
+  el.className = "toast"; el.textContent = msg;
+  $("toasts").appendChild(el);
+  setTimeout(() => el.remove(), 3000);
+  while ($("toasts").children.length > 3) $("toasts").firstChild.remove();
+}
+// Türkçe iyelik eki: "Ali" → "Ali'nin", "Mahmut" → "Mahmut'un"
+function genitive(name) {
+  const s = String(name).trim(), low = s.toLocaleLowerCase("tr-TR"), V = "aıoueiöü";
+  let v = null;
+  for (let i = low.length - 1; i >= 0; i--) if (V.includes(low[i])) { v = low[i]; break; }
+  const h = !v ? "i" : "aı".includes(v) ? "ı" : "ei".includes(v) ? "i" : "ou".includes(v) ? "u" : "ü";
+  return s + "'" + (V.includes(low[low.length - 1]) ? "n" : "") + h + "n";
+}
+
+// ================================================================ Config (Roblox: ReplicatedStorage/Shared/Config)
+const DAY_LENGTH = 150;          // bir gün = 2,5 dakika
+const LAST_ORDER = 15;           // son 15 sn yeni müşteri gelmez
+const WORLD_X = 30, WORLD_Z1 = -21, WORLD_Z2 = 22;
+const SPEED = 6.5, RUN_SPEED = 10.5;
+const LEMONS_PER_PITCHER = 3;
+const TREE_MAX = 4, TREE_GROW = 20;      // her ağaçta en fazla 4 limon, 20 sn'de bir yenisi
+const BERRY_MAX = 6, BERRY_GROW = 12, BERRY_CAP = 12;
+const PATIENCE = 50;              // müşteri en fazla bu kadar bekler (sn)
+const STAND_Z = 3;                // tezgâhın merkezi (x = 0)
+const WEATHERS = {
+  sicak:  { name: "Sıcak", icon: "☀️", spawn: 4, pay: 12, grow: 1, tip: "Çok sıcak: herkes limonata istiyor, fiyat biraz yüksek olabilir!", sky: 0x8fd3ff, fog: [55, 120], sun: 1.05, hemi: 0.75 },
+  ilik:   { name: "Ilık", icon: "⛅", spawn: 6, pay: 9, grow: 1, tip: "Güzel bir gün: orta bir fiyat iyi gider.", sky: 0xa6d4f2, fog: [50, 115], sun: 0.85, hemi: 0.7 },
+  yagmur: { name: "Yağmurlu", icon: "🌧️", spawn: 9, pay: 6, grow: 1.5, tip: "Yağmur var: az müşteri gelir, fiyatı düşük tut. Ağaçlar hızlı büyür!", sky: 0x8a96a3, fog: [30, 85], sun: 0.4, hemi: 0.55 },
+};
+const WEATHER_ROLL = [["sicak", 0.35], ["ilik", 0.45], ["yagmur", 0.2]];
+const RECIPES = [
+  { id: "klasik", name: "Klasik", icon: "🍋", mult: 1, color: 0xfff176 },
+  { id: "nane", name: "Naneli", icon: "🌿", mult: 1.4, color: 0xa8e6a1, unlock: "mint" },
+  { id: "cilek", name: "Çilekli", icon: "🍓", mult: 1.8, color: 0xff8fab, unlock: "berry", berries: 2 },
+];
+const REC = Object.fromEntries(RECIPES.map(r => [r.id, r]));
+const UPGRADES = [
+  { id: "basket", name: "Büyük Sepet", icon: "🧺", price: 60, desc: "Limon taşıma sınırı 10 → 20." },
+  { id: "tree2", name: "2. Ağaç Sırası", icon: "🌳", price: 120, desc: "Bahçeye 3 limon ağacı daha." },
+  { id: "pitcher", name: "Büyük Sürahi", icon: "🫗", price: 180, desc: "Bir sürahiden 6 yerine 10 bardak çıkar." },
+  { id: "sign", name: "Renkli Tabela", icon: "🪧", price: 250, desc: "Yol kenarına tabela ve balonlar: müşteriler daha sık gelir." },
+  { id: "ice", name: "Buz Makinesi", icon: "🧊", price: 350, desc: "Buz gibi limonata! Müşteriler %35 daha yüksek fiyatı kabul eder." },
+  { id: "kiosk", name: "Stand: Kiosk", icon: "🏪", price: 450, desc: "Stand büyür: kuyrukta 5 kişi, daha çok müşteri." },
+  { id: "mint", name: "Naneli Tarif", icon: "🌿", price: 600, desc: "Naneli limonata: bardağı 1,4 kat fiyatına satılır." },
+  { id: "tree3", name: "3. Ağaç Sırası", icon: "🌳", price: 800, desc: "Bahçeye 3 limon ağacı daha.", requires: "tree2" },
+  { id: "picker", name: "Otomatik Limon Toplayıcı", icon: "🤖", price: 1000, desc: "Robot, olgun limonları kendiliğinden toplayıp sepetine koyar." },
+  { id: "berry", name: "Çilekli Tarif", icon: "🍓", price: 1300, desc: "Bahçeye çilek fidanları dikilir. Çilekli limonata (3 limon + 2 çilek) 1,8 kat fiyatına satılır." },
+  { id: "cafe", name: "Stand: Kafe", icon: "☕", price: 2000, desc: "Stand kafeye dönüşür: kuyrukta 7 kişi, masalar, en çok müşteri.", requires: "kiosk" },
+];
+const UP = Object.fromEntries(UPGRADES.map(u => [u.id, u]));
+// Robux (Küp Evreni platform parası) ile alınanlar. Roblox'ta gamepass / developer product
+const PASSES = [
+  { id: "double", name: "2x Para", icon: "💰", jeton: 150, desc: "Satışlardan kazandığın her şey 2 katı. Kalıcı." },
+  { id: "waiter", name: "Yardımcı Garson", icon: "🧑‍🍳", jeton: 100, desc: "Standda limonata varsa müşterilere kendiliğinden satar. Kalıcı." },
+  { id: "cash1000", name: "1000 Para Paketi", icon: "⚡", jeton: 50, consumable: true, desc: "Anında 💰 1.000. İstediğin kadar alabilirsin." },
+];
+const LEVELS = [
+  { name: "Tezgâh", W: 3.4, queue: 3, spawn: 1 },
+  { name: "Kiosk", W: 4.6, queue: 5, spawn: 0.85 },
+  { name: "Kafe", W: 5.8, queue: 7, spawn: 0.72 },
+];
+const TREE_SPOTS = { base: [[-9, -3], [-13, -3], [-17, -3]], tree2: [[-9, -8], [-13, -8], [-17, -8]], tree3: [[-9, -13], [-13, -13], [-17, -13]] };
+const BERRY_SPOT = { x: -13, z: -16.6 };
+const BOARD = { x: 7, z: 1 };
+const SKINS = ["#ffdbac", "#f1c27d", "#e0ac69", "#c68642", "#8d5524"];
+const SHIRTS = ["#e63946", "#118ab2", "#06d6a0", "#ffd166", "#9b5de5", "#f15bb5", "#ff8c42", "#f4f4f4"];
+const PANTS = ["#2b2d42", "#3a5a40", "#6c584c", "#1d3557", "#5c4d7d"];
+const FACES = ["smile", "grin", "wow", "cool"];
+
+function rollWeather() { let r = Math.random(); for (const [id, p] of WEATHER_ROLL) if ((r -= p) < 0) return id; return "ilik"; }
+
+// ================================================================ Kayıt
+const SAVE_KEY = "limonataStandi";
+function freshSave() {
+  return { money: 0, lemons: 0, berries: 0, cups: { klasik: 0, nane: 0, cilek: 0 }, price: 5, owned: {}, passes: {},
+    day: 1, weather: "ilik", nextWeather: rollWeather(), totalCups: 0, totalEarned: 0, helpSeen: false, muted: false, giftIds: [] };
+}
+let save = freshSave();
+try {
+  const s = JSON.parse(localStorage.getItem(SAVE_KEY) || "null");
+  if (s && typeof s === "object") save = { ...save, ...s, cups: { ...save.cups, ...(s.cups || {}) }, owned: { ...(s.owned || {}) },
+    passes: { ...(s.passes || {}) }, giftIds: Array.isArray(s.giftIds) ? s.giftIds : [] };
+} catch (e) {}
+if (!WEATHERS[save.weather]) save.weather = "ilik";
+if (!WEATHERS[save.nextWeather]) save.nextWeather = rollWeather();
+save.price = clamp(Math.round(+save.price || 5), 1, 999);
+let lastSave = 0;
+function persist(force) {
+  if (!force && performance.now() - lastSave < 4000) return;
+  lastSave = performance.now();
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) {}
+  reportStats();
+}
+
+// ================================================================ Türetilmiş değerler
+const level = () => save.owned.cafe ? 2 : save.owned.kiosk ? 1 : 0;
+const carryCap = () => save.owned.basket ? 20 : 10;
+const pitcherSize = () => save.owned.pitcher ? 10 : 6;
+const queueCap = () => LEVELS[level()].queue;
+const totalCups = () => RECIPES.reduce((s, r) => s + (save.cups[r.id] || 0), 0);
+const recipeOk = r => !r.unlock || !!save.owned[r.unlock];
+const cupPrice = r => Math.max(1, Math.round(save.price * r.mult));
+const payBase = () => WEATHERS[save.weather].pay * (save.owned.ice ? 1.35 : 1);
+const spawnEvery = () => WEATHERS[save.weather].spawn * LEVELS[level()].spawn * (save.owned.sign ? 0.7 : 1);
+// Stokta olan en değerli tarif (önce o satılır)
+function bestRecipe() { for (let i = RECIPES.length - 1; i >= 0; i--) if (save.cups[RECIPES[i].id] > 0) return RECIPES[i]; return null; }
+
+// ================================================================ Küp Evreni köprüsü
+const platform = { inside: window.parent !== window, profile: null, reqs: {} };
+const playerName = () => (platform.profile && platform.profile.name) || "";
+function reportStats() {
+  if (!platform.inside) return;
+  parent.postMessage({ type: "kup:stats", stats: { "💰 Para": fmt(save.money), "📅 Gün": save.day, "🍋 Satılan bardak": fmt(save.totalCups),
+    "⭐ Stand": LEVELS[level()].name, "🛠️ Yükseltme": Object.keys(save.owned).filter(k => UP[k]).length + "/" + UPGRADES.length } }, "*");
+}
+function requestPurchase(item, done) {
+  if (!platform.inside) { notify("Robux ile almak için oyunu Küp Evreni'nden aç (ana klasördeki index.html)"); return; }
+  const reqId = Math.random().toString(36).slice(2);
+  platform.reqs[reqId] = done;
+  parent.postMessage({ type: "kup:purchase", reqId, id: item.id, name: item.name, price: item.jeton, icon: item.icon }, "*");
+}
+addEventListener("message", e => {
+  if (!platform.inside || e.source !== parent) return;
+  const m = e.data || {};
+  if (m.type === "kup:profile") { platform.profile = m; rebuildAvatar(); drawSign(); updateNameTag(); rerenderOpen(); }
+  else if (m.type === "kup:purchaseResult") {
+    if (platform.profile) platform.profile.jeton = m.jeton;
+    const done = platform.reqs[m.reqId]; delete platform.reqs[m.reqId];
+    if (done) done(!!m.ok);
+    rerenderOpen();
+  }
+  else if (m.type === "kup:gift") receiveGifts(m.gifts);
+});
+if (platform.inside) parent.postMessage({ type: "kup:ready" }, "*");
+
+// ================================================================ Küp Evreni hediyeleri (admin panelinden)
+// kup:gift { gifts: [{ gid, items: [{ key, n }] }] } → uygula, kaydet → kup:giftAck { gid, skipped }
+const GIFT_MONEY_MAX = 1e9;
+function applyGiftItem(key, n) {
+  if (key === "money") { // para: 2x geçişiyle çarpılmaz
+    const add = Math.min(n, GIFT_MONEY_MAX);
+    save.money = Math.min(1e12, save.money + add); flashMoney(add); return true;
+  }
+  if (key === "lemon") { // limon: sepet sınırına uyulur
+    const add = Math.min(n, carryCap() - save.lemons);
+    if (add <= 0) return false;
+    save.lemons += add; syncCrate(); return true;
+  }
+  const [kind, id] = key.split(":");
+  if (kind === "upgrade") { // parayla alınan yükseltmeler: satın almadaki yan etkiler aynen uygulanır
+    const u = UP[id];
+    if (!u || save.owned[id]) return false;
+    if (u.requires && !save.owned[u.requires]) return false; // önkoşul yoksa uygulanmaz
+    grantUpgrade(u);
+    return true;
+  }
+  if (kind === "pass") { // kalıcı Robux geçişleri (tüketilen 1000 Para Paketi hariç; onun yerine "money")
+    const p = PASSES.find(x => x.id === id && !x.consumable);
+    if (!p || save.passes[id]) return false;
+    save.passes[id] = true; applyPass(id); return true;
+  }
+  return false;
+}
+// Önkoşullu yükseltmeler sırayla (2. Ağaç → 3. Ağaç, Kiosk → Kafe); limon en sonda (Büyük Sepet önce gelsin)
+const giftOrder = key => key === "lemon" ? 999 : UPGRADES.findIndex(u => "upgrade:" + u.id === key);
+function receiveGifts(gifts) {
+  save.giftIds = save.giftIds || [];
+  let any = false;
+  const acks = [];
+  for (const g of Array.isArray(gifts) ? gifts : []) {
+    if (!g || !g.gid) continue;
+    const skipped = [];
+    if (!save.giftIds.includes(g.gid)) { // aynı hediye iki kez gelirse bir kez uygula
+      const items = (g.items || []).slice().sort((a, b) => giftOrder(String(a.key)) - giftOrder(String(b.key)));
+      for (const it of items) {
+        const n = Math.max(1, Math.floor(Number(it.n) || 1));
+        if (applyGiftItem(String(it.key), n)) any = true; else skipped.push(String(it.key));
+      }
+      save.giftIds = [g.gid, ...save.giftIds].slice(0, 200);
+    }
+    acks.push({ type: "kup:giftAck", gid: g.gid, skipped });
+  }
+  persist(true); // ack'ten önce kaydet
+  if (platform.inside) for (const a of acks) parent.postMessage(a, "*");
+  if (any) { SFX.cash(); notify("🎁 Hediye alındı!"); rerenderOpen(); drawMenu(); }
+}
+
+// ================================================================ Ses (WebAudio ile sentezlenir)
+const A = { ctx: null };
+function initAudio() {
+  if (A.ctx) { if (A.ctx.state === "suspended") A.ctx.resume(); return; }
+  try { A.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return; }
+  A.master = A.ctx.createGain(); A.master.gain.value = save.muted ? 0 : 0.5; A.master.connect(A.ctx.destination);
+  A.noise = A.ctx.createBuffer(1, A.ctx.sampleRate, A.ctx.sampleRate);
+  const d = A.noise.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+}
+function tone(freq, dur, type = "sine", gain = 0.1, freqEnd, delay = 0) {
+  if (!A.ctx) return;
+  const t0 = A.ctx.currentTime + delay, o = A.ctx.createOscillator(), g = A.ctx.createGain();
+  o.type = type; o.frequency.setValueAtTime(freq, t0);
+  if (freqEnd) o.frequency.exponentialRampToValueAtTime(freqEnd, t0 + dur);
+  g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(gain, t0 + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  o.connect(g).connect(A.master); o.start(t0); o.stop(t0 + dur + 0.05);
+}
+function noise(dur, gain, freq, type = "lowpass", delay = 0) {
+  if (!A.ctx) return;
+  const t0 = A.ctx.currentTime + delay, s = A.ctx.createBufferSource(), f = A.ctx.createBiquadFilter(), g = A.ctx.createGain();
+  s.buffer = A.noise; f.type = type; f.frequency.value = freq;
+  g.gain.setValueAtTime(gain, t0); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  s.connect(f).connect(g).connect(A.master); s.start(t0); s.stop(t0 + dur + 0.05);
+}
+const SFX = {
+  click: () => tone(620, 0.05, "square", 0.035),
+  pick: () => [660, 880].forEach((f, i) => tone(f, 0.09, "triangle", 0.07, undefined, i * 0.06)),
+  squeeze: () => { noise(0.35, 0.15, 900, "bandpass"); tone(300, 0.3, "sine", 0.05, 160, 0.05); },
+  cash: () => { [1318, 1760].forEach((f, i) => tone(f, 0.12, "square", 0.04, undefined, i * 0.07)); noise(0.08, 0.08, 4000, "highpass", 0.14); },
+  good: () => [523, 659, 784].forEach((f, i) => tone(f, 0.2, "triangle", 0.08, undefined, i * 0.07)),
+  bad: () => tone(200, 0.25, "sawtooth", 0.06, 140),
+  day: () => [392, 523, 659, 784].forEach((f, i) => tone(f, 0.2, "triangle", 0.07, undefined, i * 0.09)),
+};
+
+// ================================================================ 3D sahne
+const canvas = $("game");
+let renderer;
+try { renderer = new THREE.WebGLRenderer({ canvas, antialias: true }); }
+catch (e) { $("noWebgl").style.display = "flex"; throw e; }
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xa6d4f2);
+scene.fog = new THREE.Fog(0xa6d4f2, 50, 115);
+const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 300);
+const hemi = new THREE.HemisphereLight(0xffffff, 0x5d7a3a, 0.7);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xfff2d0, 0.85);
+sun.position.set(16, 30, 14);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024);
+Object.assign(sun.shadow.camera, { left: -30, right: 30, top: 30, bottom: -30, near: 1, far: 90 });
+scene.add(sun);
+
+const lambert = (color, extra = {}) => new THREE.MeshLambertMaterial({ color, ...extra });
+const flat = color => new THREE.MeshLambertMaterial({ color, flatShading: true });
+function mesh(geo, material, x = 0, y = 0, z = 0, parent = scene, shadow = true) {
+  const m = new THREE.Mesh(geo, material);
+  m.position.set(x, y, z); m.castShadow = shadow; m.receiveShadow = true;
+  parent.add(m); return m;
+}
+const boxM = (w, h, d, material, x, y, z, parent = scene) => mesh(new THREE.BoxGeometry(w, h, d), material, x, y, z, parent);
+function canvasTex(w, h, draw) {
+  const c = document.createElement("canvas"); c.width = w; c.height = h;
+  draw(c.getContext("2d"), w, h);
+  const t = new THREE.CanvasTexture(c); t.anisotropy = 4; return t;
+}
+function rr(g, x, y, w, h, r) { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); }
+function fitText(g, text, maxW, size, weight = 700) {
+  g.font = `${weight} ${size}px "Trebuchet MS", system-ui, sans-serif`;
+  const w = g.measureText(text).width;
+  if (w > maxW) g.font = `${weight} ${Math.floor(size * maxW / w)}px "Trebuchet MS", system-ui, sans-serif`;
+}
+// İki yüzü de okunan tabela (öndeki müşteriler ve arkadaki kamera için)
+function twoSided(w, h, tex, x, y, z, parent = scene) {
+  const g = new THREE.Group(); g.position.set(x, y, z); parent.add(g);
+  const m = new THREE.MeshBasicMaterial({ map: tex });
+  const a = new THREE.Mesh(new THREE.PlaneGeometry(w, h), m); a.position.z = 0.02; g.add(a);
+  const b = new THREE.Mesh(new THREE.PlaneGeometry(w, h), m); b.rotation.y = Math.PI; b.position.z = -0.02; g.add(b);
+  return g;
+}
+// Çarpışma: kutular ve daireler (etiketle silinebilir)
+const solids = [], circles = [];
+function removeSolids(tag) {
+  for (const L of [solids, circles]) for (let i = L.length - 1; i >= 0; i--) if (L[i].tag === tag) L.splice(i, 1);
+}
+function blocked(x, z, r) {
+  if (x < -WORLD_X + r || x > WORLD_X - r || z < WORLD_Z1 + r || z > WORLD_Z2 - r) return true;
+  for (const b of solids) if (x > b.x1 - r && x < b.x2 + r && z > b.z1 - r && z < b.z2 + r) return true;
+  for (const c of circles) if ((x - c.x) ** 2 + (z - c.z) ** 2 < (r + c.r) ** 2) return true;
+  return false;
+}
+
+// ================================================================ Dünya (park köşesi, yol, bahçe)
+const lemonMat = flat(0xffe14d);
+const clouds = [];
+function buildWorld() {
+  const grassTex = canvasTex(256, 256, (g, w, h) => {
+    g.fillStyle = "#7cc45a"; g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 900; i++) { g.fillStyle = Math.random() < 0.5 ? "#71b950" : "#88d065"; g.fillRect(Math.random() * w, Math.random() * h, 3, 6); }
+  });
+  grassTex.wrapS = grassTex.wrapT = THREE.RepeatWrapping; grassTex.repeat.set(36, 36);
+  const ground = mesh(new THREE.PlaneGeometry(240, 240), new THREE.MeshLambertMaterial({ map: grassTex }), 0, 0, 0, scene, false);
+  ground.rotation.x = -Math.PI / 2;
+  // Yol, şerit çizgileri, kaldırım
+  mesh(new THREE.BoxGeometry(240, 0.06, 5), lambert(0x4d525e), 0, 0.03, 18, scene, false);
+  const dash = lambert(0xffffff);
+  for (let x = -110; x <= 110; x += 6) mesh(new THREE.BoxGeometry(2.4, 0.02, 0.22), dash, x, 0.07, 18, scene, false);
+  mesh(new THREE.BoxGeometry(240, 0.16, 2.4), lambert(0xd9d4c7), 0, 0.08, 14.3, scene, false);
+  mesh(new THREE.BoxGeometry(240, 0.16, 1.4), lambert(0xd9d4c7), 0, 0.08, 21.2, scene, false);
+  // Standın önündeki kum patika
+  mesh(new THREE.BoxGeometry(3.2, 0.05, 9.6), lambert(0xead7a5), 0, 0.03, 8.4, scene, false);
+  // Limon bahçesi: toprak + çit (doğu tarafında giriş)
+  mesh(new THREE.BoxGeometry(15.4, 0.05, 18.6), lambert(0x9c7a52), -13.2, 0.03, -8.4, scene, false);
+  const fence = flat(0xffffff);
+  const fenceRun = (x1, z1, x2, z2) => {
+    const len = Math.hypot(x2 - x1, z2 - z1), n = Math.max(1, Math.round(len / 1.2));
+    for (let i = 0; i <= n; i++) boxM(0.14, 0.8, 0.14, fence, x1 + (x2 - x1) * i / n, 0.4, z1 + (z2 - z1) * i / n);
+    const rail = boxM(len, 0.1, 0.06, fence, (x1 + x2) / 2, 0.55, (z1 + z2) / 2); rail.rotation.y = -Math.atan2(z2 - z1, x2 - x1);
+    solids.push({ x1: Math.min(x1, x2) - 0.1, x2: Math.max(x1, x2) + 0.1, z1: Math.min(z1, z2) - 0.1, z2: Math.max(z1, z2) + 0.1 });
+  };
+  fenceRun(-21, -18, -21, 1); fenceRun(-21, -18, -5.5, -18); fenceRun(-21, 1, -5.5, 1);
+  fenceRun(-5.5, -18, -5.5, -11); fenceRun(-5.5, -1.5, -5.5, 1);
+  // Karşı sıradaki evler
+  const roofCols = [0xe76f51, 0x2a9d8f, 0x6d597a, 0xe9c46a, 0x457b9d, 0xbc6c25];
+  const wallCols = [0xfff1e6, 0xf8edeb, 0xe9f5db, 0xfefae0, 0xedf6f9, 0xfde2e4];
+  for (let i = 0; i < 7; i++) {
+    const x = -33 + i * 11, w = rand(6, 8), h = rand(3.5, 5);
+    boxM(w, h, 6, flat(wallCols[i % 6]), x, h / 2, 27);
+    const roof = mesh(new THREE.ConeGeometry(w * 0.78, 2.6, 4), flat(roofCols[i % 6]), x, h + 1.3, 27); roof.rotation.y = Math.PI / 4; roof.scale.z = 0.85;
+    boxM(1.1, 1.9, 0.1, flat(0x7f5539), x, 0.95, 23.96);
+    for (const sx of [-1, 1]) boxM(1.1, 1, 0.1, flat(0x9fd3ff), x + sx * w * 0.3, h * 0.6, 23.96);
+  }
+  // Sokak lambaları
+  for (let x = -26; x <= 26; x += 13) {
+    if (Math.abs(x) < 3) continue;
+    mesh(new THREE.CylinderGeometry(0.08, 0.1, 4, 6), flat(0x3d405b), x, 2, 13.4);
+    mesh(new THREE.SphereGeometry(0.28, 10, 8), lambert(0xfff4c2, { emissive: 0x554411 }), x, 4.1, 13.4);
+    circles.push({ x, z: 13.4, r: 0.2 });
+  }
+  // Banklar, çiçek tarhları, çalılar, süs ağaçları
+  const bench = (x, z, ry) => {
+    const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = ry; scene.add(g);
+    boxM(2, 0.12, 0.6, flat(0xb5835a), 0, 0.5, 0, g); boxM(2, 0.5, 0.1, flat(0xb5835a), 0, 0.85, -0.28, g);
+    for (const sx of [-0.8, 0.8]) boxM(0.1, 0.5, 0.5, flat(0x3d405b), sx, 0.25, 0, g);
+    circles.push({ x, z, r: 0.9 });
+  };
+  bench(9, 10.5, 0); bench(-8, 10.5, 0);
+  const flowerCols = [0xff5d8f, 0xffd23f, 0xb388eb, 0xff8c42, 0xffffff];
+  for (const [fx, fz] of [[4.5, 12.3], [-4.5, 12.3], [12, 6], [-3, -3.5], [3.5, -3.5]]) {
+    mesh(new THREE.BoxGeometry(2.6, 0.18, 1.1), flat(0x7a5230), fx, 0.09, fz, scene, false);
+    for (let i = 0; i < 7; i++) mesh(new THREE.SphereGeometry(0.16, 6, 5), flat(pick(flowerCols)), fx - 1.05 + i * 0.35, 0.32, fz + rand(-0.3, 0.3));
+  }
+  const bushMat = flat(0x4caf50);
+  for (const [bx, bz, s] of [[13, -2, 1.2], [15, 4, 1], [-24, 6, 1.4], [24, -10, 1.3], [-2, -16, 1.1], [9, -14, 1.2], [20, 9, 1]]) {
+    mesh(new THREE.IcosahedronGeometry(s, 0), bushMat, bx, s * 0.7, bz); circles.push({ x: bx, z: bz, r: s * 0.8 });
+  }
+  const parkTree = (x, z, s) => {
+    mesh(new THREE.CylinderGeometry(0.25 * s, 0.35 * s, 2.4 * s, 6), flat(0x7f5539), x, 1.2 * s, z);
+    mesh(new THREE.ConeGeometry(1.8 * s, 3.6 * s, 7), flat(0x2e7d32), x, 3.6 * s, z);
+    mesh(new THREE.ConeGeometry(1.3 * s, 2.6 * s, 7), flat(0x388e3c), x, 5 * s, z);
+    circles.push({ x, z, r: 0.4 * s });
+  };
+  for (const [x, z, s] of [[18, -6, 1.2], [22, 2, 1], [26, -16, 1.3], [12, -19, 1.1], [-26, -8, 1.2], [-27, 10, 1], [27, 11, 1.1], [3, -19, 1]]) parkTree(x, z, s);
+  // Bulutlar
+  const cloudMat = lambert(0xffffff, { transparent: true, opacity: 0.95 });
+  for (let i = 0; i < 9; i++) {
+    const g = new THREE.Group(); g.position.set(rand(-70, 70), rand(22, 30), rand(-60, 40));
+    for (let k = 0; k < 4; k++) mesh(new THREE.IcosahedronGeometry(rand(1.6, 2.8), 0), cloudMat, k * 2 - 3, rand(-0.4, 0.6), rand(-1, 1), g, false);
+    scene.add(g); clouds.push(g);
+  }
+  // Yükseltme panosu
+  const boardTex = canvasTex(512, 256, (g, w, h) => {
+    g.fillStyle = "#2b9348"; rr(g, 6, 6, w - 12, h - 12, 28); g.fill();
+    g.lineWidth = 10; g.strokeStyle = "#fff"; g.stroke();
+    g.fillStyle = "#fff"; g.textAlign = "center"; g.textBaseline = "middle";
+    fitText(g, "🛠️ YÜKSELTMELER", w - 60, 64); g.fillText("🛠️ YÜKSELTMELER", w / 2, h * 0.4);
+    fitText(g, "E ile aç", w - 60, 40, 400); g.fillText("E ile aç", w / 2, h * 0.74);
+  });
+  for (const sx of [-0.9, 0.9]) boxM(0.14, 2.2, 0.14, flat(0x7f5539), BOARD.x + sx, 1.1, BOARD.z);
+  twoSided(2.2, 1.1, boardTex, BOARD.x, 1.7, BOARD.z);
+  solids.push({ x1: BOARD.x - 1, x2: BOARD.x + 1, z1: BOARD.z - 0.15, z2: BOARD.z + 0.15 });
+}
+
+// ================================================================ Avatar (platformdan)
+function drawFace(kind) {
+  const c = document.createElement("canvas"); c.width = c.height = 128;
+  const x = c.getContext("2d");
+  x.fillStyle = "#1b1b1b"; x.strokeStyle = "#1b1b1b"; x.lineWidth = 7; x.lineCap = "round";
+  if (kind === "cool") { x.fillRect(22, 40, 36, 18); x.fillRect(70, 40, 36, 18); x.fillRect(56, 44, 16, 5); }
+  else { x.beginPath(); x.ellipse(44, 50, 7, kind === "wow" ? 12 : 10, 0, 0, 7); x.ellipse(84, 50, 7, kind === "wow" ? 12 : 10, 0, 0, 7); x.fill(); }
+  x.beginPath();
+  if (kind === "wow") { x.ellipse(64, 92, 10, 13, 0, 0, 7); x.fill(); }
+  else if (kind === "grin") { x.moveTo(36, 82); x.quadraticCurveTo(64, 116, 92, 82); x.closePath(); x.fill(); }
+  else { x.arc(64, 74, 26, 0.25 * Math.PI, 0.75 * Math.PI); x.stroke(); }
+  return c;
+}
+const faceTex = {};
+function buildAvatar(a) {
+  const g = new THREE.Group(), inner = new THREE.Group();
+  g.add(inner); inner.scale.setScalar(0.36);
+  const part = (w, h, d, c, x, y, z) => mesh(new THREE.BoxGeometry(w, h, d), lambert(c), x, y, z, inner);
+  const legs = [part(0.9, 2, 1, a.pants, -0.5, 1, 0), part(0.9, 2, 1, a.pants, 0.5, 1, 0)];
+  legs.forEach(l => { l.geometry.translate(0, -1, 0); l.position.y = 2; });
+  part(2, 2, 1, a.shirt, 0, 3, 0);
+  const arms = [part(0.9, 2, 1, a.skin, -1.45, 3, 0), part(0.9, 2, 1, a.skin, 1.45, 3, 0)];
+  arms.forEach(l => { l.geometry.translate(0, -0.8, 0); l.position.y = 3.8; });
+  mesh(new THREE.CylinderGeometry(0.62, 0.62, 1.2, 16), lambert(a.skin), 0, 4.6, 0, inner);
+  const face = FACES.includes(a.face) ? a.face : "smile";
+  if (!faceTex[face]) faceTex[face] = new THREE.CanvasTexture(drawFace(face));
+  mesh(new THREE.PlaneGeometry(0.9, 0.9), new THREE.MeshBasicMaterial({ map: faceTex[face], transparent: true }), 0, 4.6, 0.63, inner, false);
+  const hc = a.hatColor || "#e63946";
+  if (a.hat === "cap") { mesh(new THREE.CylinderGeometry(0.66, 0.66, 0.35, 16), lambert(hc), 0, 5.3, 0, inner); part(1.1, 0.08, 0.6, hc, 0, 5.15, 0.75); }
+  else if (a.hat === "crown") {
+    mesh(new THREE.CylinderGeometry(0.6, 0.55, 0.4, 8, 1, true), lambert("#ffd166", { side: THREE.DoubleSide }), 0, 5.4, 0, inner);
+    for (let i = 0; i < 6; i++) { const an = i / 6 * Math.PI * 2; mesh(new THREE.ConeGeometry(0.1, 0.3, 4), lambert("#ffd166"), Math.cos(an) * 0.55, 5.7, Math.sin(an) * 0.55, inner); }
+  } else if (a.hat === "headphones") {
+    mesh(new THREE.TorusGeometry(0.7, 0.07, 8, 20, Math.PI), lambert(hc), 0, 4.75, 0, inner);
+    part(0.25, 0.5, 0.5, hc, -0.7, 4.6, 0); part(0.25, 0.5, 0.5, hc, 0.7, 4.6, 0);
+  } else if (a.hat === "helmet") mesh(new THREE.SphereGeometry(0.95, 20, 14), lambert("#cfe8ff", { transparent: true, opacity: 0.35, depthWrite: false }), 0, 4.65, 0, inner, false);
+  return { group: g, legs, arms };
+}
+function poseFigure(parts, moving, walk, work = 0) {
+  const sw = moving ? Math.sin(walk) * 0.7 : 0;
+  parts.legs[0].rotation.x = sw; parts.legs[1].rotation.x = -sw;
+  const w = work > 0 ? -1.2 + Math.sin(work * 18) * 0.4 : 0;
+  parts.arms[0].rotation.x = -sw + w; parts.arms[1].rotation.x = sw + w;
+}
+
+// ================================================================ Oyuncu
+const pl = { x: 0, z: STAND_Z - 1.4, face: 0, moving: false, running: false, walk: 0, work: 0, group: null, parts: null };
+const DEFAULT_AVATAR = { skin: "#e0ac69", shirt: "#ffd23f", pants: "#2b2d42", hat: "cap", hatColor: "#2bb673", face: "smile" };
+function rebuildAvatar() {
+  if (pl.group) scene.remove(pl.group);
+  const b = buildAvatar((platform.profile && platform.profile.avatar) || DEFAULT_AVATAR);
+  pl.group = b.group; pl.parts = b;
+  scene.add(pl.group);
+}
+const tagCanvas = document.createElement("canvas"); tagCanvas.width = 512; tagCanvas.height = 96;
+const tagTex = new THREE.CanvasTexture(tagCanvas);
+const nameTag = new THREE.Sprite(new THREE.SpriteMaterial({ map: tagTex, transparent: true, depthWrite: false }));
+nameTag.scale.set(3, 0.56, 1); scene.add(nameTag);
+function updateNameTag() {
+  const g = tagCanvas.getContext("2d"), name = (playerName() || "Limonatacı").slice(0, 18);
+  g.clearRect(0, 0, 512, 96); g.textAlign = "center"; g.textBaseline = "middle"; g.lineWidth = 9; g.strokeStyle = "rgba(0,0,0,0.75)";
+  fitText(g, name, 480, 56); g.strokeText(name, 256, 50); g.fillStyle = "#fff"; g.fillText(name, 256, 50);
+  tagTex.needsUpdate = true;
+}
+
+// ================================================================ Limon ağaçları ve çilek fidanları
+const trees = [];
+const LEMON_DIRS = [[1, 0.15, 0.55], [-0.85, 0.3, 0.65], [0.25, -0.15, -1], [-0.6, 0.6, -0.55]].map(([a, b, c]) => { const l = Math.hypot(a, b, c); return [a / l, b / l, c / l]; });
+function addTree(x, z) {
+  if (trees.some(t => t.x === x && t.z === z)) return;
+  const g = new THREE.Group(); g.position.set(x, 0, z); scene.add(g);
+  mesh(new THREE.CylinderGeometry(0.2, 0.3, 1.8, 7), flat(0x8b5a2b), 0, 0.9, 0, g);
+  mesh(new THREE.IcosahedronGeometry(1.35, 0), flat(0x3fa34d), 0, 2.6, 0, g);
+  mesh(new THREE.IcosahedronGeometry(0.85, 0), flat(0x4cb85a), 0.45, 3.35, 0.2, g);
+  const fruits = LEMON_DIRS.map(([a, b, c]) => {
+    const f = mesh(new THREE.SphereGeometry(0.22, 8, 6), lemonMat, a * 1.3, 2.6 + b * 1.3, c * 1.3, g);
+    f.userData.s = 1; return f;
+  });
+  const t = { x, z, g, fruits, lemons: TREE_MAX, grow: rand(0, 6) };
+  trees.push(t);
+  circles.push({ x, z, r: 0.4, tag: "tree" });
+}
+function syncTrees() {
+  for (const [k, list] of Object.entries(TREE_SPOTS)) if (k === "base" || save.owned[k]) for (const [x, z] of list) addTree(x, z);
+}
+let berry = null;
+function syncBerries() {
+  if (berry || !save.owned.berry) return;
+  const g = new THREE.Group(); g.position.set(BERRY_SPOT.x, 0, BERRY_SPOT.z); scene.add(g);
+  const leaf = flat(0x2e8b3a), red = flat(0xff3355), fruits = [];
+  for (let i = 0; i < 3; i++) {
+    const bx = (i - 1) * 1.6;
+    mesh(new THREE.IcosahedronGeometry(0.55, 0), leaf, bx, 0.45, 0, g);
+    for (let k = 0; k < 2; k++) { const f = mesh(new THREE.SphereGeometry(0.13, 6, 5), red, bx + (k ? 0.35 : -0.3), 0.55 + k * 0.2, 0.45, g); f.userData.s = 1; fruits.push(f); }
+  }
+  berry = { g, fruits, n: BERRY_MAX, grow: 0 };
+  solids.push({ x1: BERRY_SPOT.x - 2.4, x2: BERRY_SPOT.x + 2.4, z1: BERRY_SPOT.z - 0.5, z2: BERRY_SPOT.z + 0.5, tag: "berry" });
+}
+function updateTrees(dt) {
+  const k = WEATHERS[save.weather].grow;
+  for (const t of trees) {
+    if (t.lemons >= TREE_MAX) { t.grow = 0; continue; }
+    t.grow += dt * k;
+    if (t.grow >= TREE_GROW) { t.grow = 0; t.lemons++; }
+  }
+  if (berry && berry.n < BERRY_MAX && (berry.grow += dt * k) >= BERRY_GROW) { berry.grow = 0; berry.n++; }
+}
+function pickTree(t) {
+  if (t.lemons <= 0) { notify("🌱 Bu ağaçta olgun limon kalmadı, biraz bekle"); return 0; }
+  const space = carryCap() - save.lemons;
+  if (space <= 0) { notify(`🧺 Sepetin dolu (${carryCap()})! Standa git, limonata yap`); SFX.bad(); return 0; }
+  const n = Math.min(t.lemons, space);
+  t.lemons -= n; save.lemons += n;
+  pl.work = 0.5; SFX.pick(); popText(`+${n} 🍋`);
+  syncCrate(); persist();
+  return n;
+}
+function pickBerries() {
+  if (!berry) return 0;
+  if (berry.n <= 0) { notify("🌱 Çilekler büyüyor, biraz bekle"); return 0; }
+  const n = Math.min(berry.n, BERRY_CAP - save.berries);
+  if (n <= 0) { notify(`🍓 En fazla ${BERRY_CAP} çilek taşıyabilirsin`); return 0; }
+  berry.n -= n; save.berries += n;
+  pl.work = 0.5; SFX.pick(); popText(`+${n} 🍓`); persist();
+  return n;
+}
+
+// ================================================================ Stand (Tezgâh → Kiosk → Kafe)
+let roofMats = [];
+let standG = null, signCanvas = null, signTex = null, menuCanvas = null, menuTex = null, squeezer = null;
+let pitchers = [], crateLemons = [], extrasG = null;
+const stripeTex = canvasTex(256, 64, (g, w, h) => {
+  for (let i = 0; i < 8; i++) { g.fillStyle = i % 2 ? "#ffffff" : "#ffd23f"; g.fillRect(i * w / 8, 0, w / 8, h); }
+});
+function drawSign() {
+  if (!signCanvas) return;
+  const g = signCanvas.getContext("2d"), w = signCanvas.width, h = signCanvas.height, name = playerName();
+  g.clearRect(0, 0, w, h);
+  g.fillStyle = "#ffd23f"; rr(g, 6, 6, w - 12, h - 12, 30); g.fill();
+  g.lineWidth = 10; g.strokeStyle = "#e08e00"; g.stroke();
+  g.textAlign = "center"; g.textBaseline = "middle"; g.fillStyle = "#3a2a00";
+  if (name) {
+    fitText(g, genitive(name.slice(0, 18)), w - 90, 54); g.fillText(genitive(name.slice(0, 18)), w / 2, h * 0.3);
+    fitText(g, "🍋 LİMONATA STANDI", w - 90, 76); g.fillText("🍋 LİMONATA STANDI", w / 2, h * 0.68);
+  } else {
+    fitText(g, "🍋 LİMONATA", w - 90, 96); g.fillText("🍋 LİMONATA", w / 2, h * 0.44);
+    fitText(g, "Taze · Soğuk · Lezzetli", w - 120, 38, 400); g.fillText("Taze · Soğuk · Lezzetli", w / 2, h * 0.8);
+  }
+  if (signTex) signTex.needsUpdate = true;
+}
+// Kara tahta menü: açık tariflerin bardak fiyatları
+function drawMenu() {
+  if (!menuCanvas) return;
+  const g = menuCanvas.getContext("2d"), w = menuCanvas.width, h = menuCanvas.height;
+  g.fillStyle = "#8d5a2b"; g.fillRect(0, 0, w, h);
+  g.fillStyle = "#24453a"; g.fillRect(14, 14, w - 28, h - 28);
+  g.fillStyle = "#fff"; g.textAlign = "center"; g.textBaseline = "middle";
+  fitText(g, "MENÜ", w - 60, 48); g.fillText("MENÜ", w / 2, 52);
+  const list = RECIPES.filter(recipeOk);
+  list.forEach((r, i) => {
+    const y = 120 + i * 62, t = `${r.icon} ${r.name}  ${cupPrice(r)} 💰`;
+    g.fillStyle = i ? "#ffe6a8" : "#fff"; fitText(g, t, w - 50, 40); g.fillText(t, w / 2, y);
+  });
+  if (save.owned.ice) { g.fillStyle = "#bfe9ff"; fitText(g, "🧊 Buz gibi!", w - 60, 30, 400); g.fillText("🧊 Buz gibi!", w / 2, h - 36); }
+  if (menuTex) menuTex.needsUpdate = true;
+}
+function buildStand() {
+  if (standG) scene.remove(standG);
+  removeSolids("stand");
+  const L = level(), W = LEVELS[L].W, SZ = STAND_Z, g = new THREE.Group();
+  standG = g; scene.add(g);
+  // Çatı parçaları: oyuncu tezgâhın arkasındayken yarı saydam olur (kuyruk görünsün)
+  roofMats = [];
+  const roof = m => { m.material.transparent = true; roofMats.push(m.material); return m; };
+  const wood = flat(0xc68a4c);
+  // Tezgâh gövdesi, çizgili ön panel, tezgâh üstü
+  boxM(W, 1.05, 0.9, wood, 0, 0.525, SZ, g);
+  mesh(new THREE.PlaneGeometry(W - 0.2, 0.78), new THREE.MeshLambertMaterial({ map: stripeTex }), 0, 0.55, SZ + 0.455, g, false);
+  boxM(W + 0.25, 0.08, 1.15, flat(0xfff3c4), 0, 1.09, SZ, g);
+  solids.push({ x1: -W / 2, x2: W / 2, z1: SZ - 0.45, z2: SZ + 0.45, tag: "stand" });
+  const poleMat = flat(L === 2 ? 0x2a9d8f : 0xffffff), backZ = SZ - 1.9;
+  for (const sx of [-1, 1]) {
+    boxM(0.14, 2.8, 0.14, poleMat, sx * (W / 2 - 0.07), 1.4, SZ + 0.38, g);
+    boxM(0.14, 3.1, 0.14, poleMat, sx * (W / 2 - 0.07), 1.55, backZ, g);
+    circles.push({ x: sx * (W / 2 - 0.07), z: backZ, r: 0.12, tag: "stand" });
+  }
+  let signY = 3.45;
+  if (L === 0) { // çizgili tente
+    const aw = roof(mesh(new THREE.BoxGeometry(W + 0.5, 0.08, 2.9), new THREE.MeshLambertMaterial({ map: stripeTex }), 0, 2.95, SZ - 0.6, g));
+    aw.rotation.x = 0.16;
+  } else { // kiosk / kafe: renkli çatı ve yan duvarlar
+    const roofCol = L === 2 ? 0x2a9d8f : 0xff7aa2;
+    roof(boxM(W + 0.9, 0.3, 3.4, flat(roofCol), 0, 3.15, SZ - 0.75, g));
+    roof(mesh(new THREE.PlaneGeometry(W + 0.9, 0.3), new THREE.MeshLambertMaterial({ map: stripeTex }), 0, 2.85, SZ + 0.96, g, false));
+    for (let i = 0; i < Math.round(W * 1.6); i++) { // tente saçağı
+      const fx = -W / 2 - 0.3 + i * (W + 0.6) / (Math.round(W * 1.6) - 1);
+      roof(mesh(new THREE.ConeGeometry(0.16, 0.3, 4), flat(i % 2 ? 0xffffff : 0xffd23f), fx, 2.62, SZ + 0.96, g)).rotation.x = Math.PI;
+    }
+    for (const sx of [-1, 1]) {
+      boxM(0.12, 2.0, 2.2, flat(L === 2 ? 0xf1faee : 0xfff3c4), sx * (W / 2 + 0.06), 1.0, SZ - 0.75, g);
+      solids.push({ x1: sx * (W / 2 + 0.06) - 0.06, x2: sx * (W / 2 + 0.06) + 0.06, z1: SZ - 1.85, z2: SZ + 0.35, tag: "stand" });
+    }
+    signY = 3.75;
+    if (L === 2) { // kafe
+      // masalar ve şemsiyeler (kuyruğun iki yanında)
+      for (const sx of [-1, 1]) {
+        const tx = sx * (W / 2 + 2.3), tz = SZ + 3.4;
+        mesh(new THREE.CylinderGeometry(0.75, 0.75, 0.08, 16), flat(0xffffff), tx, 0.8, tz, g);
+        mesh(new THREE.CylinderGeometry(0.06, 0.06, 2.5, 6), flat(0x555555), tx, 1.25, tz, g);
+        mesh(new THREE.ConeGeometry(1.5, 0.6, 8), flat(sx < 0 ? 0xff5d8f : 0xffd23f), tx, 2.6, tz, g);
+        for (const ox of [-1.1, 1.1]) mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.5, 10), flat(0x2a9d8f), tx + ox, 0.25, tz, g);
+        circles.push({ x: tx, z: tz, r: 1.5, tag: "stand" });
+      }
+    }
+  }
+  // Tabela (oyuncunun adı)
+  if (!signCanvas) { signCanvas = document.createElement("canvas"); signCanvas.width = 1024; signCanvas.height = 256; signTex = new THREE.CanvasTexture(signCanvas); signTex.anisotropy = 4; }
+  const sw = Math.min(W + (L ? 0.6 : 0.3), 4.2);
+  twoSided(sw, sw / 4, signTex, 0, signY + sw / 8 - 0.05, SZ + (L ? 0.98 : 0.42), g);
+  drawSign();
+  if (L === 2) { // kafe: tabelanın üstünde kocaman limon
+    const ly = signY + sw / 4 + 0.55, lz = SZ + 0.98;
+    mesh(new THREE.SphereGeometry(0.42, 12, 10), lemonMat, 0, ly, lz, g).scale.set(1.35, 1, 1);
+    mesh(new THREE.ConeGeometry(0.1, 0.25, 6), lemonMat, 0.66, ly, lz, g).rotation.z = -Math.PI / 2;
+    mesh(new THREE.ConeGeometry(0.1, 0.25, 6), lemonMat, -0.66, ly, lz, g).rotation.z = Math.PI / 2;
+    mesh(new THREE.IcosahedronGeometry(0.2, 0), flat(0x3ddc84), 0.25, ly + 0.42, lz, g).scale.set(1.6, 0.6, 0.8);
+  }
+  // Sıkacak (tezgâhın sol ucunda)
+  const sqX = -W / 2 + 0.5, sq = new THREE.Group(); sq.position.set(sqX, 1.13, SZ - 0.1); g.add(sq);
+  mesh(new THREE.CylinderGeometry(0.26, 0.3, 0.14, 12), flat(0xd9d9d9), 0, 0.07, 0, sq);
+  const cone = mesh(new THREE.ConeGeometry(0.18, 0.3, 8), flat(0xfff59d), 0, 0.29, 0, sq);
+  mesh(new THREE.BoxGeometry(0.06, 0.5, 0.06), flat(0x888888), 0.28, 0.3, 0, sq);
+  squeezer = { x: sqX, z: SZ - 1.25, cone, spin: 0 };
+  // Limon kasası (sepetteki limonlar burada görünür)
+  const crate = new THREE.Group(); crate.position.set(sqX + 0.1, 0, SZ - 1.0); g.add(crate);
+  boxM(0.9, 0.32, 0.55, flat(0xa0703c), 0, 0.16, 0, crate);
+  crateLemons = [];
+  for (let i = 0; i < 10; i++) crateLemons.push(mesh(new THREE.SphereGeometry(0.11, 7, 5), lemonMat, -0.32 + (i % 5) * 0.16, 0.38 + Math.floor(i / 5) * 0.12, (Math.floor(i / 5) ? 0.05 : -0.08), crate));
+  syncCrate();
+  // Sürahiler (stoktaki limonata) ve bardak kulesi
+  pitchers = [];
+  const slots = Math.max(2, Math.min(5, Math.floor((W - 1.6) / 0.45)));
+  for (let i = 0; i < slots; i++) {
+    const p = new THREE.Group(); p.position.set(sqX + 0.75 + i * 0.45, 1.13, SZ + 0.05); g.add(p);
+    mesh(new THREE.CylinderGeometry(0.15, 0.14, 0.46, 12), lambert(0xe8f8ff, { transparent: true, opacity: 0.38 }), 0, 0.23, 0, p, false);
+    p.userData.liquid = mesh(new THREE.CylinderGeometry(0.125, 0.12, 0.32, 12), lambert(0xfff176), 0, 0.17, 0, p, false);
+    pitchers.push(p);
+  }
+  for (let i = 0; i < 4; i++) mesh(new THREE.CylinderGeometry(0.09, 0.07, 0.2, 10), flat(i % 2 ? 0xff5d8f : 0xffffff), W / 2 - 0.35, 1.23 + i * 0.12, SZ + 0.1, g, false);
+  syncPitchers();
+  // Menü tahtası (tezgâhın sağ önünde, şövale üstünde)
+  if (!menuCanvas) { menuCanvas = document.createElement("canvas"); menuCanvas.width = 384; menuCanvas.height = 384; menuTex = new THREE.CanvasTexture(menuCanvas); }
+  const mx = W / 2 + 0.75, mz = SZ + 1.1;
+  for (const sx of [-0.4, 0.4]) boxM(0.08, 1.7, 0.08, flat(0x7f5539), mx + sx, 0.85, mz, g);
+  twoSided(1.15, 1.15, menuTex, mx, 1.15, mz, g);
+  circles.push({ x: mx, z: mz, r: 0.5, tag: "stand" });
+  drawMenu();
+  syncExtras();
+}
+// Yükseltmelerin standdaki görünümü: buz makinesi, nane saksısı, balonlar + yol tabelası
+function syncExtras() {
+  if (extrasG) scene.remove(extrasG);
+  removeSolids("extra");
+  const g = new THREE.Group(); extrasG = g; scene.add(g);
+  const W = LEVELS[level()].W, SZ = STAND_Z;
+  if (save.owned.ice) {
+    const ix = -W / 2 - 0.65, iz = SZ - 0.9;
+    boxM(0.8, 1.25, 0.8, flat(0xe0f4ff), ix, 0.625, iz, g);
+    boxM(0.6, 0.35, 0.05, flat(0x4fc3f7), ix, 0.95, iz + 0.41, g);
+    for (let i = 0; i < 4; i++) boxM(0.16, 0.16, 0.16, lambert(0xbfefff, { transparent: true, opacity: 0.8 }), ix - 0.2 + (i % 2) * 0.35, 1.33 + Math.floor(i / 2) * 0.12, iz + (i > 1 ? 0.1 : -0.1), g);
+    solids.push({ x1: ix - 0.4, x2: ix + 0.4, z1: iz - 0.4, z2: iz + 0.4, tag: "extra" });
+  }
+  if (save.owned.mint) {
+    const px = -W / 2 - 0.6, pz = SZ + 0.55;
+    mesh(new THREE.CylinderGeometry(0.3, 0.22, 0.45, 10), flat(0xd2691e), px, 0.225, pz, g);
+    for (let i = 0; i < 6; i++) { const a = i * 1.05; mesh(new THREE.ConeGeometry(0.1, 0.4, 4), flat(0x3ddc84), px + Math.cos(a) * 0.14, 0.62, pz + Math.sin(a) * 0.14, g).rotation.set(Math.sin(a) * 0.5, 0, Math.cos(a) * 0.5); }
+    circles.push({ x: px, z: pz, r: 0.3, tag: "extra" });
+  }
+  if (save.owned.sign) {
+    const sx = -4.6, sz = 13.1;
+    mesh(new THREE.CylinderGeometry(0.09, 0.09, 3.6, 6), flat(0x555555), sx, 1.8, sz, g);
+    const t = canvasTex(512, 256, (c, w, h) => {
+      c.fillStyle = "#ff5d8f"; rr(c, 6, 6, w - 12, h - 12, 30); c.fill(); c.lineWidth = 10; c.strokeStyle = "#fff"; c.stroke();
+      c.fillStyle = "#fff"; c.textAlign = "center"; c.textBaseline = "middle";
+      fitText(c, "🍋 LİMONATA", w - 60, 72); c.fillText("🍋 LİMONATA", w / 2, h * 0.38);
+      fitText(c, "Taze limonata burada! ➜", w - 60, 36); c.fillText("Taze limonata burada! ➜", w / 2, h * 0.74);
+    });
+    twoSided(2.4, 1.2, t, sx, 3.2, sz, g);
+    circles.push({ x: sx, z: sz, r: 0.2, tag: "extra" });
+    const bcols = [0xff5d8f, 0x4fc3f7, 0xffd23f, 0x9b5de5];
+    [[-W / 2 - 0.1, 0], [W / 2 + 0.1, 1]].forEach(([bx, k]) => {
+      for (let i = 0; i < 2; i++) {
+        const b = mesh(new THREE.SphereGeometry(0.28, 10, 8), lambert(bcols[k * 2 + i]), bx + (i ? 0.25 : -0.15) * Math.sign(bx), 3.6 + i * 0.35, SZ + 0.4, g, false);
+        b.scale.y = 1.2; b.userData.balloon = Math.random() * 6;
+      }
+    });
+  }
+}
+function syncCrate() { const n = Math.min(10, Math.ceil(save.lemons * 10 / carryCap())); crateLemons.forEach((m, i) => { m.visible = i < n; }); }
+function syncPitchers() {
+  const ps = pitcherSize(), cols = [];
+  for (let i = RECIPES.length - 1; i >= 0; i--) { const r = RECIPES[i]; for (let k = Math.ceil((save.cups[r.id] || 0) / ps); k > 0; k--) cols.push(r.color); }
+  pitchers.forEach((p, i) => { p.visible = i < cols.length; if (i < cols.length) p.userData.liquid.material.color.setHex(cols[i]); });
+}
+
+// ================================================================ Yardımcı Garson (Robux) ve Limon Toplayıcı robot
+let waiter = null, robot = null;
+function spawnWaiter() {
+  if (waiter) return;
+  const b = buildAvatar({ skin: "#f1c27d", shirt: "#f4f4f4", pants: "#2b2d42", hat: "cap", hatColor: "#ff5d8f", face: "grin" });
+  scene.add(b.group);
+  const c = document.createElement("canvas"); c.width = 512; c.height = 96;
+  const g = c.getContext("2d"); g.textAlign = "center"; g.textBaseline = "middle"; g.lineWidth = 9; g.strokeStyle = "rgba(0,0,0,0.75)";
+  fitText(g, "🧑‍🍳 Garson", 480, 52); g.strokeText("🧑‍🍳 Garson", 256, 50); g.fillStyle = "#ffd23f"; g.fillText("🧑‍🍳 Garson", 256, 50);
+  const tag = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false }));
+  tag.scale.set(2.4, 0.45, 1); scene.add(tag);
+  waiter = { b, tag, t: 1.5, work: 0 };
+}
+function updateWaiter(dt) {
+  if (!waiter) return;
+  waiter.work = Math.max(0, waiter.work - dt);
+  if ((waiter.t -= dt) > 0) return;
+  waiter.t = 1.6;
+  if (frontReady() && bestRecipe() && sellFront("waiter")) waiter.work = 0.6;
+}
+function spawnRobot() {
+  if (robot || !save.owned.picker) return;
+  const g = new THREE.Group(); scene.add(g);
+  boxM(0.7, 0.6, 0.6, flat(0x90a4ae), 0, 0.55, 0, g);
+  boxM(0.5, 0.4, 0.45, flat(0xcfd8dc), 0, 1.05, 0, g);
+  for (const sx of [-0.12, 0.12]) mesh(new THREE.SphereGeometry(0.06, 6, 5), lambert(0x00e5ff, { emissive: 0x007080 }), sx, 1.1, 0.23, g, false);
+  mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.3, 4), flat(0x555555), 0, 1.4, 0, g);
+  mesh(new THREE.SphereGeometry(0.07, 6, 5), lambert(0xff5d8f, { emissive: 0x551122 }), 0, 1.57, 0, g, false);
+  for (const sx of [-0.3, 0.3]) mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.12, 10), flat(0x37474f), sx, 0.18, 0, g).rotation.z = Math.PI / 2;
+  boxM(0.55, 0.22, 0.4, flat(0xa0703c), 0, 0.95, -0.42, g); // sırt sepeti
+  robot = { g, x: -7.5, z: -5.5, face: 0, target: null, cool: 0 };
+}
+function updateRobot(dt) {
+  if (!robot) return;
+  if (!robot.target || robot.target.lemons <= 0) {
+    robot.target = null; let bd = 1e9;
+    for (const t of trees) if (t.lemons > 0) { const d = dist(robot.x, robot.z, t.x, t.z); if (d < bd) { bd = d; robot.target = t; } }
+  }
+  const full = save.lemons >= carryCap();
+  const tx = robot.target ? robot.target.x + 1.2 : -7.5, tz = robot.target ? robot.target.z + 1.4 : -5.5;
+  const d = dist(robot.x, robot.z, tx, tz);
+  robot.moving = false;
+  if (d > 0.1 && !full) {
+    const st = Math.min(d, 3 * dt);
+    robot.x += (tx - robot.x) / d * st; robot.z += (tz - robot.z) / d * st;
+    robot.face = Math.atan2(tx - robot.x, tz - robot.z); robot.moving = true;
+  } else if (robot.target && !full && (robot.cool -= dt) <= 0) {
+    robot.cool = 2.2;
+    const t = robot.target;
+    t.lemons--; save.lemons++;
+    const f = t.fruits[t.lemons], wp = new THREE.Vector3(); f.getWorldPosition(wp);
+    flyLemon(wp, new THREE.Vector3(-LEVELS[level()].W / 2 + 0.6, 0.5, STAND_Z - 1.0));
+    syncCrate();
+  }
+}
+const flyers = [];
+function flyLemon(from, to) {
+  const m = mesh(new THREE.SphereGeometry(0.2, 8, 6), lemonMat, from.x, from.y, from.z, scene, false);
+  flyers.push({ m, from, to, t: 0 });
+}
+function updateFlyers(dt) {
+  for (let i = flyers.length - 1; i >= 0; i--) {
+    const f = flyers[i]; f.t += dt / 1.1;
+    const k = Math.min(1, f.t);
+    f.m.position.lerpVectors(f.from, f.to, k); f.m.position.y += Math.sin(k * Math.PI) * 5;
+    if (f.t >= 1) { scene.remove(f.m); f.m.geometry.dispose(); flyers.splice(i, 1); }
+  }
+}
+
+// ================================================================ Ekonomi
+const today = { sold: 0, earned: 0, happy: 0, angry: 0, streak: 0, cheapTip: false };
+let tipCool = 0;
+function addMoney(n) {
+  if (save.passes.double) n *= 2;
+  save.money += n; save.totalEarned += n; today.earned += n;
+  flashMoney(n); popText(`+${fmt(n)} 💰`);
+  persist();
+  return n;
+}
+function spend(n) {
+  if (save.money < n) { notify(`💸 Yeterli paran yok (💰 ${fmt(n)} gerekli)`); SFX.bad(); return false; }
+  save.money -= n; flashMoney(-n); persist(true); return true;
+}
+function changePrice(d) {
+  const p = clamp(save.price + d, 1, 999);
+  if (p === save.price) return;
+  save.price = p; drawMenu(); SFX.click(); persist();
+}
+function makePitcher(rid) {
+  const r = REC[rid];
+  if (!r || !recipeOk(r)) { notify("Bu tarif henüz açılmadı (🛠️ Yükseltmeler)"); return false; }
+  if (save.lemons < LEMONS_PER_PITCHER) { notify(`🍋 Limonata için ${LEMONS_PER_PITCHER} limon gerekli (sende ${save.lemons}). Bahçeden topla!`); SFX.bad(); return false; }
+  if (r.berries && save.berries < r.berries) { notify(`🍓 Çilekli için ${r.berries} çilek gerekli (sende ${save.berries}). Çilek fidanından topla!`); SFX.bad(); return false; }
+  save.lemons -= LEMONS_PER_PITCHER;
+  if (r.berries) save.berries -= r.berries;
+  save.cups[r.id] = (save.cups[r.id] || 0) + pitcherSize();
+  if (squeezer) squeezer.spin = 0.7;
+  pl.work = 0.7; SFX.squeeze();
+  notify(`🧃 ${r.icon} ${r.name} limonata hazır: +${pitcherSize()} bardak`);
+  syncCrate(); syncPitchers(); persist();
+  return true;
+}
+function openSqueezer() {
+  const avail = RECIPES.filter(recipeOk);
+  if (avail.length === 1) { makePitcher("klasik"); return; }
+  $("recInfo").textContent = `Sepetinde: 🍋 ${save.lemons} limon` + (save.owned.berry ? ` · 🍓 ${save.berries} çilek` : "") + ` · 1 sürahi = ${pitcherSize()} bardak`;
+  $("recList").innerHTML = avail.map((r, i) => {
+    const can = save.lemons >= LEMONS_PER_PITCHER && (!r.berries || save.berries >= r.berries);
+    const need = `${LEMONS_PER_PITCHER} 🍋` + (r.berries ? ` + ${r.berries} 🍓` : "");
+    return `<button class="btn ${can ? "lemon" : ""}" data-rec="${r.id}" ${can ? "" : "disabled"}>${r.icon} ${r.name}<small>${need} · bardağı ${cupPrice(r)} 💰 · (${i + 1})</small></button>`;
+  }).join("");
+  show("ovRecipe");
+}
+$("recList").addEventListener("click", e => {
+  const b = e.target.closest("[data-rec]");
+  if (!b) return;
+  hide("ovRecipe"); makePitcher(b.dataset.rec);
+});
+
+// ================================================================ Müşteriler (Roblox: CustomerService)
+const customers = [], queue = [];
+const qSpot = i => ({ x: 0, z: STAND_Z + 1.55 + i * 1.25 });
+function makeBubble() {
+  const c = document.createElement("canvas"); c.width = 384; c.height = 96;
+  const tex = new THREE.CanvasTexture(c);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
+  sp.scale.set(2.6, 0.65, 1); sp.position.y = 2.75; sp.visible = false;
+  return { sp, c, tex, text: null };
+}
+function setBubble(c, text) {
+  const b = c.bubble;
+  if (b.text === text) return;
+  b.text = text; b.sp.visible = !!text;
+  if (!text) return;
+  const g = b.c.getContext("2d"); g.clearRect(0, 0, 384, 96);
+  fitText(g, text, 340, 40);
+  const w = Math.min(372, g.measureText(text).width + 36);
+  g.fillStyle = "#fff"; rr(g, 192 - w / 2, 8, w, 80, 24); g.fill();
+  g.lineWidth = 4; g.strokeStyle = "rgba(0,0,0,0.25)"; g.stroke();
+  g.fillStyle = "#222"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(text, 192, 50);
+  b.tex.needsUpdate = true;
+}
+function spawnCustomer() {
+  const side = Math.random() < 0.5 ? -1 : 1;
+  const a = { skin: pick(SKINS), shirt: pick(SHIRTS), pants: pick(PANTS), hat: Math.random() < 0.45 ? pick(["cap", "headphones"]) : "none", hatColor: pick(SHIRTS), face: pick(FACES) };
+  const b = buildAvatar(a);
+  const c = { g: b.group, parts: b, x: side * 34, z: 16.6 + rand(-0.6, 0.6), face: -side * Math.PI / 2, walk: 0, moving: false, state: "come", path: [], wait: 0,
+    max: payBase() * rand(0.8, 1.2), judged: false, bubble: makeBubble(), speed: rand(3, 3.8), life: 0 };
+  c.g.add(c.bubble.sp);
+  scene.add(c.g);
+  customers.push(c); queue.push(c);
+  relayout();
+  return c;
+}
+function relayout() {
+  queue.forEach((c, i) => {
+    const s = qSpot(i);
+    c.path = Math.abs(c.x - s.x) > 0.4 ? [{ x: s.x, z: 15.4 }, s] : [s];
+  });
+}
+const frontReady = () => { const c = queue[0]; return c && c.state === "come" && !c.path.length ? c : null; };
+const priceOk = (c, r) => cupPrice(r) <= c.max * r.mult;
+function leave(c, text) {
+  if (c.state === "leave") return;
+  c.state = "leave"; c.life = 3;
+  const i = queue.indexOf(c); if (i >= 0) queue.splice(i, 1);
+  relayout();
+  setBubble(c, text);
+  const side = c.x > 0.2 ? 1 : c.x < -0.2 ? -1 : (Math.random() < 0.5 ? -1 : 1);
+  const ox = c.x + side * 1.3;
+  c.path = [{ x: ox, z: c.z }, { x: ox, z: 15.6 }, { x: side * 36, z: 16 + rand(-0.6, 0.6) }];
+}
+function angry(c, text) {
+  if (c.state === "leave") return;
+  today.angry++;
+  leave(c, text);
+}
+function tooExpensive() {
+  today.streak++;
+  if (today.streak >= 2 && now > tipCool) { tipCool = now + 20; today.streak = 0; notify("💡 Müşteriler fiyatı pahalı buldu. Fiyatı düşür (−)"); }
+}
+function sellFront(by) {
+  const c = frontReady(), r = bestRecipe(), me = by === "player";
+  if (!c) { if (me) notify("🥤 Tezgâhta bekleyen müşteri yok"); return false; }
+  if (!r) { if (me) { notify("🧃 Satacak limonata yok. Önce sıkacakta limonata yap"); SFX.bad(); } return false; }
+  if (!priceOk(c, r)) { angry(c, "😠 Çok pahalı!"); tooExpensive(); SFX.bad(); return false; }
+  const price = cupPrice(r), ratio = price / (c.max * r.mult);
+  save.cups[r.id]--;
+  save.totalCups++;
+  today.sold++; today.happy++; today.streak = 0;
+  addMoney(price);
+  leave(c, ratio < 0.55 ? "😍 Çok ucuz!" : ratio < 0.85 ? `😊 ${r.icon} Çok lezzetli!` : "🙂 Biraz pahalı ama olur");
+  if (ratio < 0.55 && !today.cheapTip) { today.cheapTip = true; notify("💡 Çok ucuz satıyorsun, fiyatı artırabilirsin (+)"); }
+  if (me) pl.work = 0.4;
+  SFX.cash(); syncPitchers();
+  return true;
+}
+function removeCustomer(c) {
+  scene.remove(c.g);
+  c.bubble.tex.dispose(); c.bubble.sp.material.dispose();
+  const i = customers.indexOf(c); if (i >= 0) customers.splice(i, 1);
+  const q = queue.indexOf(c); if (q >= 0) queue.splice(q, 1);
+}
+function updateCustomers(dt) {
+  for (const c of [...customers]) {
+    const t = c.path[0];
+    c.moving = false;
+    if (t) {
+      const dx = t.x - c.x, dz = t.z - c.z, d = Math.hypot(dx, dz), st = c.speed * dt;
+      if (d <= st) { c.x = t.x; c.z = t.z; c.path.shift(); }
+      else { c.x += dx / d * st; c.z += dz / d * st; c.face = Math.atan2(dx, dz); c.moving = true; }
+      c.walk += dt * 9;
+    }
+    if (c.state === "come") {
+      c.wait += dt;
+      if (!c.path.length) c.face = Math.PI; // sırada tezgâha (−z) bak
+      if (queue[0] === c && !c.path.length) {
+        const r = bestRecipe();
+        if (r && !c.judged) {
+          c.judged = true;
+          if (!priceOk(c, r)) { angry(c, "😠 Çok pahalı!"); tooExpensive(); continue; }
+        }
+        setBubble(c, r ? "🍋 Bir bardak lütfen!" : "🍋 Limonata var mı?");
+      }
+      if (c.wait > PATIENCE) angry(c, bestRecipe() ? "😠 Çok bekledim!" : "😠 Limonata yok!");
+    } else {
+      if ((c.life -= dt) <= 0) setBubble(c, "");
+      if (!c.path.length) removeCustomer(c);
+    }
+  }
+}
+
+// ================================================================ Günler (sonsuz, her gün DAY_LENGTH sn)
+let dayTime = DAY_LENGTH, spawnT = 2;
+function updateDay(dt) {
+  dayTime -= dt;
+  if ((spawnT -= dt) <= 0) {
+    spawnT = spawnEvery() * rand(0.75, 1.25);
+    if (dayTime > LAST_ORDER && queue.length < queueCap()) spawnCustomer();
+  }
+  if (dayTime <= 0) endDay();
+}
+function endDay() {
+  dayTime = 0;
+  for (const c of [...queue]) leave(c, "👋 Yarın gelirim!");
+  const served = today.happy + today.angry;
+  const next = WEATHERS[save.nextWeather];
+  $("sumTitle").textContent = `🌙 Gün ${save.day} bitti!`;
+  const rows = [
+    ["🥤 Satılan bardak", fmt(today.sold)], ["💰 Kazanç", "💰 " + fmt(today.earned)],
+    ["😊 Mutlu müşteri", fmt(today.happy)], ["😠 Kızgın müşteri", fmt(today.angry)],
+    ["⭐ Memnuniyet", served ? "%" + Math.round(today.happy / served * 100) : "—"],
+    ["🏦 Toplam para", "💰 " + fmt(save.money)], ["🌤️ Yarının havası", `${next.icon} ${next.name}`],
+  ];
+  $("sumTable").innerHTML = rows.map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join("");
+  $("sumTip").textContent = "Yarın: " + next.tip;
+  save.day += 1;
+  save.weather = save.nextWeather;
+  save.nextWeather = rollWeather();
+  $("btnNextDay").textContent = `☀️ Sonraki gün başlasın (Gün ${save.day})`;
+  persist(true);
+  show("ovSum");
+}
+function startDay() {
+  for (const c of [...customers]) removeCustomer(c);
+  Object.assign(today, { sold: 0, earned: 0, happy: 0, angry: 0, streak: 0, cheapTip: false });
+  dayTime = DAY_LENGTH; spawnT = 2;
+  applyWeather();
+  hide("ovSum");
+  const w = WEATHERS[save.weather];
+  notify(`${w.icon} Gün ${save.day}: ${w.name}. ${w.tip}`);
+  SFX.day();
+}
+// Hava: gökyüzü, ışık, yağmur
+let rain = null;
+function applyWeather() {
+  const w = WEATHERS[save.weather];
+  scene.background.setHex(w.sky); scene.fog.color.setHex(w.sky);
+  scene.fog.near = w.fog[0]; scene.fog.far = w.fog[1];
+  sun.intensity = w.sun; hemi.intensity = w.hemi;
+  for (const c of clouds) c.children.forEach(m => m.material.color.setHex(save.weather === "yagmur" ? 0x9aa3ad : 0xffffff));
+  if (!rain) {
+    const N = 1400, pos = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++) { pos[i * 3] = rand(-25, 25); pos[i * 3 + 1] = rand(0, 22); pos[i * 3 + 2] = rand(-25, 25); }
+    const geo = new THREE.BufferGeometry(); geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    rain = new THREE.Points(geo, new THREE.PointsMaterial({ color: 0xcfe3ff, size: 0.12, transparent: true, opacity: 0.75 }));
+    scene.add(rain);
+  }
+  rain.visible = save.weather === "yagmur";
+}
+
+// ================================================================ Yükseltmeler (Roblox: UpgradeService)
+function grantUpgrade(u) {
+  save.owned[u.id] = true;
+  if (u.id === "tree2" || u.id === "tree3") syncTrees();
+  else if (u.id === "kiosk" || u.id === "cafe") buildStand();
+  else if (u.id === "berry") { syncBerries(); syncExtras(); }
+  else if (u.id === "picker") spawnRobot();
+  else syncExtras();
+  syncCrate(); syncPitchers(); drawMenu();
+  persist(true);
+}
+function buyUpgrade(id) {
+  const u = UP[id];
+  if (!u || save.owned[id]) return false;
+  if (u.requires && !save.owned[u.requires]) { notify(`🔒 Önce ${UP[u.requires].name} gerekli`); return false; }
+  if (!spend(u.price)) return false;
+  grantUpgrade(u);
+  SFX.good(); notify(`${u.icon} ${u.name} alındı!`);
+  return true;
+}
+const row = (icon, title, desc, right) => `<div class="rec"><div class="ic">${icon}</div><div><b>${title}</b><div class="muted">${desc}</div></div>${right}</div>`;
+function renderUpgrades() {
+  $("upMoney").textContent = `Paran: 💰 ${fmt(save.money)} · Stand: ${LEVELS[level()].name}`;
+  $("upList").innerHTML = UPGRADES.map(u => {
+    const own = save.owned[u.id], lock = u.requires && !save.owned[u.requires];
+    const right = own ? `<button class="btn" disabled>✓ Alındı</button>`
+      : lock ? `<button class="btn" disabled>🔒 Önce ${UP[u.requires].name}</button>`
+      : `<button class="btn ${save.money >= u.price ? "go" : ""}" data-up="${u.id}">💰 ${fmt(u.price)}</button>`;
+    return row(u.icon, u.name, u.desc, right);
+  }).join("");
+}
+$("upList").addEventListener("click", e => {
+  const b = e.target.closest("[data-up]");
+  if (b && buyUpgrade(b.dataset.up)) renderUpgrades();
+});
+
+// ================================================================ Robux mağazası
+function applyPass(id) { if (id === "waiter") spawnWaiter(); }
+function renderShop() {
+  const j = platform.profile ? platform.profile.jeton : null;
+  $("shopJeton").textContent = j === null || j === undefined ? "" : `Bakiyen: R$ ${j}`;
+  $("passList").innerHTML = PASSES.map(p => {
+    const owned = !p.consumable && save.passes[p.id];
+    return row(p.icon, p.name, p.desc, `<button class="btn lemon" data-pass="${p.id}" ${owned ? "disabled" : ""}>${owned ? "✓ Sende" : "R$ " + p.jeton}</button>`);
+  }).join("");
+  $("shopNote").textContent = platform.inside
+    ? "Robux, Küp Evreni'nin ortak parası. Günlük ödül, oyun süresi ve rozetlerle kazanılır."
+    : "⚠️ Robux ile almak için oyunu Küp Evreni'nden aç (ana klasördeki index.html).";
+}
+$("passList").addEventListener("click", e => {
+  const b = e.target.closest("[data-pass]");
+  if (!b) return;
+  const p = PASSES.find(x => x.id === b.dataset.pass);
+  if (!p || (!p.consumable && save.passes[p.id])) return;
+  requestPurchase(p, ok => {
+    if (!ok) { notify("Satın alma iptal edildi"); return; }
+    if (p.id === "cash1000") { save.money += 1000; flashMoney(1000); }
+    else { save.passes[p.id] = true; applyPass(p.id); }
+    persist(true); SFX.good();
+    notify(`${p.icon} ${p.name} alındı!`);
+    renderShop();
+  });
+});
+
+// ================================================================ Etkileşim (E)
+let nearAct = null;
+function nearestAction() {
+  const L = [];
+  const add = (x, z, r, text, fn) => L.push({ x, z, r, text, fn });
+  for (const t of trees) add(t.x, t.z, 2.0, t.lemons ? `🍋 Limon topla (${t.lemons})` : "🌱 Limonlar büyüyor…", () => pickTree(t));
+  if (berry) add(BERRY_SPOT.x, BERRY_SPOT.z + 0.8, 2.6, berry.n ? `🍓 Çilek topla (${berry.n})` : "🌱 Çilekler büyüyor…", pickBerries);
+  if (squeezer) add(squeezer.x, squeezer.z, 1.3, save.lemons >= LEMONS_PER_PITCHER ? "🧃 Limonata yap" : `🧃 Sıkacak (${LEMONS_PER_PITCHER} 🍋 gerekli)`, openSqueezer);
+  const fr = frontReady(), r = bestRecipe();
+  add(0.3, STAND_Z - 1.25, 1.4, fr && r ? `🥤 Sat (${cupPrice(r)} 💰)` : fr ? "🥤 Limonata bitti!" : "🥤 Tezgâh: müşteri bekleniyor…", () => sellFront("player"));
+  add(BOARD.x, BOARD.z - 1, 2.0, "🛠️ Yükseltmeler", openUpgrades);
+  add(BOARD.x, BOARD.z + 1, 2.0, "🛠️ Yükseltmeler", openUpgrades);
+  let best = null, bd = 1e9;
+  for (const a of L) { const d = dist(pl.x, pl.z, a.x, a.z); if (d < a.r && d < bd) { bd = d; best = a; } }
+  return best;
+}
+function interact() { if (nearAct && nearAct.fn) { initAudio(); nearAct.fn(); } }
+
+// ================================================================ Arayüz
+const OVERLAYS = ["ovHelp", "ovUp", "ovShop", "ovRecipe", "ovSum"];
+const isShown = id => $(id).classList.contains("show");
+const anyOverlay = () => OVERLAYS.some(isShown);
+function show(id) { $(id).classList.add("show"); keys.clear(); }
+function hide(id) {
+  $(id).classList.remove("show");
+  if (id === "ovHelp" && !save.helpSeen) { save.helpSeen = true; persist(true); }
+}
+document.querySelectorAll(".overlay").forEach(o => o.addEventListener("click", e => { if (e.target.closest("[data-close]")) { SFX.click(); hide(o.id); } }));
+function openUpgrades() { renderUpgrades(); show("ovUp"); }
+function openShop() { renderShop(); show("ovShop"); }
+function rerenderOpen() { if (isShown("ovShop")) renderShop(); if (isShown("ovUp")) renderUpgrades(); }
+let moneyFlashT = 0;
+function flashMoney(n) {
+  const el = $("moneyAdd");
+  el.textContent = (n > 0 ? " +" : " −") + fmt(Math.abs(n)); el.style.color = n > 0 ? "var(--ok)" : "var(--bad)";
+  moneyFlashT = 1.8;
+}
+function popText(t) {
+  const el = document.createElement("div");
+  el.className = "pop"; el.textContent = t;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 1200);
+}
+function hintText() {
+  const cups = totalCups(), fr = frontReady();
+  if (dayTime <= LAST_ORDER && dayTime > 0) return "🌇 Kapanış yaklaşıyor: yeni müşteri gelmez";
+  if (cups > 0 && fr) return "🥤 Müşteri bekliyor! Tezgâha geç, E ile sat";
+  if (save.lemons >= LEMONS_PER_PITCHER && cups < pitcherSize()) return "🧃 Standdaki sıkacağa git, E ile limonata yap";
+  if (cups === 0) return "🍋 Bahçedeki ağaçlardan limon topla (E)";
+  return "🥤 Müşterileri bekle · 🛠️ Para biriktirip yükseltme al";
+}
+let touchUI = matchMedia("(pointer: coarse)").matches;
+function updateHud(dt) {
+  setText($("money").firstChild, "💰 " + fmt(save.money));
+  if (moneyFlashT > 0 && (moneyFlashT -= dt) <= 0) $("moneyAdd").textContent = "";
+  setText($("inv"), `🍋 ${save.lemons}/${carryCap()}` + (save.owned.berry ? ` · 🍓 ${save.berries}` : "") + ` · 🥤 ${totalCups()} bardak`);
+  setText($("priceTxt"), save.price + " 💰");
+  const w = WEATHERS[save.weather], t = Math.max(0, Math.ceil(dayTime));
+  setText($("dayTxt"), `${w.icon} ${w.name} · Gün ${save.day} · ${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}` + (t <= LAST_ORDER ? " · Kapanış!" : ""));
+  $("dayTxt").classList.toggle("late", t <= LAST_ORDER);
+  const served = today.happy + today.angry;
+  const pct = served ? Math.round(today.happy / served * 100) : null;
+  setText($("moodTxt"), "Müşteri memnuniyeti: " + (pct === null ? "—" : `${pct >= 80 ? "😊" : pct >= 50 ? "😐" : "😠"} %${pct}`));
+  const a = nearAct, b = $("btnAct");
+  b.style.display = a ? "block" : "none";
+  if (a) setText(b.lastChild, a.text);
+  setText($("hint"), hintText());
+}
+
+// ================================================================ Hareket ve kamera
+const keys = new Set();
+const stick = { id: null, ox: 0, oy: 0, x: 0, y: 0 };
+const cam = { yaw: Math.PI, pitch: 0.55, dist: 9 };
+function updatePlayer(dt) {
+  let fwd = 0, side = 0;
+  if (keys.has("KeyW") || keys.has("ArrowUp")) fwd += 1;
+  if (keys.has("KeyS") || keys.has("ArrowDown")) fwd -= 1;
+  if (keys.has("KeyA") || keys.has("ArrowLeft")) side -= 1;
+  if (keys.has("KeyD") || keys.has("ArrowRight")) side += 1;
+  fwd -= stick.y; side += stick.x;
+  const len = Math.hypot(fwd, side);
+  pl.moving = len > 0.05;
+  pl.running = pl.moving && (keys.has("ShiftLeft") || keys.has("ShiftRight") || Math.hypot(stick.x, stick.y) > 0.92);
+  pl.work = Math.max(0, pl.work - dt);
+  if (!pl.moving) return;
+  const k = Math.min(1, len) / len, sp = pl.running ? RUN_SPEED : SPEED;
+  const fx = -Math.sin(cam.yaw), fz = -Math.cos(cam.yaw), rx = Math.cos(cam.yaw), rz = -Math.sin(cam.yaw);
+  const mx = (fx * fwd + rx * side) * k, mz = (fz * fwd + rz * side) * k;
+  const nx = pl.x + mx * sp * dt, nz = pl.z + mz * sp * dt;
+  const stuck = blocked(pl.x, pl.z, 0.35);
+  if (stuck || !blocked(nx, pl.z, 0.35)) pl.x = nx;
+  if (stuck || !blocked(pl.x, nz, 0.35)) pl.z = nz;
+  pl.face = Math.atan2(mx, mz);
+  pl.walk += dt * (pl.running ? 14 : 10);
+}
+function syncScene(dt) {
+  const cd = cam.dist;
+  const tx = pl.x + Math.sin(cam.yaw) * Math.cos(cam.pitch) * cd;
+  const tz = pl.z + Math.cos(cam.yaw) * Math.cos(cam.pitch) * cd;
+  const ty = Math.max(0.6, 1.4 + Math.sin(cam.pitch) * cd);
+  const k = Math.min(1, dt * 9);
+  camera.position.x += (tx - camera.position.x) * k;
+  camera.position.y += (ty - camera.position.y) * k;
+  camera.position.z += (tz - camera.position.z) * k;
+  camera.lookAt(pl.x, 1.3, pl.z);
+  pl.group.position.set(pl.x, 0, pl.z);
+  pl.group.rotation.y += angDiff(pl.group.rotation.y, pl.face) * Math.min(1, dt * 14);
+  poseFigure(pl.parts, pl.moving, pl.walk, pl.work);
+  nameTag.position.set(pl.x, 2.55, pl.z);
+  for (const c of customers) {
+    c.g.position.set(c.x, 0, c.z);
+    c.g.rotation.y += angDiff(c.g.rotation.y, c.face) * Math.min(1, dt * 10);
+    poseFigure(c.parts, c.moving, c.walk);
+  }
+  if (waiter) {
+    const W = LEVELS[level()].W, wx = W / 2 - 0.5, wz = STAND_Z - 1.1;
+    waiter.b.group.position.set(wx, 0, wz); waiter.b.group.rotation.y = 0;
+    poseFigure(waiter.b, false, 0, waiter.work);
+    waiter.tag.position.set(wx, 2.55, wz);
+  }
+  if (robot) {
+    robot.g.position.set(robot.x, robot.moving ? Math.abs(Math.sin(now * 12)) * 0.06 : 0, robot.z);
+    robot.g.rotation.y += angDiff(robot.g.rotation.y, robot.face) * Math.min(1, dt * 8);
+  }
+  // Limonların büyüme / toplanma animasyonu
+  const grow = (list, n) => list.forEach((f, i) => {
+    const tgt = i < n ? 1 : 0;
+    f.userData.s += (tgt - f.userData.s) * Math.min(1, dt * 7);
+    f.visible = f.userData.s > 0.03; f.scale.setScalar(Math.max(0.001, f.userData.s));
+  });
+  for (const t of trees) grow(t.fruits, t.lemons);
+  if (berry) grow(berry.fruits, berry.n);
+  // Kamera standın arkasındayken çatıyı saydamlaştır
+  const fade = camera.position.z < STAND_Z - 0.5 && dist(pl.x, pl.z, 0, STAND_Z) < 7 ? 0.28 : 1;
+  for (const m of roofMats) m.opacity += (fade - m.opacity) * Math.min(1, dt * 6);
+  if (squeezer) {
+    if (squeezer.spin > 0) { squeezer.spin -= dt; squeezer.cone.rotation.y += dt * 18; squeezer.cone.position.y = 0.29 - Math.abs(Math.sin(now * 20)) * 0.05; }
+    else squeezer.cone.position.y = 0.29;
+  }
+  if (extrasG) extrasG.traverse(o => { if (o.userData.balloon !== undefined) o.position.y += Math.sin(now * 2 + o.userData.balloon) * 0.002; });
+  for (const c of clouds) { c.position.x += dt * 0.6; if (c.position.x > 80) c.position.x = -80; }
+  if (rain && rain.visible) {
+    const p = rain.geometry.attributes.position, arr = p.array;
+    for (let i = 0; i < arr.length; i += 3) { arr[i + 1] -= dt * 16; if (arr[i + 1] < 0) arr[i + 1] += 22; }
+    p.needsUpdate = true;
+    rain.position.set(Math.round(pl.x), 0, Math.round(pl.z));
+  }
+}
+
+// ================================================================ Girdi
+const PRICE_DOWN = ["KeyQ", "Minus", "NumpadSubtract"], PRICE_UP = ["KeyR", "Equal", "NumpadAdd"];
+addEventListener("keydown", e => {
+  if (e.repeat && !PRICE_DOWN.includes(e.code) && !PRICE_UP.includes(e.code)) return;
+  initAudio();
+  if (anyOverlay()) {
+    if (isShown("ovRecipe") && /^Digit[1-3]$/.test(e.code)) {
+      const r = RECIPES.filter(recipeOk)[+e.code.slice(5) - 1];
+      if (r) { hide("ovRecipe"); makePitcher(r.id); }
+    } else if (isShown("ovSum") && (e.code === "Enter" || e.code === "Space")) { startDay(); e.preventDefault(); }
+    else if (e.code === "Escape") ["ovHelp", "ovUp", "ovShop", "ovRecipe"].forEach(hide);
+    return;
+  }
+  keys.add(e.code);
+  if (e.code === "KeyE" || e.code === "Space") { interact(); e.preventDefault(); }
+  if (PRICE_DOWN.includes(e.code)) changePrice(-1);
+  if (PRICE_UP.includes(e.code)) changePrice(1);
+  if (e.code === "KeyU") openUpgrades();
+  if (e.code.startsWith("Arrow")) e.preventDefault();
+});
+addEventListener("keyup", e => keys.delete(e.code));
+addEventListener("blur", () => keys.clear());
+addEventListener("wheel", e => { if (!anyOverlay()) cam.dist = clamp(cam.dist + Math.sign(e.deltaY) * 1, 4, 18); }, { passive: true });
+const ptrs = new Map();
+canvas.addEventListener("pointerdown", e => {
+  initAudio();
+  const p = { x: e.clientX, y: e.clientY, stick: false };
+  if (e.pointerType !== "mouse") touchUI = true;
+  if (e.pointerType !== "mouse" && e.clientX < innerWidth / 2 && stick.id === null) {
+    p.stick = true; stick.id = e.pointerId; stick.ox = e.clientX; stick.oy = e.clientY;
+    const el = $("stick"); el.style.left = e.clientX + "px"; el.style.top = e.clientY + "px"; el.style.display = "block";
+  }
+  ptrs.set(e.pointerId, p);
+});
+addEventListener("pointermove", e => {
+  const p = ptrs.get(e.pointerId);
+  if (!p) return;
+  if (p.stick) {
+    let dx = e.clientX - stick.ox, dy = e.clientY - stick.oy;
+    const l = Math.hypot(dx, dy), max = 50;
+    if (l > max) { dx = dx / l * max; dy = dy / l * max; }
+    stick.x = dx / max; stick.y = dy / max;
+    $("stick").firstChild.style.transform = `translate(${dx}px, ${dy}px)`;
+  } else {
+    cam.yaw -= (e.clientX - p.x) * 0.006;
+    cam.pitch = clamp(cam.pitch + (e.clientY - p.y) * 0.004, 0.1, 1.25);
+  }
+  p.x = e.clientX; p.y = e.clientY;
+});
+function endPtr(e) {
+  const p = ptrs.get(e.pointerId);
+  if (!p) return;
+  ptrs.delete(e.pointerId);
+  if (p.stick) { stick.id = null; stick.x = stick.y = 0; $("stick").style.display = "none"; $("stick").firstChild.style.transform = ""; }
+}
+addEventListener("pointerup", endPtr);
+addEventListener("pointercancel", endPtr);
+const tap = (id, fn) => $(id).addEventListener("pointerdown", e => { e.preventDefault(); e.stopPropagation(); initAudio(); fn(); });
+// Basılı tutunca tekrarlayan buton (fiyat − / +)
+function holdBtn(id, fn) {
+  let t1 = 0, t2 = 0;
+  const stop = () => { clearTimeout(t1); clearInterval(t2); };
+  $(id).addEventListener("pointerdown", e => {
+    e.preventDefault(); e.stopPropagation(); initAudio(); fn(); stop();
+    t1 = setTimeout(() => { t2 = setInterval(fn, 90); }, 400);
+  });
+  for (const ev of ["pointerup", "pointerleave", "pointercancel"]) $(id).addEventListener(ev, stop);
+}
+tap("btnAct", interact);
+holdBtn("bMinus", () => changePrice(-1));
+holdBtn("bPlus", () => changePrice(1));
+$("bUp").addEventListener("click", () => { SFX.click(); openUpgrades(); });
+$("bShop").addEventListener("click", () => { SFX.click(); openShop(); });
+$("bHelp").addEventListener("click", () => { SFX.click(); show("ovHelp"); });
+$("bMute").addEventListener("click", () => {
+  initAudio(); save.muted = !save.muted;
+  if (A.master) A.master.gain.value = save.muted ? 0 : 0.5;
+  $("bMute").textContent = save.muted ? "🔇" : "🔊"; persist(true);
+});
+$("btnNextDay").addEventListener("click", startDay);
+
+// Dik telefonda yatay görüş daralmasın: dikey FOV'u ekran oranına göre aç (en fazla 100°)
+function fitFov(base) {
+  const a = innerWidth / innerHeight;
+  if (a >= 1) return base;
+  return Math.min(100, 2 * Math.atan(Math.tan(base * Math.PI / 360) / a) * 180 / Math.PI);
+}
+function resize() {
+  renderer.setPixelRatio(Math.min(1.5, devicePixelRatio || 1));
+  renderer.setSize(innerWidth, innerHeight, false);
+  camera.aspect = innerWidth / innerHeight;
+  camera.fov = fitFov(60);
+  camera.updateProjectionMatrix();
+}
+addEventListener("resize", resize);
+
+// ================================================================ Döngü
+let now = 0, last = performance.now();
+function update(dt) {
+  now += dt;
+  if (!anyOverlay()) {
+    updatePlayer(dt);
+    updateDay(dt);
+    updateCustomers(dt);
+    updateTrees(dt);
+    updateWaiter(dt);
+    updateRobot(dt);
+  }
+  updateFlyers(dt);
+  nearAct = anyOverlay() ? null : nearestAction();
+  updateHud(dt);
+  persist();
+}
+function frame(t) {
+  const dt = Math.min(0.1, (t - last) / 1000);
+  last = t;
+  update(dt);
+  syncScene(dt);
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+// Test kancası: tarayıcı rAF'ı yavaşlattığında oyun mantığını elle ilerletir
+window.step = sec => { for (let t = 0; t < sec; t += 1 / 30) { update(1 / 30); syncScene(1 / 30); } renderer.render(scene, camera); };
+
+// ================================================================ Başlat
+buildWorld();
+syncTrees();
+syncBerries();
+buildStand();
+spawnRobot();
+if (save.passes.waiter) spawnWaiter();
+rebuildAvatar();
+updateNameTag();
+applyWeather();
+if (save.helpSeen) hide("ovHelp");
+$("bMute").textContent = save.muted ? "🔇" : "🔊";
+resize();
+camera.position.set(pl.x, 6, pl.z - 9);
+setInterval(() => persist(true), 10000);
+requestAnimationFrame(frame);
+</script>
+<div id="rotateHint" style="display:none;position:fixed;left:50%;top:30%;transform:translate(-50%,-50%);z-index:99;max-width:80vw;padding:12px 16px;border-radius:14px;background:rgba(0,0,0,0.78);color:#fff;font:600 15px system-ui,sans-serif;text-align:center;pointer-events:auto">📱↻ Daha geniş görmek için telefonu yan çevir<br><small style="opacity:.7">(kapatmak için dokun)</small></div>
+<script>
+// Dik tutulan telefonda bir kez "yan çevir" ipucu
+(() => {
+  const el = document.getElementById("rotateHint");
+  if (!matchMedia("(pointer: coarse)").matches) return;
+  let closed = false;
+  const upd = () => { el.style.display = !closed && innerWidth < innerHeight ? "block" : "none"; };
+  el.addEventListener("pointerdown", e => { e.stopPropagation(); closed = true; upd(); });
+  setTimeout(() => { closed = true; upd(); }, 8000);
+  addEventListener("resize", upd); upd();
+})();
+</script>
+</body>
+</html>
