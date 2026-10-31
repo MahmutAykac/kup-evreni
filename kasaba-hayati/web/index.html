@@ -7,7 +7,7 @@
 <!--
   Kasaba Hayatı RP: kasabada ev al, araba sür, meslek seç, rol yap. Küp Evreni platformunda çalışır (tek başına da açılır).
   Kurallar ve ekonomi TASARIM.md ile aynı. Para, meslek, ev ve araç kararları `Server` nesnesinde (Roblox'ta sunucu servisleri).
-  Kontroller: WASD yürü/sür · Space zıpla/fren · E etkileşim · F araca bin/in · H korna · P telefon · sürükle: kamera
+  Kontroller: WASD yürü/sür · Space zıpla/fren · E etkileşim · F araca bin/in / araba çal · G ateş · H korna · P telefon · sürükle: kamera
 -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <style>
@@ -30,6 +30,9 @@
   #menu { position: fixed; right: 14px; top: 12px; display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; max-width: 46vw; }
   #menu button { border: 2px solid var(--line); background: var(--panel); border-radius: 14px; padding: 8px 12px; cursor: pointer; font-size: 15px; }
   #hint { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); pointer-events: none; text-align: center; font-size: 15px; max-width: calc(100vw - 32px); }
+  #hpBar { height: 8px; background: #3a1d24; border-radius: 5px; margin-top: 6px; overflow: hidden; }
+  #hpFill { display: block; height: 100%; width: 100%; background: #4ade80; transition: width .2s, background .2s; }
+  #hurt { position: fixed; inset: 0; pointer-events: none; box-shadow: inset 0 0 140px 30px rgba(230,20,30,0.85); opacity: 0; z-index: 4; }
   #fade { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; transition: opacity 1s; z-index: 8; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 28px; font-weight: 700; }
   #fade.on { opacity: 1; }
   #toasts { position: fixed; top: 96px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 6px; align-items: center; pointer-events: none; z-index: 5; }
@@ -83,7 +86,8 @@
 </head>
 <body>
 <canvas id="game"></canvas>
-<div id="top" class="pill"><div id="money">💵 ₺ 0<span id="moneyAdd"></span></div><div id="jobTxt"></div></div>
+<div id="top" class="pill"><div id="money">💵 ₺ 0<span id="moneyAdd"></span></div><div id="jobTxt"></div><div id="hpBar" title="Can"><i id="hpFill"></i></div></div>
+<div id="hurt"></div>
 <canvas id="map" width="150" height="150"></canvas>
 <div id="clock" class="pill"></div>
 <div id="speedo" class="pill"></div>
@@ -103,6 +107,7 @@
     <button id="btnCar" title="Araca bin / in (F)">🚗</button>
     <button id="btnPhoneM" title="Telefon (P)">📱</button>
     <button id="btnJump" title="Zıpla">⤒</button>
+    <button id="btnShoot" title="Ateş et (G)">🔫</button>
   </div>
 </div>
 <div id="stick"><div></div></div>
@@ -115,6 +120,7 @@
     <li>💼 Binalara gidip meslek seç: 👮 Polis, 🩺 Doktor, 📦 Kurye, ☕ Kafe Çalışanı, 🎒 Öğrenci. Her oyun saatinde maaş alırsın.</li>
     <li>🚲 <b>📱 Telefon → Araçlar</b> ile araç çağır, yanına gidip <b>F</b> ile bin. <b>H</b> korna!</li>
     <li>🔑 Trafikteki bir arabanın yanına git, <b>F</b> ile çal! Ama ⭐ polis peşine düşer: 50 m uzakta 12 sn kalırsan kurtulursun, yakalanırsan araca el konur ve ₺150 ceza.</li>
+    <li>❤️ Canın sol üstte. Polis ateş eder, kaza yaparsan can kaybedersin; biterse hastanede uyanırsın (₺50). 🔫 Tabancayı 📱 Telefon → Eşya'dan al (polislere ücretsiz), <b>G</b> ile kameranın baktığı yöne ateş et.</li>
     <li>💵 Görevleri yap, para kazan; daha iyi ev ve araba al.</li>
     <li>✏️ Telefon → Ayarlar'dan rol adını değiştir. Adın ve mesleğin başının üstünde görünür.</li>
   </ol>
@@ -124,7 +130,7 @@
 </div></div>
 <div id="ovPhone" class="overlay"><div class="card">
   <div class="tabs" id="phoneTabs">
-    <button data-tab="is">💼 Meslek</button><button data-tab="arac">🚗 Araçlar</button><button data-tab="ev">🏠 Ev</button>
+    <button data-tab="is">💼 Meslek</button><button data-tab="arac">🚗 Araçlar</button><button data-tab="ev">🏠 Ev</button><button data-tab="esya">🎒 Eşya</button>
     <button data-tab="ayar">⚙️ Ayarlar</button><button data-tab="magaza">R$ Mağaza</button>
   </div>
   <div id="phoneBody"></div>
@@ -306,6 +312,7 @@ function applyGiftItem(key, n) {
     if (v.pass) save.passes[v.pass] = true; else save.cars[id] = true;
     return true;
   }
+  if (key === "item:gun") { if (save.gun) return false; save.gun = true; return true; }
   if (kind === "style") { // ev stili: ₺ ile satılanlar styles, Robux ile satılanlar passes
     const st = STYLE[id];
     if (!st || !st.pass && !st.price) return false; // ücretsiz küçük ev zaten açık
@@ -409,6 +416,7 @@ const SFX = {
   good: () => [523, 659, 784].forEach((f, i) => tone(f, 0.2, "triangle", 0.08, undefined, i * 0.07)),
   job: () => [392, 523, 659, 784].forEach((f, i) => tone(f, 0.2, "triangle", 0.07, undefined, i * 0.08)),
   bad: () => tone(200, 0.25, "sawtooth", 0.07, 140),
+  shot: (g = 1) => { noise(0.14, 0.45 * g, 1400); tone(140, 0.09, "square", 0.07 * g, 50); },
   bump: () => { noise(0.2, 0.35, 300); tone(90, 0.2, "square", 0.08); },
 };
 
@@ -977,6 +985,7 @@ function updateCar(dt, input = true) {
   const nx = c.x + Math.sin(c.h) * c.speed * dt, nz = c.z + Math.cos(c.h) * c.speed * dt;
   if (!stuck && carBlocked(nx, nz, c.h, c)) {
     if (Math.abs(c.speed) > 5) { SFX.bump(); cam.shake = 0.25; }
+    if (Math.abs(c.speed) > 9) hurt(Math.round(Math.abs(c.speed) * 0.6));
     c.speed *= -0.25;
   } else { c.x = nx; c.z = nz; }
   pl.x = c.x; pl.z = c.z;
@@ -1059,7 +1068,7 @@ function updateTraffic(dt) {
     if (ahead(px, pz)) stop = byPlayer = true;
     if (pcar && !pl.inCar && ahead(pcar.x, pcar.z)) stop = true;
     for (const o of traffic) if (o !== c && ahead(o.x, o.z, 1.8)) stop = true;
-    if (wanted && ahead(wanted.cop.x, wanted.cop.z, 1.8)) stop = true;
+    if (wanted && wanted.cop && ahead(wanted.cop.x, wanted.cop.z, 1.8)) stop = true;
     const target = stop ? 0 : Math.abs(turn) > 0.4 ? 5 : 11;
     c.speed += clamp(target - c.speed, -14 * dt, 5 * dt);
     c.x += fx * c.speed * dt; c.z += fz * c.speed * dt;
@@ -1069,13 +1078,17 @@ function updateTraffic(dt) {
 }
 function updatePeds(dt) {
   for (const n of peds) {
+    if (n.ko > 0) {
+      if ((n.ko -= dt) <= 0) { n.g.rotation.x = 0; n.y = 0; dropLabel(n.label); n.label = null; }
+      continue;
+    }
     const t = n.loop[n.i];
     if (walkNpc(n, t.x, t.z, n.speed, dt)) n.i = (n.i + n.step + 4) % 4;
   }
 }
 
 // ================================================================ Araba çalma + aranma (Roblox: CrimeService)
-const WANTED_TIME = 75, ESCAPE_DIST = 50, ESCAPE_TIME = 12, COP_SPEED = 20, FINE = 150;
+const COP_HP = 4, WANTED_TIME = 75, ESCAPE_DIST = 50, ESCAPE_TIME = 12, COP_SPEED = 20, FINE = 150;
 const runners = [];        // arabası çalınıp kaçan sürücüler
 let refills = [];          // yeniden doğacak trafik arabalarının zamanları
 let wanted = null;         // { t, far, sirenT, cop: { def, model, x, z, h, speed, chasing } }
@@ -1130,18 +1143,21 @@ function copWaypoint(c, tx, tz) {
   if (def(H)) return { x: viaRoad(c.x, t.x), z: H };
   return roadPoint(c.x, c.z);
 }
-function startWanted() {
-  if (wanted) { wanted.t = WANTED_TIME; wanted.far = 0; notify("🔑 Bir araba daha çaldın! ⭐ Aranma süren yenilendi"); return; }
+function spawnCop() {
   // Polis, oyuncudan ~50 m uzaktaki bir kavşaktan çıkar
   let best = null;
   for (const x of ROADS) for (const z of ROADS) { const s = Math.abs(dist(x, z, pl.x, pl.z) - 50); if (!best || s < best.s) best = { x, z, s }; }
-  const cop = { def: VEH.polis, model: makeCar(VEH.polis), x: best.x, z: best.z, h: Math.atan2(pl.x - best.x, pl.z - best.z), speed: 0, chasing: true };
-  wanted = { t: WANTED_TIME, far: 0, sirenT: 0, cop };
-  notify("🔑 Arabayı çaldın! ⭐ Polis peşinde, kaç!"); SFX.siren();
+  return { def: VEH.polis, model: makeCar(VEH.polis), x: best.x, z: best.z, h: Math.atan2(pl.x - best.x, pl.z - best.z), speed: 0, chasing: true, hp: COP_HP };
+}
+function startWanted(msg = "🔑 Arabayı çaldın! ⭐ Polis peşinde, kaç!", again = "🔑 Bir araba daha çaldın! ⭐ Aranma süren yenilendi") {
+  if (wanted) { wanted.t = WANTED_TIME; wanted.far = 0; notify(again); return; }
+  wanted = { t: WANTED_TIME, far: 0, sirenT: 0, shootT: 2, respawn: 0, cop: spawnCop() };
+  notify(msg); SFX.siren();
 }
 function endWanted(msg) {
   if (!wanted) return;
-  scene.remove(wanted.cop.model.g); wanted = null;
+  if (wanted.cop) scene.remove(wanted.cop.model.g);
+  wanted = null;
   if (msg) notify(msg);
 }
 function busted() {
@@ -1170,7 +1186,8 @@ function updateCrime(dt) {
     if (start >= 0) { addTraffic(li, start); refills.shift(); } else refills[0] = now + 3;
   }
   if (!wanted) return;
-  const c = wanted.cop, tx = pl.inCar ? pcar.x : pl.x, tz = pl.inCar ? pcar.z : pl.z, d = dist(c.x, c.z, tx, tz);
+  if (!wanted.cop && (wanted.respawn -= dt) <= 0) { wanted.cop = spawnCop(); wanted.far = 0; notify("🚓 Yeni bir polis arabası geliyor!"); }
+  const c = wanted.cop, tx = pl.inCar ? pcar.x : pl.x, tz = pl.inCar ? pcar.z : pl.z, d = c ? dist(c.x, c.z, tx, tz) : 1e9;
   if (d < 3.4) { busted(); return; }
   wanted.t -= dt;
   wanted.far = d > ESCAPE_DIST ? wanted.far + dt : 0;
@@ -1179,12 +1196,93 @@ function updateCrime(dt) {
     endWanted("😎 Polisi atlattın! Artık aranmıyorsun.");
     return;
   }
+  if (!c) return;
+  // Polis yakındaysa ve arada bina yoksa ateş eder
+  if ((wanted.shootT -= dt) <= 0 && d < 24 && clearLine(c.x, c.z, tx, tz)) {
+    wanted.shootT = 1.1;
+    const hit = Math.random() < 0.7;
+    tracer(c.x, 1.6, c.z, tx + (hit ? 0 : rand(-2, 2)), 1.2, tz + (hit ? 0 : rand(-2, 2)), 0xff6b6b); SFX.shot(0.6);
+    if (hit) hurt(pl.inCar ? 6 : 9);
+  }
   const w = copWaypoint(c, tx, tz), turn = angDiff(c.h, Math.atan2(w.x - c.x, w.z - c.z));
   c.h += clamp(turn, -2.6 * dt, 2.6 * dt);
   const target = Math.abs(turn) > 0.7 ? 7 : d < 10 ? 12 : COP_SPEED;
   c.speed += clamp(target - c.speed, -18 * dt, 9 * dt);
   c.x += Math.sin(c.h) * c.speed * dt; c.z += Math.cos(c.h) * c.speed * dt;
   if ((wanted.sirenT -= dt) <= 0 && d < 45) { wanted.sirenT = 2.2; SFX.siren(); }
+}
+
+// ================================================================ Can ve silah (Roblox: CombatService + Tool)
+const GUN_PRICE = 500, MEDKIT_PRICE = 40, GUN_RANGE = 32, GUN_CONE = 0.35;
+const tracers = [];
+let lastShot = -9, lastHurt = -9;
+const gunMesh = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.55, 1.5), new THREE.MeshLambertMaterial({ color: 0x1b1b1f }));
+gunMesh.position.set(0, -1.9, 0.55);
+const hasGun = () => !!save.gun || save.job === "polis";
+const aimDir = () => cam.yaw + Math.PI;   // kameranın baktığı yön
+function tracer(x1, y1, z1, x2, y2, z2, color = 0xfff3a0) {
+  const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x1, y1, z1), new THREE.Vector3(x2, y2, z2)]), new THREE.LineBasicMaterial({ color }));
+  scene.add(l); tracers.push({ l, t: 0.09 });
+}
+function hurt(n) {
+  if (pl.hp <= 0 || sleep) return;
+  pl.hp -= n; lastHurt = now; cam.shake = Math.max(cam.shake, 0.2);
+  tone(160, 0.12, "sawtooth", 0.05, 90);
+}
+function knockOut() {
+  if (pl.inCar) exitCar();
+  if (pcar && pcar.stolen) removeCar();
+  if (call && call.treat) call.treat = 0;
+  const bill = Math.min(50, save.money);
+  if (bill) { save.money -= bill; flashMoney(-bill); }
+  const h = BUILDINGS.find(b => b.id === "hastane");
+  pl.x = h.door.x; pl.z = h.door.z + h.f * 1.5; pl.y = 0; pl.vy = 0; pl.hp = 100;
+  if (blocked(pl.x, pl.z, 0.35)) { pl.x = START.x; pl.z = START.z; }
+  endWanted();
+  SFX.bad(); persist(true);
+  notify("💫 Bayıldın! Hastanede uyandın" + (bill ? " (-₺" + bill + ")" : ""));
+}
+function shoot() {
+  if (!hasGun() || sleep || anyOverlay() || now - lastShot < 0.35) return;
+  initAudio(); lastShot = now; SFX.shot();
+  const a = aimDir(), fx = Math.sin(a), fz = Math.cos(a);
+  const ox = pl.inCar ? pcar.x : pl.x, oz = pl.inCar ? pcar.z : pl.z, oy = pl.inCar ? 1.4 : pl.y + 1.2;
+  if (!pl.inCar) pl.face = a;
+  // Hedefler: nişan konisindeki en yakın, arada bina olmayan
+  const T = [];
+  if (wanted && wanted.cop) T.push({ x: wanted.cop.x, z: wanted.cop.z, y: 1, r: 2.2, k: "cop" });
+  if (call && call.kind === "hirsiz") T.push({ x: call.npc.x, z: call.npc.z, y: 1, r: 0.9, k: "thief" });
+  for (const n of peds) if (!(n.ko > 0)) T.push({ x: n.x, z: n.z, y: 1, r: 0.9, k: "ped", n });
+  for (const c of traffic) T.push({ x: c.x, z: c.z, y: 1, r: 2, k: "car", c });
+  let best = null, bd = GUN_RANGE;
+  for (const t of T) {
+    const dx = t.x - ox, dz = t.z - oz, d = Math.hypot(dx, dz);
+    if (d > GUN_RANGE || d < 0.5) continue;
+    const along = dx * fx + dz * fz, lat = Math.abs(dx * fz - dz * fx);
+    if (along <= 0 || (lat > t.r && Math.abs(angDiff(a, Math.atan2(dx, dz))) > GUN_CONE)) continue;
+    if (d < bd && clearLine(ox, oz, t.x, t.z)) { bd = d; best = t; }
+  }
+  if (!best) {   // boşluğa: binaya çarpana kadar
+    let d = 1; while (d < GUN_RANGE && !blocked(ox + fx * d, oz + fz * d, 0.1)) d += 1;
+    tracer(ox + fx * 0.8, oy, oz + fz * 0.8, ox + fx * d, oy, oz + fz * d); return;
+  }
+  tracer(ox + fx * 0.8, oy, oz + fz * 0.8, best.x, best.y, best.z);
+  if (best.k === "cop") {
+    const c = wanted.cop;
+    if (--c.hp <= 0) {
+      scene.remove(c.model.g); wanted.cop = null; wanted.respawn = 8; wanted.t = Math.max(wanted.t, 20);
+      SFX.bump(); notify("💥 Polis arabası devre dışı! Yenisi gelmeden kaç!");
+    } else { SFX.bump(); notify("🚓 Polis arabası vuruldu (" + c.hp + " kaldı)"); }
+  } else if (best.k === "thief") {
+    finishCall(true, "🚓 Hırsızı durdurdun!", 90);
+  } else if (best.k === "ped") {
+    const n = best.n;
+    n.ko = 6; n.moving = false; n.y = 0.25; n.g.rotation.x = -Math.PI / 2; poseNpc(n);
+    n.label = makeLabel(2, 0.5, "💫"); n.label.position.set(n.x, 1.4, n.z);
+    startWanted("🔫 Vatandaşa ateş ettin! ⭐ Polis peşinde!", "🔫 Vatandaşa ateş ettin! ⭐ Aranma süren yenilendi");
+  } else if (best.k === "car") {
+    best.c.speed = 0; SFX.bump(); best.c.honkT = 0;
+  }
 }
 
 // ================================================================ Meslekler ve görevler (Roblox: JobService)
@@ -1323,7 +1421,7 @@ $("quizA").addEventListener("click", e => {
 function updateJobs(dt) { updateCall(dt); updateCustomers(dt); }
 
 // ================================================================ Oyuncu (avatar platformdan)
-const pl = { x: save.px, y: 0, z: save.pz, vy: 0, face: Math.PI, moving: false, walk: 0, group: null, parts: null, inCar: false };
+const pl = { x: save.px, y: 0, z: save.pz, vy: 0, face: Math.PI, moving: false, walk: 0, group: null, parts: null, inCar: false, hp: 100 };
 const DEFAULT_AVATAR = { skin: "#e0ac69", shirt: "#118ab2", pants: "#2b2d42", hat: "cap", hatColor: "#e63946", face: "smile" };
 function drawFace(kind) {
   const c = document.createElement("canvas"); c.width = c.height = 128;
@@ -1517,6 +1615,12 @@ function renderPhone() {
         WALL_COLORS.map(c => `<span class="sw ${c === save.house.color ? "on" : ""}" style="background:${hexCss(c)}" data-act="color:${c}"></span>`).join("") +
         `<div class="rowb">${btn("🚪 Eve ışınlan", "tphome", false, "go")}${btn("🏚️ Evi bırak", "leave")}</div>`;
     } else B.innerHTML = `<p>Henüz evin yok. Güneydoğudaki <b>🏘️ Mahalle</b>'de 8 SATILIK arsa var: birine git ve <b>E</b>'ye bas. Küçük Ev ücretsiz!</p><div class="rowb">${btn("📍 Boş arsaya ışınlan", "tpplot", false, "go")}</div>`;
+  } else if (phoneTab === "esya") {
+    const gunBtn = btn("₺ " + fmt(GUN_PRICE) + " Al", "buygun", save.money < GUN_PRICE);
+    B.innerHTML = `<div class="muted">❤️ Canın: <b>${Math.ceil(pl.hp)}/100</b> · Hasar almazsan can kendiliğinden dolar.</div>` +
+      row("🔫", "Tabanca", "G tuşu / 🔫 butonu: kameranın baktığı yöne ateş. Polis arabası 4 atışta durur. Vatandaşa ateş edersen ⭐ aranırsın. Polislere görevdeyken ücretsiz.",
+        save.gun ? btn("✓ Sende", "", true) : gunBtn) +
+      row("🩹", "İlk Yardım Çantası", "Hemen +50 can", btn("₺ " + MEDKIT_PRICE + " Kullan", "medkit", pl.hp >= 100 || save.money < MEDKIT_PRICE, "go"));
   } else if (phoneTab === "ayar") {
     B.innerHTML = `<div class="muted">Rol adın (başının üstünde görünür):</div><input id="rpNameIn" class="field" maxlength="16" placeholder="${esc(rpName())}" value="${esc(save.rpName)}">
       <div class="rowb">${btn("💾 Adı kaydet", "name", false, "go")}${btn(save.muted ? "🔇 Ses kapalı" : "🔊 Ses açık", "mute")}</div>
@@ -1539,6 +1643,8 @@ $("phoneBody").addEventListener("click", e => {
   else if (act === "call") spawnCar(id);
   else if (act === "buy") { Server.buyCar(id); renderPhone(); }
   else if (act === "pass") buyPass(id);
+  else if (act === "buygun") { if (!save.gun && Server.spend(GUN_PRICE)) { save.gun = true; persist(true); SFX.good(); notify("🔫 Tabanca aldın! G ile ateş et."); } renderPhone(); }
+  else if (act === "medkit") { if (pl.hp < 100 && Server.spend(MEDKIT_PRICE)) { pl.hp = Math.min(100, pl.hp + 50); SFX.good(); notify("🩹 +50 can"); } renderPhone(); }
   else if (act === "rmcar") { removeCar(); renderPhone(); }
   else if (act === "color") { save.house.color = +id; syncHouse(); persist(true); renderPhone(); }
   else if (act === "tphome") { if (pl.inCar) exitCar(); const s = homeSpawn(); pl.x = s.x; pl.z = s.z; hide("ovPhone"); }
@@ -1621,7 +1727,7 @@ function drawMap() {
   mapX.drawImage(mapBg, 0, 0);
   mapX.fillStyle = "#fff";
   for (const c of traffic) mapX.fillRect(mp(c.x) - 1.5, mp(c.z) - 1.5, 3, 3);
-  if (wanted) { mapX.fillStyle = Math.floor(now * 4) % 2 ? "#ff2a2a" : "#2a5bff"; mapX.fillRect(mp(wanted.cop.x) - 3, mp(wanted.cop.z) - 3, 6, 6); }
+  if (wanted && wanted.cop) { mapX.fillStyle = Math.floor(now * 4) % 2 ? "#ff2a2a" : "#2a5bff"; mapX.fillRect(mp(wanted.cop.x) - 3, mp(wanted.cop.z) - 3, 6, 6); }
   if (pcar && !pl.inCar) { mapX.fillStyle = "#4cc9f0"; mapX.fillRect(mp(pcar.x) - 2.5, mp(pcar.z) - 2.5, 5, 5); }
   if (beacon.visible) {
     mapX.fillStyle = "#ffd166"; mapX.strokeStyle = "#000"; mapX.lineWidth = 1;
@@ -1661,12 +1767,15 @@ function updateHud(dt) {
   setText($("hint"), h); $("hint").style.display = h ? "block" : "none";
   const nearCar = !pl.inCar && ((pcar && dist(pl.x, pl.z, pcar.x, pcar.z) < 4) || nearTraffic());
   $("wanted").style.display = wanted ? "block" : "none";
-  if (wanted) setText($("wanted"), `⭐ ARANIYORSUN · 🚓 ${Math.round(dist(wanted.cop.x, wanted.cop.z, pl.x, pl.z))} m · ${wanted.far > 0 ? "kaçıyorsun " + Math.ceil(ESCAPE_TIME - wanted.far) + " sn" : Math.ceil(wanted.t) + " sn"}`);
+  if (wanted) setText($("wanted"), `⭐ ARANIYORSUN · 🚓 ${wanted.cop ? Math.round(dist(wanted.cop.x, wanted.cop.z, pl.x, pl.z)) + " m" : "yok"} · ${wanted.far > 0 ? "kaçıyorsun " + Math.ceil(ESCAPE_TIME - wanted.far) + " sn" : Math.ceil(wanted.t) + " sn"}`);
   $("btnCar").style.display = pl.inCar || nearCar || touchUI ? "block" : "none";
   setText($("btnCar"), pl.inCar ? "🚶" : "🚗");
   $("btnHorn").style.display = pl.inCar ? "block" : "none";
   $("btnPhoneM").style.display = touchUI ? "block" : "none";
   $("btnJump").style.display = touchUI && !pl.inCar ? "block" : "none";
+  $("btnShoot").style.display = hasGun() ? "block" : "none";
+  const hf = $("hpFill"), hpw = Math.max(0, Math.round(pl.hp)) + "%";
+  if (hf.style.width !== hpw) { hf.style.width = hpw; hf.style.background = pl.hp > 50 ? "#4ade80" : pl.hp > 25 ? "#ffd166" : "#ff4d6d"; }
   if ((mapT -= dt) <= 0) { mapT = 0.1; drawMap(); }
 }
 
@@ -1759,7 +1868,12 @@ function syncScene(dt) {
   nameTag.position.set(pl.x, (pl.inCar && !bike ? (pcar.def.kind === "van" ? 3.6 : 3) : pl.y + 2.9), pl.z);
   if (pcar) syncCarModel(pcar, dt);
   for (const c of traffic) syncCarModel(c, dt);
-  if (wanted) syncCarModel(wanted.cop, dt);
+  if (wanted && wanted.cop) syncCarModel(wanted.cop, dt);
+  for (let i = tracers.length - 1; i >= 0; i--) if ((tracers[i].t -= dt) <= 0) { scene.remove(tracers[i].l); tracers[i].l.geometry.dispose(); tracers.splice(i, 1); }
+  if (gunMesh.parent !== pl.parts.arms[1]) pl.parts.arms[1].add(gunMesh);
+  gunMesh.visible = hasGun() && !pl.inCar;
+  if (gunMesh.visible && now - lastShot < 0.5 && !sleep) { pl.parts.arms[1].rotation.x = -Math.PI / 2; if (!pl.moving) pl.group.rotation.y = pl.face = aimDir(); }
+  $("hurt").style.opacity = Math.max(0, 1 - (now - lastHurt) * 2.5) * 0.8;
   for (const n of peds) poseNpc(n);
   if (call) { if (call.kind === "hirsiz") poseNpc(call.npc); else { call.npc.g.position.set(call.npc.x, call.npc.y, call.npc.z); } }
   beaconRing.scale.setScalar(1 + Math.sin(now * 4) * 0.15);
@@ -1787,6 +1901,7 @@ addEventListener("keydown", e => {
   if (e.code === "KeyE") interact();
   if (e.code === "KeyF") toggleCar();
   if (e.code === "KeyH") horn();
+  if (e.code === "KeyG") shoot();
   if (e.code === "KeyP") openPhone();
   if (e.code === "Space") { jump(); e.preventDefault(); }
   if (e.code.startsWith("Arrow")) e.preventDefault();
@@ -1835,6 +1950,7 @@ tap("btnCar", toggleCar);
 tap("btnHorn", horn);
 tap("btnPhoneM", () => openPhone());
 tap("btnJump", jump);
+tap("btnShoot", shoot);
 
 // Dik telefonda yatay görüş daralmasın: dikey FOV'u ekran oranına göre aç (en fazla 100°)
 function fitFov(base) {
@@ -1859,6 +1975,8 @@ function update(dt) {
   else if (pl.inCar) updateCar(dt, !anyOverlay());
   else if (!anyOverlay()) updatePlayer(dt);
   if (!blocking()) { updateDayNight(dt); updateTraffic(dt); updatePeds(dt); updateJobs(dt); updateCrime(dt); }
+  if (now - lastHurt > 6 && pl.hp < 100) pl.hp = Math.min(100, pl.hp + 4 * dt);
+  if (pl.hp <= 0) knockOut();
   updateHouse(dt);
   nearAct = nearestAction();
   updateHud(dt);
