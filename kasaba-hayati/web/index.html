@@ -25,6 +25,7 @@
   #jobTxt { font-size: 13px; color: var(--muted); }
   #map { position: fixed; left: 14px; top: 78px; width: 150px; height: 150px; border-radius: 12px; border: 2px solid var(--line); pointer-events: none; }
   #clock { position: fixed; left: 50%; top: 12px; transform: translateX(-50%); font-size: 17px; font-weight: 700; pointer-events: none; white-space: nowrap; }
+  #wanted { position: fixed; left: 50%; top: 92px; transform: translateX(-50%); font-size: 15px; pointer-events: none; display: none; white-space: nowrap; color: #ffd166; background: rgba(160,20,30,0.85); }
   #speedo { position: fixed; left: 50%; top: 56px; transform: translateX(-50%); font-size: 15px; pointer-events: none; display: none; white-space: nowrap; }
   #menu { position: fixed; right: 14px; top: 12px; display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; max-width: 46vw; }
   #menu button { border: 2px solid var(--line); background: var(--panel); border-radius: 14px; padding: 8px 12px; cursor: pointer; font-size: 15px; }
@@ -72,6 +73,7 @@
     #map { width: 100px; height: 100px; top: 66px; }
     #clock { left: 14px; transform: none; font-size: 14px; top: 176px; }
     #speedo { top: 212px; left: 14px; transform: none; font-size: 13px; }
+    #wanted { top: 244px; left: 14px; transform: none; font-size: 13px; }
     #menu button { padding: 6px 9px; font-size: 13px; }
     #menu small { display: none; }
     #hint { bottom: 168px; font-size: 13px; }
@@ -85,6 +87,7 @@
 <canvas id="map" width="150" height="150"></canvas>
 <div id="clock" class="pill"></div>
 <div id="speedo" class="pill"></div>
+<div id="wanted" class="pill"></div>
 <div id="menu">
   <button id="bPhone">📱 Telefon <small>(P)</small></button>
   <button id="bShop">R$ Mağaza</button>
@@ -111,6 +114,7 @@
     <li>🏠 Güneydoğu mahallesindeki <b>SATILIK</b> arsalardan birine git, <b>E</b> ile ev al. Küçük Ev ücretsiz!</li>
     <li>💼 Binalara gidip meslek seç: 👮 Polis, 🩺 Doktor, 📦 Kurye, ☕ Kafe Çalışanı, 🎒 Öğrenci. Her oyun saatinde maaş alırsın.</li>
     <li>🚲 <b>📱 Telefon → Araçlar</b> ile araç çağır, yanına gidip <b>F</b> ile bin. <b>H</b> korna!</li>
+    <li>🔑 Trafikteki bir arabanın yanına git, <b>F</b> ile çal! Ama ⭐ polis peşine düşer: 50 m uzakta 12 sn kalırsan kurtulursun, yakalanırsan araca el konur ve ₺150 ceza.</li>
     <li>💵 Görevleri yap, para kazan; daha iyi ev ve araba al.</li>
     <li>✏️ Telefon → Ayarlar'dan rol adını değiştir. Adın ve mesleğin başının üstünde görünür.</li>
   </ol>
@@ -263,7 +267,7 @@ function reportStats() {
   if (!platform.inside) return;
   const j = JOBS[save.job];
   parent.postMessage({ type: "kup:stats", stats: { "💵 Para": "₺ " + fmt(save.money), "💼 Meslek": j.icon + " " + j.name,
-    "🏠 Ev": save.house ? STYLE[save.house.style].name : "Yok", "📦 Görev": save.tasks } }, "*");
+    "🏠 Ev": save.house ? STYLE[save.house.style].name : "Yok", "📦 Görev": save.tasks, "🔑 Çalınan": save.stolen || 0 } }, "*");
 }
 function requestPurchase(item, done) {
   if (!platform.inside) { notify("Robux ile almak için oyunu Küp Evreni'nden aç (ana klasördeki index.html)"); return; }
@@ -981,7 +985,7 @@ function syncCarModel(c, dt) {
   const m = c.model;
   m.g.position.set(c.x, 0, c.z); m.g.rotation.y = c.h;
   for (const w of m.wheels) w.rotation.x += c.speed * dt / 0.42;
-  m.sirens.forEach((s, i) => s.visible = (c === pcar && pl.inCar) ? (Math.floor(now * 4) + i) % 2 === 0 : true);
+  m.sirens.forEach((s, i) => s.visible = ((c === pcar && pl.inCar) || c.chasing) ?(Math.floor(now * 4) + i) % 2 === 0 : true);
 }
 
 // ================================================================ NPC: trafik ve yayalar (Roblox: NpcService)
@@ -1013,13 +1017,14 @@ function randomSidewalkPoint() {
   const z = k === 0 ? b.z1 - 1 : k === 2 ? b.z2 + 1 : b.z1 + (b.z2 - b.z1) * t;
   return { x, z };
 }
+const TRAFFIC_COLS = [0xe63946, 0x118ab2, 0xffd166, 0x2b2d42, 0x06d6a0, 0xf2f3f5, 0x7b2cbf, 0x8338ec];
+function addTraffic(li, start) {
+  const path = lanePath(LOOPS[li]), p = path[start], q = path[(start + 1) % path.length];
+  const v = Math.random() < 0.3 ? VEH.kamyonet : VEH.sedan;
+  traffic.push({ def: v, model: makeCar(v, pick(TRAFFIC_COLS)), path, i: (start + 1) % path.length, x: p.x, z: p.z, h: Math.atan2(q.x - p.x, q.z - p.z), speed: 0, honkT: 0 });
+}
 function spawnNpcs() {
-  const cols = [0xe63946, 0x118ab2, 0xffd166, 0x2b2d42, 0x06d6a0, 0xf2f3f5, 0x7b2cbf];
-  [[0, 0], [0, 2], [1, 1], [2, 0], [3, 2], [4, 0], [4, 3]].forEach(([li, start]) => {
-    const path = lanePath(LOOPS[li]), p = path[start], q = path[(start + 1) % path.length];
-    const v = Math.random() < 0.3 ? VEH.kamyonet : VEH.sedan;
-    traffic.push({ def: v, model: makeCar(v, pick(cols)), path, i: (start + 1) % path.length, x: p.x, z: p.z, h: Math.atan2(q.x - p.x, q.z - p.z), speed: 0, honkT: 0 });
-  });
+  [[0, 0], [0, 2], [1, 1], [2, 0], [3, 2], [4, 0], [4, 3]].forEach(([li, start]) => addTraffic(li, start));
   for (let i = 0; i < 10; i++) {
     const loop = sidewalkLoop(BLOCKS[i % 4]), k = Math.floor(Math.random() * 4), a = loop[k], b = loop[(k + 1) % 4], t = Math.random();
     const av = buildAvatar(randomAvatar());
@@ -1054,6 +1059,7 @@ function updateTraffic(dt) {
     if (ahead(px, pz)) stop = byPlayer = true;
     if (pcar && !pl.inCar && ahead(pcar.x, pcar.z)) stop = true;
     for (const o of traffic) if (o !== c && ahead(o.x, o.z, 1.8)) stop = true;
+    if (wanted && ahead(wanted.cop.x, wanted.cop.z, 1.8)) stop = true;
     const target = stop ? 0 : Math.abs(turn) > 0.4 ? 5 : 11;
     c.speed += clamp(target - c.speed, -14 * dt, 5 * dt);
     c.x += fx * c.speed * dt; c.z += fz * c.speed * dt;
@@ -1066,6 +1072,119 @@ function updatePeds(dt) {
     const t = n.loop[n.i];
     if (walkNpc(n, t.x, t.z, n.speed, dt)) n.i = (n.i + n.step + 4) % 4;
   }
+}
+
+// ================================================================ Araba çalma + aranma (Roblox: CrimeService)
+const WANTED_TIME = 75, ESCAPE_DIST = 50, ESCAPE_TIME = 12, COP_SPEED = 20, FINE = 150;
+const runners = [];        // arabası çalınıp kaçan sürücüler
+let refills = [];          // yeniden doğacak trafik arabalarının zamanları
+let wanted = null;         // { t, far, sirenT, cop: { def, model, x, z, h, speed, chasing } }
+function nearTraffic(r = 3.4) {
+  let best = null, bd = r;
+  for (const c of traffic) { const d = dist(pl.x, pl.z, c.x, c.z); if (d < bd) { bd = d; best = c; } }
+  return best;
+}
+function stealCar(c) {
+  if (pl.inCar || sleep || !c || !traffic.includes(c)) return;
+  initAudio();
+  traffic.splice(traffic.indexOf(c), 1);
+  removeCar();
+  // Sürücü kapıdan fırlar, bağırarak kaçar
+  const rx = Math.cos(c.h), rz = -Math.sin(c.h);
+  const r = { ...npcBase(buildAvatar(randomAvatar())), x: c.x - rx * 1.9, z: c.z - rz * 1.9, t: 6, dx: -rx, dz: -rz };
+  r.label = makeLabel(4, 1, "😡 Arabam!", "#ff6b6b");
+  runners.push(r);
+  pcar = { def: c.def, model: c.model, x: c.x, z: c.z, h: c.h, speed: 0, stolen: true };
+  pl.x = c.x; pl.z = c.z; pl.inCar = true; pl.y = 0; pl.vy = 0; cam.lastDrag = -9;
+  SFX.door(); [880, 660, 880, 660].forEach((f, i) => tone(f, 0.12, "square", 0.04, undefined, i * 0.15)); // alarm
+  save.stolen = (save.stolen || 0) + 1; persist(true);
+  refills.push(now + 25);
+  startWanted();
+}
+// Yol ağı: ROADS hem dikey (x = r) hem yatay (z = r) yollar
+function onRoad(x, z) {
+  return { v: Math.abs(z) <= ROAD_END ? ROADS.find(r => Math.abs(x - r) < 4.5) : undefined,
+           h: Math.abs(x) <= ROAD_END ? ROADS.find(r => Math.abs(z - r) < 4.5) : undefined };
+}
+function roadPoint(x, z) {
+  let best = null;
+  for (const c of ROADS) for (const p of [{ x: c, z: clamp(z, -ROAD_END, ROAD_END) }, { x: clamp(x, -ROAD_END, ROAD_END), z: c }]) {
+    p.d = dist(x, z, p.x, p.z); if (!best || p.d < best.d) best = p;
+  }
+  return best;
+}
+function clearLine(x1, z1, x2, z2) {
+  const n = Math.ceil(dist(x1, z1, x2, z2) / 1.5);
+  for (let i = 1; i < n; i++) { const t = i / n; if (blocked(x1 + (x2 - x1) * t, z1 + (z2 - z1) * t, 1.1)) return false; }
+  return true;
+}
+const viaRoad = (a, b) => ROADS.reduce((best, r) => Math.abs(a - r) + Math.abs(r - b) < Math.abs(a - best) + Math.abs(best - b) ? r : best);
+function copWaypoint(c, tx, tz) {
+  if (dist(c.x, c.z, tx, tz) < 30 && clearLine(c.x, c.z, tx, tz)) return { x: tx, z: tz };
+  const t = roadPoint(tx, tz), me = onRoad(c.x, c.z), tr = onRoad(t.x, t.z);
+  const V = me.v, H = me.h, TV = tr.v, TH = tr.h, def = k => k !== undefined;
+  if ((def(V) && V === TV) || (def(H) && H === TH)) return t;
+  if (def(H) && def(TV)) return { x: TV, z: H };
+  if (def(V) && def(TH)) return { x: V, z: TH };
+  if (def(V)) return { x: V, z: viaRoad(c.z, t.z) };
+  if (def(H)) return { x: viaRoad(c.x, t.x), z: H };
+  return roadPoint(c.x, c.z);
+}
+function startWanted() {
+  if (wanted) { wanted.t = WANTED_TIME; wanted.far = 0; notify("🔑 Bir araba daha çaldın! ⭐ Aranma süren yenilendi"); return; }
+  // Polis, oyuncudan ~50 m uzaktaki bir kavşaktan çıkar
+  let best = null;
+  for (const x of ROADS) for (const z of ROADS) { const s = Math.abs(dist(x, z, pl.x, pl.z) - 50); if (!best || s < best.s) best = { x, z, s }; }
+  const cop = { def: VEH.polis, model: makeCar(VEH.polis), x: best.x, z: best.z, h: Math.atan2(pl.x - best.x, pl.z - best.z), speed: 0, chasing: true };
+  wanted = { t: WANTED_TIME, far: 0, sirenT: 0, cop };
+  notify("🔑 Arabayı çaldın! ⭐ Polis peşinde, kaç!"); SFX.siren();
+}
+function endWanted(msg) {
+  if (!wanted) return;
+  scene.remove(wanted.cop.model.g); wanted = null;
+  if (msg) notify(msg);
+}
+function busted() {
+  const fine = Math.min(FINE, save.money);
+  if (pcar && pcar.stolen) removeCar();
+  if (fine) { save.money -= fine; flashMoney(-fine); }
+  save.busted = (save.busted || 0) + 1; persist(true);
+  SFX.bad(); cam.shake = 0.4;
+  endWanted(`🚓 Yakalandın! Çalıntı araca el konuldu${fine ? `, ceza -₺${fine}` : ""}`);
+}
+function updateCrime(dt) {
+  // kaçan sürücüler
+  for (let i = runners.length - 1; i >= 0; i--) {
+    const r = runners[i];
+    r.t -= dt;
+    const nx = r.x + r.dx * 4.5 * dt, nz = r.z + r.dz * 4.5 * dt;
+    if (blocked(nx, nz, 0.35)) { const k = r.dx; r.dx = -r.dz; r.dz = k; }
+    else { r.x = nx; r.z = nz; r.face = Math.atan2(r.dx, r.dz); r.walk += dt * 18; r.moving = true; }
+    poseNpc(r); r.label.position.set(r.x, 3, r.z);
+    if (r.t <= 0) { removeNpc(r); runners.splice(i, 1); }
+  }
+  // trafiği yeniden doldur (oyuncudan uzakta)
+  if (refills.length && refills[0] <= now) {
+    const li = Math.floor(Math.random() * LOOPS.length), path = lanePath(LOOPS[li]);
+    const start = path.findIndex(p => dist(p.x, p.z, pl.x, pl.z) > 30 && !traffic.some(t => dist(t.x, t.z, p.x, p.z) < 10));
+    if (start >= 0) { addTraffic(li, start); refills.shift(); } else refills[0] = now + 3;
+  }
+  if (!wanted) return;
+  const c = wanted.cop, tx = pl.inCar ? pcar.x : pl.x, tz = pl.inCar ? pcar.z : pl.z, d = dist(c.x, c.z, tx, tz);
+  if (d < 3.4) { busted(); return; }
+  wanted.t -= dt;
+  wanted.far = d > ESCAPE_DIST ? wanted.far + dt : 0;
+  if (wanted.far > ESCAPE_TIME || wanted.t <= 0) {
+    SFX.good();
+    endWanted("😎 Polisi atlattın! Artık aranmıyorsun.");
+    return;
+  }
+  const w = copWaypoint(c, tx, tz), turn = angDiff(c.h, Math.atan2(w.x - c.x, w.z - c.z));
+  c.h += clamp(turn, -2.6 * dt, 2.6 * dt);
+  const target = Math.abs(turn) > 0.7 ? 7 : d < 10 ? 12 : COP_SPEED;
+  c.speed += clamp(target - c.speed, -18 * dt, 9 * dt);
+  c.x += Math.sin(c.h) * c.speed * dt; c.z += Math.cos(c.h) * c.speed * dt;
+  if ((wanted.sirenT -= dt) <= 0 && d < 45) { wanted.sirenT = 2.2; SFX.siren(); }
 }
 
 // ================================================================ Meslekler ve görevler (Roblox: JobService)
@@ -1332,6 +1451,7 @@ function nearestAction() {
     add(house.bed.x, house.bed.z, 2.4, sleepyHour() ? "🛏️ Uyu (sabaha kadar)" : "🛏️ Uyu (20:00'den sonra)", goSleep);
     add(house.tvX, house.tvZ, 2.6, house.tv.ch === 0 ? "📺 Televizyonu aç" : house.tv.ch === TV_CH.length - 1 ? "📺 Televizyonu kapat" : "📺 Sonraki kanal", tvNext);
   }
+  if (!inCar) { const t = nearTraffic(); if (t) add(t.x, t.z, 3.4, "🔑 Arabayı çal (F)", () => stealCar(t)); }
   if (!inCar && pcar) add(pcar.x, pcar.z, 3.6, `${pcar.def.icon} ${pcar.def.name}: bin (F)`, enterCar);
   let best = null, bd = 1e9;
   for (const a of L) {
@@ -1345,6 +1465,7 @@ function interact() { if (nearAct && nearAct.fn) { initAudio(); nearAct.fn(); } 
 function toggleCar() {
   if (pl.inCar) exitCar();
   else if (pcar && dist(pl.x, pl.z, pcar.x, pcar.z) < 4) enterCar();
+  else if (nearTraffic()) stealCar(nearTraffic());
   else if (!pcar) openPhone("arac");
   else notify(`${pcar.def.icon} Aracın uzakta. Telefon → Araçlar ile yeniden çağır.`);
 }
@@ -1382,7 +1503,7 @@ function renderPhone() {
   } else if (phoneTab === "arac") {
     B.innerHTML = `<div class="muted">Bir aracı çağırınca en yakın yola gelir. Yanına gidip <b>F</b> ile bin.</div>` + VEHICLES.map(v => {
       let r;
-      if (Server.canUse(v)) r = btn(pcar && pcar.def === v ? "↻ Yeniden çağır" : "Çağır", `call:${v.id}`, false, "go");
+      if (Server.canUse(v)) r = btn(pcar && pcar.def === v && !pcar.stolen ? "↻ Yeniden çağır" : "Çağır", `call:${v.id}`, false, "go");
       else if (v.job) r = btn(`${JOBS[v.job].icon} ${JOBS[v.job].name} olmalısın`, "", true);
       else if (v.pass) r = btn("R$ " + PASSES.find(p => p.id === v.pass).jeton, `pass:${v.pass}`, false, "warn");
       else r = btn("₺ " + fmt(v.price) + " Al", `buy:${v.id}`, save.money < v.price);
@@ -1500,6 +1621,7 @@ function drawMap() {
   mapX.drawImage(mapBg, 0, 0);
   mapX.fillStyle = "#fff";
   for (const c of traffic) mapX.fillRect(mp(c.x) - 1.5, mp(c.z) - 1.5, 3, 3);
+  if (wanted) { mapX.fillStyle = Math.floor(now * 4) % 2 ? "#ff2a2a" : "#2a5bff"; mapX.fillRect(mp(wanted.cop.x) - 3, mp(wanted.cop.z) - 3, 6, 6); }
   if (pcar && !pl.inCar) { mapX.fillStyle = "#4cc9f0"; mapX.fillRect(mp(pcar.x) - 2.5, mp(pcar.z) - 2.5, 5, 5); }
   if (beacon.visible) {
     mapX.fillStyle = "#ffd166"; mapX.strokeStyle = "#000"; mapX.lineWidth = 1;
@@ -1531,13 +1653,15 @@ function updateHud(dt) {
   setText($("jobTxt"), `${j.icon} ${j.name} · ${rpName()}`);
   setText($("clock"), `${isNight ? "🌙" : "☀️"} ${clockText()} · Gün ${save.day}`);
   $("speedo").style.display = pl.inCar ? "block" : "none";
-  if (pl.inCar) setText($("speedo"), `${pcar.def.icon} ${pcar.def.name} · ${Math.round(Math.abs(pcar.speed) * 3.6)} km/s`);
+  if (pl.inCar) setText($("speedo"), `${pcar.stolen ? "🔑 Çalıntı " : pcar.def.icon + " "}${pcar.def.name} · ${Math.round(Math.abs(pcar.speed) * 3.6)} km/s`);
   const a = nearAct, b = $("btnAct");
   b.style.display = a ? "block" : "none";
   if (a) { setText(b.lastChild, a.text); b.style.opacity = a.fn ? 1 : 0.6; }
   const h = hintText();
   setText($("hint"), h); $("hint").style.display = h ? "block" : "none";
-  const nearCar = pcar && !pl.inCar && dist(pl.x, pl.z, pcar.x, pcar.z) < 4;
+  const nearCar = !pl.inCar && ((pcar && dist(pl.x, pl.z, pcar.x, pcar.z) < 4) || nearTraffic());
+  $("wanted").style.display = wanted ? "block" : "none";
+  if (wanted) setText($("wanted"), `⭐ ARANIYORSUN · 🚓 ${Math.round(dist(wanted.cop.x, wanted.cop.z, pl.x, pl.z))} m · ${wanted.far > 0 ? "kaçıyorsun " + Math.ceil(ESCAPE_TIME - wanted.far) + " sn" : Math.ceil(wanted.t) + " sn"}`);
   $("btnCar").style.display = pl.inCar || nearCar || touchUI ? "block" : "none";
   setText($("btnCar"), pl.inCar ? "🚶" : "🚗");
   $("btnHorn").style.display = pl.inCar ? "block" : "none";
@@ -1733,7 +1857,7 @@ function update(dt) {
   if (sleep) updateSleep(dt);
   else if (pl.inCar) updateCar(dt, !anyOverlay());
   else if (!anyOverlay()) updatePlayer(dt);
-  if (!blocking()) { updateDayNight(dt); updateTraffic(dt); updatePeds(dt); updateJobs(dt); }
+  if (!blocking()) { updateDayNight(dt); updateTraffic(dt); updatePeds(dt); updateJobs(dt); updateCrime(dt); }
   updateHouse(dt);
   nearAct = nearestAction();
   updateHud(dt);
