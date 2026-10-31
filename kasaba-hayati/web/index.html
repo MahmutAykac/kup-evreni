@@ -1759,6 +1759,7 @@ function syncScene(dt) {
   nameTag.position.set(pl.x, (pl.inCar && !bike ? (pcar.def.kind === "van" ? 3.6 : 3) : pl.y + 2.9), pl.z);
   if (pcar) syncCarModel(pcar, dt);
   for (const c of traffic) syncCarModel(c, dt);
+  if (wanted) syncCarModel(wanted.cop, dt);
   for (const n of peds) poseNpc(n);
   if (call) { if (call.kind === "hirsiz") poseNpc(call.npc); else { call.npc.g.position.set(call.npc.x, call.npc.y, call.npc.z); } }
   beaconRing.scale.setScalar(1 + Math.sin(now * 4) * 0.15);
