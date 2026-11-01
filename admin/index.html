@@ -7,12 +7,12 @@
 <title>Küp Evreni Admin</title>
 <!--
   Küp Evreni admin paneli: ayrı sayfa (ana sayfada hiçbir giriş yolu yok).
-  Platformla aynı localStorage'ı okur/yazar: kupEvreni (aktif hesap), kupEvreniHesaplar (diğer hesaplar), oyunların saveKey'leri.
-  localStorage adrese bağlıdır: admin, oyunun oynandığı adresle aynı yerden açılmalı (file:// ≠ localhost ≠ github.io).
-  Değiştirilen şifrenin SHA-256 özeti kupEvreniAdmin anahtarında durur (sadece o cihazda geçerli).
-  Giriş sessionStorage'da tutulur (kupAdminOturum): sayfa yenilenince atmaz, 12 saat ya da Çıkış ile biter.
-  Her şey tarayıcıda çalıştığı için gerçek bir güvenlik değildir.
+  Veriler Supabase'de (supabase/kurulum.sql): oyuncular, satın alımlar, hediyeler, ayarlar, promo kodlar, işlem kaydı.
+  Giriş: Küp Evreni hesabı + profiles.is_admin = true. Yetkiyi sunucu kontrol eder (RLS + admin_* fonksiyonları).
+  Admin oturumu ana sayfadan ayrı tutulur (storageKey kupAdminAuth).
+  Oyunların kendi kayıtları (saveKey) hâlâ cihazdadır: "Zaten verildi" ve Oyun kaydı sütunu bu cihazı gösterir.
 -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/dist/umd/supabase.min.js"></script>
 <style>
   :root {
     --bg: #0d0e12;
@@ -280,13 +280,15 @@
 
 <!-- Giriş -->
 <div id="login">
-  <form class="loginCard" id="loginForm" autocomplete="off">
+  <form class="loginCard" id="loginForm" autocomplete="on">
     <div class="brand"><i></i>KÜP EVRENİ <small>ADMIN</small></div>
     <h1>Yönetici girişi</h1>
-    <div class="muted" style="font-size:14px">Devam etmek için admin şifresini gir.</div>
+    <div class="muted" style="font-size:14px">Küp Evreni'ndeki admin hesabınla gir.</div>
+    <label class="lbl" for="user">Kullanıcı adı</label>
+    <input class="field" id="user" placeholder="Kullanıcı adı" autocomplete="username" autofocus>
     <label class="lbl" for="pass">Şifre</label>
     <div class="pw">
-      <input class="field" type="password" id="pass" placeholder="••••••••" autofocus>
+      <input class="field" type="password" id="pass" placeholder="••••••••" autocomplete="current-password">
       <button type="button" id="eye" title="Şifreyi göster"></button>
     </div>
     <div class="err" id="loginErr"></div>
@@ -309,6 +311,7 @@
       <button class="btn ghost" id="menuBtn" aria-label="Menü"></button>
       <div><div class="crumb">Admin</div><h1 id="pageTitle"></h1></div>
       <div class="search"><span id="searchIco"></span><input class="field" id="search" placeholder="Kullanıcı ara…"></div>
+      <button class="btn ghost" id="btnRefresh" title="Sunucudan yenile"></button>
     </header>
     <div class="page" id="page"></div>
   </div>
@@ -346,9 +349,10 @@ const BADGES = [
   { id: "hour", icon: "⏱️", name: "Bir saat" }, { id: "shopper", icon: "🛍️", name: "Alışverişçi" },
 ];
 const FACES = { smile: "🙂", cool: "😎", wow: "😮", grin: "😁" };
-const KEY = "kupEvreni", ACC_KEY = "kupEvreniHesaplar", ADMIN_KEY = "kupEvreniAdmin", SESSION_KEY = "kupAdminOturum";
-const ADMIN_DEFAULT_HASH = "0d004a4a238543099c4adb83dd38ef1aed92936620fd7aeeecbbf6bfdc447df3";
-const SESSION_MS = 12 * 3600 * 1000;
+// Supabase (ana sayfayla aynı proje; admin oturumu ayrı anahtarda)
+const SB_URL = "https://hpgfimktdcuoikgbbggk.supabase.co", SB_KEY = "sb_publishable_o212R-fxvBvUaX7RCTIVUg__NjphVnk";
+const sb = window.supabase ? window.supabase.createClient(SB_URL, SB_KEY, { auth: { storageKey: "kupAdminAuth" } }) : null;
+let adminSession = null, adminName = "";
 
 // ================================================================ İkonlar (çizgi ikonlar)
 const ICONS = {
@@ -383,39 +387,6 @@ const ICONS = {
 };
 const ic = (n, extra = "") => `<svg class="i" viewBox="0 0 24 24" ${extra}>${ICONS[n]}</svg>`;
 
-// ================================================================ Yardımcılar
-function sha256(str) { // crypto.subtle telefonda (http://192.168...) yok, o yüzden elle
-  const K = [], H = [];
-  for (let p = 2, c = 0; c < 64; p++) {
-    let prime = true;
-    for (let d = 2; d * d <= p; d++) if (p % d === 0) { prime = false; break; }
-    if (!prime) continue;
-    if (c < 8) H[c] = (Math.pow(p, 1 / 2) * 2 ** 32) | 0;
-    K[c++] = (Math.pow(p, 1 / 3) * 2 ** 32) | 0;
-  }
-  const b = [...new TextEncoder().encode(str)], len = b.length * 8;
-  b.push(0x80); while (b.length % 64 !== 56) b.push(0);
-  for (let i = 7; i >= 0; i--) b.push(i >= 4 ? 0 : (len >>> (i * 8)) & 255);
-  const rr = (v, n) => (v >>> n) | (v << (32 - n));
-  for (let o = 0; o < b.length; o += 64) {
-    const w = [];
-    for (let i = 0; i < 64; i++) {
-      if (i < 16) w[i] = (b[o + i * 4] << 24) | (b[o + i * 4 + 1] << 16) | (b[o + i * 4 + 2] << 8) | b[o + i * 4 + 3];
-      else {
-        const s0 = rr(w[i - 15], 7) ^ rr(w[i - 15], 18) ^ (w[i - 15] >>> 3), s1 = rr(w[i - 2], 17) ^ rr(w[i - 2], 19) ^ (w[i - 2] >>> 10);
-        w[i] = (w[i - 16] + s0 + w[i - 7] + s1) | 0;
-      }
-    }
-    let [a, bb, c, d, e, f, g, h] = H;
-    for (let i = 0; i < 64; i++) {
-      const t1 = (h + (rr(e, 6) ^ rr(e, 11) ^ rr(e, 25)) + ((e & f) ^ (~e & g)) + K[i] + w[i]) | 0;
-      const t2 = ((rr(a, 2) ^ rr(a, 13) ^ rr(a, 22)) + ((a & bb) ^ (a & c) ^ (bb & c))) | 0;
-      h = g; g = f; f = e; e = (d + t1) | 0; d = c; c = bb; bb = a; a = (t1 + t2) | 0;
-    }
-    [a, bb, c, d, e, f, g, h].forEach((v, i) => H[i] = (H[i] + v) | 0);
-  }
-  return H.map(v => (v >>> 0).toString(16).padStart(8, "0")).join("");
-}
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
 const fmtNum = n => (n || 0).toLocaleString("tr");
 function fmtTime(sec) { const m = Math.floor((sec || 0) / 60); return m < 60 ? `${m} dk` : `${Math.floor(m / 60)} sa ${m % 60} dk`; }
@@ -425,36 +396,122 @@ function toast(msg, bad) {
   t.textContent = msg; t.classList.toggle("bad", !!bad); t.classList.add("on");
   clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove("on"), 2600);
 }
-function load(key, fallback) { try { return JSON.parse(localStorage.getItem(key) || "null") ?? fallback; } catch (e) { return fallback; } }
-function save(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) {} }
-function adminHash() { try { return localStorage.getItem(ADMIN_KEY) || ADMIN_DEFAULT_HASH; } catch (e) { return ADMIN_DEFAULT_HASH; } }
 const ava = a => `<span class="ava" style="background:${esc(a.avatar?.skin || "#ffdbac")}">${FACES[a.avatar?.face] || "🙂"}</span>`;
 const playSec = a => Object.values(a.playTime || {}).reduce((s, v) => s + v, 0);
 const spentOf = a => (a.purchases || []).reduce((s, p) => s + (p.price || 0), 0);
 
-// Her işlemde localStorage'dan taze oku: ana sayfa başka sekmede açıksa onun yazdıklarını ezmeyelim
-// Kullanıcı kimliği: "a" = aktif hesap, "0", "1"… = kupEvreniHesaplar[i]
-function users() {
-  const active = load(KEY, null), accounts = load(ACC_KEY, []);
-  const list = accounts.map((a, i) => ({ uid: String(i), a, active: false }));
-  if (active && active.name) list.unshift({ uid: "a", a: active, active: true });
-  return list;
+// ================================================================ Sunucu verisi (Supabase)
+// Panel açılınca her şey DB'ye yüklenir; okuma DB'den (anında), yazma hem DB'ye hem sunucuya (arka planda).
+const DB = { profiles: [], buysBy: {}, purchases: [], gifts: [], cfg: {}, codes: [], packs: [], log: [], uses: {} };
+async function loadAll() {
+  const [p, b, g, s, l, u] = await Promise.all([
+    sb.from("profiles").select("id,name,jeton,data,is_admin,created_at,updated_at").order("created_at"),
+    sb.from("purchases").select("user_id,game,item,price,at").order("at", { ascending: false }).limit(5000),
+    sb.from("gifts").select("*").order("at", { ascending: false }).limit(1000),
+    sb.from("settings").select("key,value"),
+    sb.from("admin_log").select("at,text").order("at", { ascending: false }).limit(300),
+    sb.from("code_uses").select("code"),
+  ]);
+  const bad = [p, b, g, s, l, u].find(x => x.error);
+  if (bad) throw new Error(bad.error.message);
+  DB.profiles = p.data || [];
+  DB.purchases = b.data || [];
+  DB.buysBy = {};
+  for (const x of DB.purchases) (DB.buysBy[x.user_id] = DB.buysBy[x.user_id] || []).push({ game: x.game, id: x.item, price: x.price, at: Date.parse(x.at) });
+  DB.gifts = g.data || [];
+  const st = Object.fromEntries((s.data || []).map(x => [x.key, x.value]));
+  DB.cfg = st.cfg && typeof st.cfg === "object" ? st.cfg : {};
+  DB.codes = Array.isArray(st.codes) ? st.codes : [];
+  DB.packs = Array.isArray(st.packs) ? st.packs : [];
+  DB.log = (l.data || []).map(x => ({ at: Date.parse(x.at), text: x.text }));
+  DB.uses = {};
+  for (const x of u.data || []) DB.uses[x.code] = (DB.uses[x.code] || 0) + 1;
 }
-function getUser(uid) { return users().find(u => u.uid === uid) || null; }
-function putUser(uid, acc) {
-  if (uid === "a") { save(KEY, acc); return; }
-  const accounts = load(ACC_KEY, []); accounts[+uid] = acc; save(ACC_KEY, accounts);
+// Arka planda yaz; hata olursa göster
+function bg(q, what) {
+  Promise.resolve(q).then(r => { if (r && r.error) throw r.error; }).catch(e => toast(`${what} kaydedilemedi: ${e.message || e}`, true));
+}
+const nowIso = () => new Date().toISOString();
+const putSetting = (key, value) => bg(sb.from("settings").upsert({ key, value, updated_at: nowIso() }), "Ayar");
+const giftRow = g => ({ gid: g.gid, to: g.to_name, toId: g.to_id, game: g.game, items: g.items || [], note: g.note || "", skipped: g.skipped || [], at: Date.parse(g.at), got: g.got ? Date.parse(g.got) : null });
+const idByName = n => (DB.profiles.find(p => p.name === n) || {}).id;
+
+// Eski panel load/save çağrıları: platform anahtarları sunucuya, oyun kayıtları bu cihazın localStorage'ına gider
+function load(key, fallback) {
+  if (key === CFG_KEY) return structuredClone({ ...DB.cfg, codes: DB.codes.map(c => ({ ...c, used: DB.uses[c.code] || 0 })) });
+  if (key === LOG_KEY) return DB.log.slice();
+  if (key === PACK_KEY) return structuredClone(DB.packs);
+  if (key === GIFT_KEY) return {
+    pending: DB.gifts.filter(g => !g.got).map(giftRow),
+    done: DB.gifts.filter(g => g.got).map(giftRow).sort((a, b) => b.got - a.got).slice(0, 100),
+  };
+  try { return JSON.parse(localStorage.getItem(key) || "null") ?? fallback; } catch (e) { return fallback; }
+}
+function save(key, val) {
+  if (key === CFG_KEY) {
+    const { codes = [], ...rest } = val || {};
+    const clean = codes.map(({ used, ...c }) => c);
+    if (JSON.stringify(rest) !== JSON.stringify(DB.cfg)) { DB.cfg = rest; putSetting("cfg", rest); }
+    if (JSON.stringify(clean) !== JSON.stringify(DB.codes)) { DB.codes = clean; putSetting("codes", clean); }
+    return;
+  }
+  if (key === PACK_KEY) { DB.packs = val || []; putSetting("packs", DB.packs); return; }
+  if (key === LOG_KEY) { // panelde sadece "Temizle" kullanıyor
+    DB.log = val || [];
+    if (!DB.log.length) bg(sb.from("admin_log").delete().gt("id", 0), "İşlem kaydı");
+    return;
+  }
+  if (key === GIFT_KEY) { // bekleyen listedeki farkı sunucuya yaz: yeni = ekle, çıkan = iptal
+    const pend = (val && val.pending) || [];
+    const added = pend.filter(x => !DB.gifts.some(g => g.gid === x.gid))
+      .map(x => ({ gid: x.gid, to_id: x.toId || idByName(x.to), to_name: x.to, game: x.game, items: x.items, note: x.note || "", at: new Date(x.at || Date.now()).toISOString() }))
+      .filter(x => x.to_id);
+    const removed = DB.gifts.filter(g => !g.got && !pend.some(x => x.gid === g.gid)).map(g => g.gid);
+    DB.gifts = [...added.map(x => ({ ...x, got: null, skipped: [] })), ...DB.gifts.filter(g => !removed.includes(g.gid))];
+    if (added.length) bg(sb.from("gifts").insert(added), "Hediye");
+    if (removed.length) bg(sb.from("gifts").delete().in("gid", removed), "Hediye iptali");
+    return;
+  }
+  try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) {}
 }
 
-// ================================================================ Oturum
-function sessionOk() {
-  try {
-    const s = JSON.parse(sessionStorage.getItem(SESSION_KEY) || "null");
-    return !!s && s.h === adminHash() && Date.now() - s.t < SESSION_MS; // şifre değişirse oturum düşer
-  } catch (e) { return false; }
+// Kullanıcı kimliği = Supabase kullanıcı id'si. "active" = son 5 dakikada bir şey yaptı (çevrimiçi)
+function users() {
+  const now = Date.now();
+  return DB.profiles.map(p => ({
+    uid: p.id, active: now - Date.parse(p.updated_at) < 5 * 60 * 1000, admin: p.is_admin,
+    a: { ...(p.data || {}), name: p.name, jeton: p.jeton, joined: p.data?.joined || String(p.created_at).slice(0, 10), purchases: DB.buysBy[p.id] || [] },
+  }));
 }
-function startSession() { try { sessionStorage.setItem(SESSION_KEY, JSON.stringify({ h: adminHash(), t: Date.now() })); } catch (e) {} }
-function endSession() { try { sessionStorage.removeItem(SESSION_KEY); } catch (e) {} }
+function getUser(uid) { return users().find(u => u.uid === uid) || null; }
+// Panel sadece Robux, rozet ve günlük ödülü değiştirir. Robux sadece değiştiyse gider (oyuncunun o arada kazandığı ezilmesin).
+function putUser(uid, acc) {
+  const p = DB.profiles.find(x => x.id === uid);
+  if (!p) return;
+  const patch = { badges: acc.badges || {}, lastDaily: acc.lastDaily || "" };
+  const j = Math.min(2000000000, Math.max(0, Math.floor(acc.jeton || 0)));
+  const jChanged = j !== p.jeton;
+  p.jeton = j; p.data = { ...(p.data || {}), ...patch };
+  bg(sb.rpc("admin_patch", { p_id: uid, p_jeton: jChanged ? j : null, p_data: patch }), p.name);
+}
+
+// Bu cihazda buluttan önceki admin ayarları varsa (kod, duyuru, avatar mağazası, paketler) bir kez sunucuya taşı
+function migrateLocal() {
+  if (Object.keys(DB.cfg).length || DB.codes.length || DB.packs.length) return;
+  let c = null, packs = null, log = null;
+  try { c = JSON.parse(localStorage.getItem(CFG_KEY) || "null"); packs = JSON.parse(localStorage.getItem(PACK_KEY) || "null"); log = JSON.parse(localStorage.getItem(LOG_KEY) || "null"); } catch (e) {}
+  if (!(c && Object.keys(c).length) && !(packs && packs.length)) return;
+  if (c) save(CFG_KEY, c);
+  if (packs && packs.length) save(PACK_KEY, packs);
+  if (Array.isArray(log) && log.length) {
+    DB.log = [...DB.log, ...log].slice(0, 300);
+    bg(sb.from("admin_log").insert(log.slice(0, 300).map(x => ({ at: new Date(x.at).toISOString(), text: String(x.text) }))), "Eski işlem kaydı");
+  }
+  toast("Bu cihazdaki eski admin ayarları sunucuya taşındı");
+}
+
+// ================================================================ Oturum (Supabase hesabı + is_admin)
+function sessionOk() { return !!adminSession; }
 
 $("eye").innerHTML = ic("eye");
 $("eye").onclick = () => {
@@ -463,24 +520,49 @@ $("eye").onclick = () => {
   $("eye").innerHTML = ic(show ? "eyeOff" : "eye");
   $("pass").focus();
 };
-$("loginForm").onsubmit = e => {
+function loginFail(msg) {
+  $("loginErr").textContent = msg;
+  const c = $("loginForm"); c.classList.remove("shake"); void c.offsetWidth; c.classList.add("shake");
+}
+// Oturum gerçekten admin mi? (yetkiyi asıl sunucu kontrol eder, bu sadece doğru ekranı göstermek için)
+async function checkAdmin(user) {
+  const { data } = await sb.from("profiles").select("name,is_admin").eq("id", user.id).maybeSingle();
+  return data && data.is_admin ? data.name : null;
+}
+$("loginForm").onsubmit = async e => {
   e.preventDefault();
-  if (sha256($("pass").value) !== adminHash()) {
-    $("loginErr").textContent = "Şifre yanlış. Tekrar dene.";
-    const c = $("loginForm"); c.classList.remove("shake"); void c.offsetWidth; c.classList.add("shake");
-    $("pass").select(); return;
-  }
-  startSession(); enterApp();
+  if (!sb) { loginFail("Sunucuya bağlanılamadı. İnterneti kontrol edip sayfayı yenile."); return; }
+  const btn = $("loginForm").querySelector("button[type=submit]");
+  btn.disabled = true; $("loginErr").textContent = "";
+  try {
+    const { data: email, error: e1 } = await sb.rpc("kup_login_email", { p_name: $("user").value.trim() });
+    if (e1) throw e1;
+    if (!email) { loginFail("Bu kullanıcı adıyla hesap yok."); return; }
+    const { data, error } = await sb.auth.signInWithPassword({ email, password: $("pass").value });
+    if (error) { loginFail("Şifre yanlış. Tekrar dene."); $("pass").select(); return; }
+    const name = await checkAdmin(data.user);
+    if (!name) { await sb.auth.signOut(); loginFail("Bu hesabın admin yetkisi yok."); return; }
+    adminSession = data.session; adminName = name;
+    enterApp();
+  } catch (err) { loginFail("Bağlantı hatası: " + (err.message || err)); }
+  finally { btn.disabled = false; }
 };
-function enterApp() {
+async function enterApp() {
   $("login").style.display = "none";
   $("app").classList.add("on");
+  $("page").innerHTML = `<div class="card"><div class="cardBody muted">Sunucudan yükleniyor…</div></div>`;
+  try { await loadAll(); migrateLocal(); } catch (e) { toast("Veriler yüklenemedi: " + e.message, true); }
   go(location.hash.slice(1) || "overview");
 }
-function logout() {
-  endSession(); closeDrawer();
+async function refreshData(quiet) {
+  if (!adminSession) return;
+  try { await loadAll(); render(); if (!quiet) toast("Veriler yenilendi"); } catch (e) { toast("Yenilenemedi: " + e.message, true); }
+}
+async function logout() {
+  try { await sb.auth.signOut(); } catch (e) {}
+  adminSession = null; closeDrawer();
   $("app").classList.remove("on"); $("login").style.display = "";
-  $("pass").value = ""; $("loginErr").textContent = ""; $("pass").focus();
+  $("pass").value = ""; $("loginErr").textContent = ""; $("user").focus();
 }
 
 // ================================================================ Gezinme
@@ -532,20 +614,18 @@ $("siteLink").innerHTML = ic("out") + "Siteye dön";
 $("btnLogout").innerHTML = ic("logout") + "Çıkış yap";
 $("btnLogout").onclick = logout;
 $("searchIco").innerHTML = ic("search");
+$("btnRefresh").innerHTML = ic("refresh");
+$("btnRefresh").onclick = () => refreshData(false);
+// Sekmeye geri dönünce listeler tazelensin (form doldurulan sayfalarda değil)
+document.addEventListener("visibilitychange", () => { if (!document.hidden && ["overview", "users", "purchases", "badges"].includes(page) && !drawerUid) refreshData(true); });
 $("search").addEventListener("input", () => { if (page !== "users") go("users"); else renderUsers(); });
-// Ana sayfa başka sekmede bir şey kaydederse paneli tazele
-addEventListener("storage", () => { if ($("app").classList.contains("on")) render(); });
 
 // ================================================================ Boş durum (hesap yok)
 function emptyUsers() {
-  const here = location.protocol === "file:" ? "bilgisayardaki dosya (file://)" : location.host;
   return `<div class="empty"><div class="big">${ic("users")}</div>
-    <h3>Bu adreste kayıtlı hesap yok</h3>
-    <p>Tarayıcı her adresin verisini ayrı tutar. Admin paneli şu an <code>${esc(here)}</code> adresinde açık ve burada henüz hesap oluşturulmamış.
-    Küp Evreni'ni <b>bu adreste</b> açıp giriş yap ya da hesap oluştur, sonra bu sayfayı yenile.</p>
-    ${location.protocol === "file:" ? `<a class="btn primary" href="http://localhost:5173/admin/">Sunucudan aç: localhost:5173/admin</a>
-      <p style="margin-top:10px;font-size:13px">Açılmazsa sunucu kapalıdır: <code>sunucu</code> klasöründeki <code>kur.bat</code> dosyasına çift tıkla.</p>`
-      : `<a class="btn primary" href="../index.html" target="_blank">${ic("out")}Küp Evreni'ni bu adreste aç</a>`}
+    <h3>Henüz kayıtlı oyuncu yok</h3>
+    <p>Oyuncular Küp Evreni'nde hesap oluşturunca (hangi cihazdan olursa olsun) burada görünür.</p>
+    <a class="btn primary" href="../index.html" target="_blank">${ic("out")}Küp Evreni'ni aç</a>
   </div>`;
 }
 
@@ -569,7 +649,7 @@ function renderOverview() {
   const buys = allPurchases().slice(0, 6);
   $("page").innerHTML = `
     <div class="kpis">
-      ${kpi("users", "var(--accent)", "var(--accent-soft)", "Kullanıcılar", u.length, u.some(x => x.active) ? "1 aktif oturum" : "aktif oturum yok")}
+      ${kpi("users", "var(--accent)", "var(--accent-soft)", "Kullanıcılar", u.length, `${u.filter(x => x.active).length} çevrimiçi (son 5 dk)`)}
       ${kpi("gem", "var(--gold)", "var(--gold-soft)", "Dolaşımdaki Robux", "R$ " + fmtNum(totalRobux), "tüm hesapların bakiyesi")}
       ${kpi("bag", "var(--play)", "var(--play-soft)", "Harcanan Robux", "R$ " + fmtNum(spent), allPurchases().length + " satın alım")}
       ${kpi("clock", "var(--text2)", "var(--surface3)", "Toplam oynama", fmtTime(play), "tüm oyunlar")}
@@ -580,7 +660,7 @@ function renderOverview() {
         <div class="cardBody">${play ? `<div class="bars">${bars}</div>` : `<p class="muted" style="margin:0">Henüz oynanan oyun yok.</p>`}</div></div>
       <div class="card"><div class="cardHead"><h2>En çok Robux</h2><button class="btn sm ghost right" data-goto="users">Tümü ${ic("chevron")}</button></div>
         <div class="cardBody" style="padding-top:8px">${top.length ? top.map(x => `<div class="user click" data-user="${x.uid}" style="padding:8px 0;cursor:pointer">${ava(x.a)}
-          <div style="flex:1;min-width:0"><b>${esc(x.a.name)}</b><small>${x.active ? "Aktif" : "Kayıtlı"}</small></div><span class="robux num">R$ ${fmtNum(x.a.jeton)}</span></div>`).join("") : `<p class="muted" style="margin:0">Hesap yok.</p>`}</div></div>
+          <div style="flex:1;min-width:0"><b>${esc(x.a.name)}</b><small>${x.active ? "Çevrimiçi" : "Kayıtlı"}</small></div><span class="robux num">R$ ${fmtNum(x.a.jeton)}</span></div>`).join("") : `<p class="muted" style="margin:0">Hesap yok.</p>`}</div></div>
     </div>
     <div class="card"><div class="cardHead"><h2>Son satın alımlar</h2><button class="btn sm ghost right" data-goto="purchases">Tümü ${ic("chevron")}</button></div>
       ${buys.length ? purchaseTable(buys) : `<div class="cardBody muted">Henüz satın alım yok.</div>`}</div>`;
@@ -598,7 +678,7 @@ function renderUsers() {
       <thead><tr><th>Kullanıcı</th><th>Durum</th><th class="r">Robux</th><th class="hideSm">Rozet</th><th class="r hideSm">Oynama</th><th class="r hideSm">Harcama</th><th></th></tr></thead>
       <tbody>${u.map(x => `<tr class="click" data-user="${x.uid}">
         <td><div class="user">${ava(x.a)}<div><b>${esc(x.a.name)}</b><small>Katılma: ${esc(x.a.joined || "—")}</small></div></div></td>
-        <td>${x.active ? `<span class="pill green">Aktif</span>` : `<span class="pill gray">Kayıtlı</span>`}</td>
+        <td>${x.active ? `<span class="pill green">Çevrimiçi</span>` : `<span class="pill gray">Kayıtlı</span>`}${x.admin ? ` <span class="pill gold">Admin</span>` : ""}</td>
         <td class="r robux num">R$ ${fmtNum(x.a.jeton)}</td>
         <td class="hideSm">${BADGES.filter(b => x.a.badges?.[b.id]).map(b => b.icon).join(" ") || "—"}</td>
         <td class="r num hideSm">${fmtTime(playSec(x.a))}</td>
@@ -660,46 +740,45 @@ function renderGames() {
 
 // ================================================================ Ayarlar
 function renderSettings() {
-  let size = 0; try { for (let i = 0; i < localStorage.length; i++) size += (localStorage.getItem(localStorage.key(i)) || "").length; } catch (e) {}
+  const u = users();
   $("page").innerHTML = `<div class="settings">
-    <div class="card"><div class="cardHead"><h2>Admin şifresi</h2></div><div class="cardBody">
-      ${[["pOld", "Mevcut şifre", "current-password", ""], ["pNew", "Yeni şifre", "new-password", "En az 4 karakter"], ["pNew2", "Yeni şifre (tekrar)", "new-password", ""]].map(([id, lab, ac, ph]) =>
+    <div class="card"><div class="cardHead"><h2>Admin hesabı</h2></div><div class="cardBody">
+      <div class="kv"><span class="muted">Giriş yapan</span><b>${esc(adminName)}</b></div>
+      ${[["pOld", "Mevcut şifre", "current-password", ""], ["pNew", "Yeni şifre", "new-password", "En az 6 karakter"], ["pNew2", "Yeni şifre (tekrar)", "new-password", ""]].map(([id, lab, ac, ph]) =>
         `<label class="lbl" for="${id}">${lab}</label><div class="pw"><input class="field" type="password" id="${id}" autocomplete="${ac}" placeholder="${ph}"><button type="button" data-eye="${id}" title="Şifreyi göster">${ic("eye")}</button></div>`).join("")}
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px"><button class="btn primary" id="btnPass">Şifreyi değiştir</button>
-        <button class="btn" id="btnPassReset">Varsayılana döndür</button></div>
-      <p class="muted" style="font-size:13px;margin:12px 0 0">${adminHash() === ADMIN_DEFAULT_HASH ? "Şu an varsayılan şifre kullanılıyor." : "Şu an özel bir şifre kullanılıyor."} Şifre sadece bu cihazda ve bu adreste geçerlidir.</p></div></div>
-    <div class="card"><div class="cardHead"><h2>Depolama</h2></div><div class="cardBody">
-      <div class="kv"><span class="muted">Adres</span><code>${esc(location.protocol === "file:" ? "file:// (bilgisayardaki dosya)" : location.origin)}</code></div>
-      <div class="kv"><span class="muted">Kullanılan alan</span><code>${(size / 1024).toFixed(1)} KB</code></div>
-      <div class="kv"><span class="muted">Hesap verisi</span><code>${KEY}, ${ACC_KEY}</code></div>
-      <button class="btn" id="btnExport" style="margin-top:12px">${ic("download")}Yedek indir (JSON)</button></div></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px"><button class="btn primary" id="btnPass">Şifreyi değiştir</button></div>
+      <p class="muted" style="font-size:13px;margin:12px 0 0">Bu, Küp Evreni'ndeki hesabının şifresidir: ana sayfaya girerken de yeni şifreyi kullanırsın. Başka birini admin yapmak için Supabase SQL Editor'da:<br><code>update profiles set is_admin = true where name = 'Ad';</code></p></div></div>
+    <div class="card"><div class="cardHead"><h2>Sunucu</h2></div><div class="cardBody">
+      <div class="kv"><span class="muted">Veritabanı</span><code>${esc(SB_URL.replace("https://", ""))}</code></div>
+      <div class="kv"><span class="muted">Hesaplar</span><code>${u.length}</code></div>
+      <div class="kv"><span class="muted">Satın alımlar</span><code>${DB.purchases.length}</code></div>
+      <div class="kv"><span class="muted">Hediyeler</span><code>${DB.gifts.length}</code></div>
+      <button class="btn" id="btnExport" style="margin-top:12px">${ic("download")}Yedek indir (JSON)</button>
+      <p class="muted" style="font-size:13px;margin:12px 0 0">Yedek: tüm hesaplar, satın alımlar, hediyeler, ayarlar, promo kodlar ve bu cihazdaki oyun kayıtları.</p></div></div>
   </div>`;
   $("page").querySelectorAll("[data-eye]").forEach(b => b.onclick = () => {
     const f = $(b.dataset.eye), show = f.type === "password";
     f.type = show ? "text" : "password"; b.innerHTML = ic(show ? "eyeOff" : "eye");
   });
-  // Zaten giriş yapılmış olduğu için mevcut şifre sorulmaz
-  $("btnPassReset").onclick = () => {
-    if (!confirm("Admin şifresi varsayılana döndürülsün mü?")) return;
-    try { localStorage.removeItem(ADMIN_KEY); } catch (e) {}
-    logAct("Admin şifresi varsayılana döndürüldü");
-    startSession(); renderSettings(); toast("Şifre varsayılana döndü");
-  };
-  $("btnPass").onclick = () => {
-    if (sha256($("pOld").value) !== adminHash()) { toast("Mevcut şifre yanlış. Göz ikonuyla ne yazdığını kontrol et.", true); return; }
+  $("btnPass").onclick = async () => {
     const p = $("pNew").value;
-    if (p.length < 4) { toast("Yeni şifre en az 4 karakter olmalı", true); return; }
+    if (p.length < 6) { toast("Yeni şifre en az 6 karakter olmalı", true); return; }
     if (p !== $("pNew2").value) { toast("Yeni şifreler aynı değil", true); return; }
-    try { localStorage.setItem(ADMIN_KEY, sha256(p)); } catch (e) {}
+    const email = adminSession.user.email;
+    const chk = await sb.auth.signInWithPassword({ email, password: $("pOld").value });
+    if (chk.error) { toast("Mevcut şifre yanlış. Göz ikonuyla ne yazdığını kontrol et.", true); return; }
+    adminSession = chk.data.session;
+    const { error } = await sb.auth.updateUser({ password: p });
+    if (error) { toast("Şifre değişmedi: " + error.message, true); return; }
     logAct("Admin şifresi değiştirildi");
-    startSession(); renderSettings(); toast("Admin şifresi değişti");
+    renderSettings(); toast("Şifre değişti");
   };
   $("btnExport").onclick = () => {
-    const data = { at: new Date().toISOString(), [KEY]: load(KEY, null), [ACC_KEY]: load(ACC_KEY, []) };
-    GAMES.forEach(g => data[g.saveKey] = load(g.saveKey, null));
+    const data = { at: nowIso(), profiles: DB.profiles, purchases: DB.purchases, gifts: DB.gifts, cfg: DB.cfg, codes: DB.codes, packs: DB.packs, log: DB.log, deviceSaves: {} };
+    GAMES.forEach(g => data.deviceSaves[g.saveKey] = load(g.saveKey, null));
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
-    a.download = `kup-evreni-yedek-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `kup-evreni-yedek-${nowIso().slice(0, 10)}.json`;
     a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   };
 }
@@ -713,7 +792,7 @@ const cfg = () => load(CFG_KEY, {}) || {};
 function setCfg(fn) { const c = cfg(); fn(c); save(CFG_KEY, c); }
 const eco = () => ({ ...ECO_DEFAULT, ...(cfg().eco || {}) });
 const newId = () => "c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
-function logAct(text) { const l = load(LOG_KEY, []); l.unshift({ at: Date.now(), text }); save(LOG_KEY, l.slice(0, 300)); }
+function logAct(text) { text = `${adminName}: ${text}`; DB.log.unshift({ at: Date.now(), text }); DB.log = DB.log.slice(0, 300); bg(sb.from("admin_log").insert({ text }), "İşlem kaydı"); }
 const tg = (on, attrs) => `<button class="tg ${on ? "on" : ""}" ${attrs} aria-pressed="${!!on}"></button>`;
 // Sayı kutuları (data-num): yazarken binlik nokta konur (19.000.000), okurken noktalar atılır
 const numVal = el => { const d = String(el.value).replace(/\D/g, ""); return d === "" ? null : Number(d); };
@@ -1170,7 +1249,7 @@ function renderDrawer() {
   const a = x.a, buys = (a.purchases || []).slice().sort((p, q) => q.at - p.at);
   const games = GAMES.filter(g => a.playTime?.[g.id]).sort((p, q) => a.playTime[q.id] - a.playTime[p.id]);
   $("drawer").innerHTML = `
-    <div class="dHead">${ava(a)}<div><h2>${esc(a.name)}</h2>${x.active ? `<span class="pill green">Aktif hesap</span>` : `<span class="pill gray">Kayıtlı hesap</span>`}</div>
+    <div class="dHead">${ava(a)}<div><h2>${esc(a.name)}</h2>${x.active ? `<span class="pill green">Çevrimiçi</span>` : `<span class="pill gray">Kayıtlı hesap</span>`}</div>
       <button class="btn ghost" data-act="close" aria-label="Kapat">${ic("x")}</button></div>
     <div class="dBody">
       <div class="sec"><div class="miniStats">
@@ -1223,12 +1302,13 @@ $("drawer").addEventListener("click", e => {
   else if (act === "badgesReset") { a.badges = { welcome: true }; putUser(x.uid, a); logAct(`${a.name}: rozetler sıfırlandı`); toast("Rozetler sıfırlandı"); }
   else if (act === "daily") { a.lastDaily = ""; putUser(x.uid, a); logAct(`${a.name}: günlük ödül yenilendi`); toast("Günlük ödül tekrar alınabilir"); }
   else if (act === "delete") {
-    askDelete(a.name, () => {
-      // Onay penceresi açıkken liste değişmiş olabilir: aynı ada sahip hesabı taze veriden bul
-      const y = getUser(x.uid);
-      if (!y || y.a.name !== a.name) { toast("Hesap bulunamadı", true); render(); return; }
-      if (y.uid === "a") { try { localStorage.removeItem(KEY); } catch (err) {} }
-      else { const accounts = load(ACC_KEY, []); accounts.splice(+y.uid, 1); save(ACC_KEY, accounts); }
+    askDelete(a.name, async () => {
+      // Hesap sunucudan silinir (satın alımları ve hediyeleri de gider)
+      const { error } = await sb.rpc("admin_delete_user", { p_id: x.uid });
+      if (error) { toast("Silinemedi: " + error.message, true); return; }
+      DB.profiles = DB.profiles.filter(p => p.id !== x.uid);
+      DB.gifts = DB.gifts.filter(g => g.to_id !== x.uid);
+      DB.purchases = DB.purchases.filter(p => p.user_id !== x.uid); delete DB.buysBy[x.uid];
       logAct(`Hesap silindi: ${a.name}`); closeDrawer(); toast("Hesap silindi"); render();
     });
     return;
@@ -1244,11 +1324,9 @@ $("page").addEventListener("click", e => {
   else if (u) openDrawer(u.dataset.user);
   else if (w) {
     const g = GAMES.find(x => x.id === w.dataset.wipe);
-    if (!confirm(`${g.title} kaydı silinsin mi? Bu cihazdaki tüm oyuncuların bu oyundaki ilerlemesi gider.`)) return;
+    if (!confirm(`${g.title} kaydı bu cihazdan silinsin mi? Bu cihazda bu oyunda oynanan ilerleme gider (oyun kayıtları henüz bulutta değil).`)) return;
     try { localStorage.removeItem(g.saveKey); } catch (err) {}
-    const active = load(KEY, null);
-    if (active && active.gameStats) { delete active.gameStats[g.id]; save(KEY, active); }
-    logAct(`Oyun kaydı silindi: ${g.title}`); toast("Kayıt silindi"); render();
+    logAct(`Oyun kaydı silindi (bu cihaz): ${g.title}`); toast("Kayıt silindi"); render();
   }
 });
 
@@ -1262,7 +1340,17 @@ $("page").addEventListener("mousemove", e => {
 $("page").addEventListener("mouseleave", () => $("tip").style.display = "none");
 
 // ================================================================ Başlat
-if (sessionOk()) enterApp();
+// Kayıtlı admin oturumu varsa (sayfa yenilendi) şifre sormadan aç
+(async () => {
+  if (!sb) { $("loginErr").textContent = "Sunucu kütüphanesi yüklenemedi. İnterneti kontrol edip sayfayı yenile."; return; }
+  const { data } = await sb.auth.getSession();
+  if (!data.session) return;
+  const name = await checkAdmin(data.session.user);
+  if (!name) { await sb.auth.signOut(); return; }
+  adminSession = data.session; adminName = name;
+  enterApp();
+})();
+sb && sb.auth.onAuthStateChange((ev, s) => { if (adminSession && s) adminSession = s; if (ev === "SIGNED_OUT" && adminSession) logout(); });
 </script>
 </body>
 </html>

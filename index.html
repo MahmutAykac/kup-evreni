@@ -12,6 +12,7 @@
   - Oyunlar iframe içinde açılır. Platform ↔ oyun iletişimi postMessage ile (protokol INDEX.md'de).
 -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/dist/umd/supabase.min.js"></script>
 <style>
   :root {
     --bg: #111216;
@@ -238,9 +239,9 @@
     <div class="badges" id="badges"></div>
     <h2>Oyun istatistikleri</h2>
     <div id="gameStats"></div>
-    <h2>Hesaplar</h2>
+    <h2>Hesap</h2>
     <div id="accounts" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center"></div>
-    <p class="muted" style="margin-top:28px">İlerleme bu tarayıcıda saklanır. <button class="btn" id="btnResetAll" style="margin-left:8px">Platform verisini sıfırla</button></p>
+    <p class="muted" style="margin-top:28px">☁️ Hesabın bulutta saklanır: başka bir cihazda kullanıcı adın ve şifrenle giriş yapınca Robux'un, avatarın ve rozetlerin seninle gelir. (Oyunların içindeki ilerleme şimdilik bu cihazda kalır.)</p>
   </section>
 </main>
 
@@ -269,16 +270,16 @@
   </section>
 </div>
 <div class="modal" id="nameModal"><div class="sheet" id="nameSheet" style="max-width:420px"><div class="body">
-  <h1>👋 Hesap oluştur</h1>
-  <p class="muted">Oyunlarda görünecek bir kullanıcı adı seç.</p>
-  <input id="nameInput" maxlength="20" placeholder="Kullanıcı adı">
-  <button class="btn play" id="btnName" style="width:100%">Başla</button>
-</div></div></div>
-<div class="modal" id="loginModal"><div class="sheet" style="max-width:420px"><div class="body">
-  <h1>Giriş yap</h1>
-  <p class="muted">Bu cihazdaki hesaplardan birini seç.</p>
-  <div id="loginList"></div>
-  <button class="btn" style="width:100%;margin-top:10px" id="btnLoginNew">Yeni hesap oluştur</button>
+  <h1 id="authTitle">👋 Hesap oluştur</h1>
+  <p class="muted" id="authSub"></p>
+  <form id="authForm" autocomplete="on" onsubmit="return false">
+    <input id="nameInput" maxlength="20" placeholder="Kullanıcı adı" autocomplete="username">
+    <input id="passInput" type="password" maxlength="72" placeholder="Şifre (en az 6 karakter)" autocomplete="new-password">
+    <div id="authErr" style="color:#ff6b6b;min-height:20px;font-size:14px;margin-bottom:6px"></div>
+    <button class="btn play" id="btnName" style="width:100%">Başla</button>
+  </form>
+  <button class="btn" id="btnAuthSwitch" style="width:100%;margin-top:10px"></button>
+  <div id="oldAccs"></div>
 </div></div></div>
 <div class="modal" id="earnModal"><div class="sheet" style="max-width:480px"><div class="body">
   <h1>💎 Robux nasıl kazanılır?</h1>
@@ -379,20 +380,79 @@ const playable = g => !g.soon && !gameCfg(g.id).maint;
 const customItem = id => [...(CFG.avatar?.faces || []), ...(CFG.avatar?.hats || [])].find(x => x.id === id);
 const faceEmoji = id => (FACES.find(f => f[0] === id) || FACES[0])[1];
 
-// ================================================================ Profil (localStorage)
+// ================================================================ Bulut (Supabase): hesaplar, Robux, hediyeler, ayarlar
+// Robux sadece sunucudaki fonksiyonlarla değişir (supabase/kurulum.sql). Tarayıcıdaki kopya sadece hızlı açılış için önbellektir.
+const SB_URL = "https://hpgfimktdcuoikgbbggk.supabase.co", SB_KEY = "sb_publishable_o212R-fxvBvUaX7RCTIVUg__NjphVnk";
+const sb = window.supabase ? window.supabase.createClient(SB_URL, SB_KEY) : null;
+let session = null;
+async function rpc(fn, args = {}) {
+  if (!sb) throw new Error("Sunucuya bağlanılamadı");
+  const { data, error } = await sb.rpc(fn, args);
+  if (error) throw new Error(error.message || "Sunucu hatası");
+  return data;
+}
+const errMsg = e => /fetch|network|load failed/i.test(String(e && e.message)) ? "İnternet bağlantısı yok, tekrar dene" : (e && e.message) || "Hata";
+const escH = s => String(s ?? "").replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
+// Kullanıcı adı → giriş e-postası (e-posta hiç gönderilmez, sadece Supabase'in kimlik alanı)
+const TRMAP = { ç: "c", ğ: "g", ı: "i", ö: "o", ş: "s", ü: "u" };
+const slug = n => n.toLocaleLowerCase("tr").replace(/[çğıöşü]/g, c => TRMAP[c]).normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+const emailFor = n => `u.${slug(n)}@kupevreni.app`;
+
+// ================================================================ Profil (sunucudan; localStorage = önbellek)
 const KEY = "kupEvreni";
-const DEFAULT = { name: "", jeton: eco().start, lastDaily: "", joined: new Date().toISOString().slice(0, 10), recent: [], playTime: {},
+const DEFAULT = { name: "", jeton: 0, lastDaily: "", joined: "", recent: [], playTime: {},
   badges: { welcome: true }, purchases: [], gameStats: {},
   avatar: { skin: SKINS[0], shirt: "#118ab2", pants: "#2b2d42", hat: "cap", hatColor: "#e63946", face: "smile" } };
-let profile;
-try { profile = JSON.parse(localStorage.getItem(KEY) || "null"); } catch (e) { profile = null; }
-profile = profile ? { ...DEFAULT, ...profile, avatar: { ...DEFAULT.avatar, ...(profile.avatar || {}) } } : structuredClone(DEFAULT);
-function persist() { try { localStorage.setItem(KEY, JSON.stringify(profile)); } catch (e) {} }
-// Diğer (aktif olmayan) hesaplar
+// Eski (buluttan önceki) cihaz hesapları: taşınana kadar kupEvreniHesaplar'da durur
 const ACC_KEY = "kupEvreniHesaplar";
-let accounts;
-try { accounts = JSON.parse(localStorage.getItem(ACC_KEY) || "[]"); } catch (e) { accounts = []; }
-function persistAccounts() { try { localStorage.setItem(ACC_KEY, JSON.stringify(accounts)); } catch (e) {} }
+const readJSON = (k, fb) => { try { return JSON.parse(localStorage.getItem(k) || "null") ?? fb; } catch (e) { return fb; } };
+const writeJSON = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
+(function moveOldSlot() { // aktif eski hesap da listeye geçer, KEY artık sadece bulut önbelleği
+  const a = readJSON(KEY, null);
+  if (a && a.name && !a.cloud) { writeJSON(ACC_KEY, [a, ...readJSON(ACC_KEY, [])]); try { localStorage.removeItem(KEY); } catch (e) {} }
+})();
+const oldAccounts = () => (readJSON(ACC_KEY, []) || []).filter(a => a && a.name && !a.cloud);
+function forgetOld(name) { // taşınan hesap listeden çıkar; ne olur ne olmaz diye yedeği kalır
+  const all = readJSON(ACC_KEY, []), gone = all.filter(a => a && a.name === name);
+  writeJSON("kupEvreniEskiYedek", [...readJSON("kupEvreniEskiYedek", []), ...gone]);
+  writeJSON(ACC_KEY, all.filter(a => !(a && a.name === name)));
+}
+let profile;
+{ const c = readJSON(KEY, null); profile = c && c.cloud ? { ...DEFAULT, ...c, avatar: { ...DEFAULT.avatar, ...(c.avatar || {}) } } : structuredClone(DEFAULT); }
+function cache() { writeJSON(KEY, profile); }
+// Avatar, son oyunlar, istatistikler sunucuya biraz bekleyip toplu gider
+function persist() { cache(); clearTimeout(persist.h); persist.h = setTimeout(pushSave, 1500); }
+async function pushSave() {
+  persist.h = null;
+  if (!session) return;
+  try { await rpc("kup_save", { p_avatar: profile.avatar, p_recent: profile.recent, p_stats: profile.gameStats }); } catch (e) {}
+}
+function applyRow(r) {
+  const d = r.data || {};
+  profile = { ...structuredClone(DEFAULT), ...d, avatar: { ...DEFAULT.avatar, ...(d.avatar || {}) },
+    name: r.name, jeton: r.jeton, cloud: true, uid: session.user.id, purchases: [] };
+  cache();
+}
+async function refreshProfile() {
+  if (!sb || !session) return false;
+  const { data, error } = await sb.from("profiles").select("name,jeton,data").eq("id", session.user.id).maybeSingle();
+  if (error) return false; // internet yoksa önbellekle devam
+  if (!data) { await logout(); return false; } // hesap silinmiş
+  if (persist.h) return true; // gönderilmemiş avatar değişikliği varsa üstüne yazma
+  applyRow(data);
+  return true;
+}
+async function logout() {
+  try { await sb.auth.signOut(); } catch (e) {}
+  try { localStorage.removeItem(KEY); } catch (e) {}
+  location.reload();
+}
+function setJeton(j) {
+  if (typeof j !== "number") return;
+  const changed = j !== profile.jeton;
+  profile.jeton = j; cache(); renderTop();
+  if (changed && current) sendProfile(); // açık oyundaki bakiye de güncellensin
+}
 
 function toast(msg) {
   const t = $("toast");
@@ -403,16 +463,24 @@ function toast(msg) {
 // Miktarlar admin panelinden değişebilir (eco), 2x etkinlikte iki katı
 const PLAY_REWARD_SEC = 300;   // her 5 dk oyun
 const dailyR = () => eco().daily * mult(), playR = () => eco().play * mult(), badgeR = () => eco().badge * mult();
-function addRobux(n) {
-  profile.jeton += n; persist(); renderTop();
-  if (current) sendProfile(); // açık oyundaki bakiye de güncellensin
-}
-function award(id) {
-  if (profile.badges[id]) return;
-  profile.badges[id] = true;
+function badgeToast(id, amt) {
   const b = BADGES.find(x => x.id === id);
-  addRobux(badgeR());
-  toast(`${b.icon} Rozet kazandın: ${b.name} (+R$ ${badgeR()})`);
+  profile.badges[id] = true; cache();
+  if (b && amt) toast(`${b.icon} Rozet kazandın: ${b.name} (+R$ ${amt})`);
+}
+// Rozeti sunucu verir ve Robux'u ekler (Bir saat ve Alışverişçi sunucuda otomatik)
+async function award(id) {
+  if (profile.badges[id] || !session) return;
+  profile.badges[id] = true; cache();
+  try { const r = await rpc("kup_award", { p_badge: id }); setJeton(r.jeton); if (r.amount) badgeToast(id, r.amount); }
+  catch (e) { delete profile.badges[id]; cache(); }
+}
+async function claimDaily() {
+  if (profile.lastDaily === today() || !session) return;
+  $("btnDaily").disabled = true;
+  try { const r = await rpc("kup_daily"); profile.lastDaily = r.lastDaily; setJeton(r.jeton); toast(`🎁 +R$ ${r.amount}!`); }
+  catch (e) { if (/zaten/.test(e.message)) profile.lastDaily = today(); toast(errMsg(e)); }
+  renderHome();
 }
 function renderEarn() {
   const canDaily = profile.lastDaily !== today();
@@ -429,29 +497,21 @@ function renderEarn() {
     <div class="earn"><div class="ico">🎟️</div><div><b>Promo kod</b><div style="display:flex;gap:8px;margin-top:6px">
       <input id="promoInput" maxlength="20" placeholder="KOD" style="flex:1;min-width:0;height:38px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text);padding:0 10px;font:inherit;text-transform:uppercase">
       <button class="btn blue" id="btnPromo">Kullan</button></div></div><span></span></div>`;
-  $("btnPromo").onclick = () => { redeem($("promoInput").value); renderEarn(); };
+  $("btnPromo").onclick = () => redeem($("promoInput").value);
   $("promoInput").onkeydown = e => { if (e.key === "Enter") $("btnPromo").click(); };
   const d = $("btnEarnDaily");
-  if (d) d.onclick = () => { $("btnDaily").click(); renderEarn(); };
+  if (d) d.onclick = async () => { await claimDaily(); renderEarn(); };
 }
-function redeem(raw) {
+// Promo kodlar sunucuda (oyuncular kod listesini göremez)
+async function redeem(raw) {
   const code = String(raw || "").trim().toLocaleUpperCase("tr");
   if (!code) return;
-  loadCfg(); // admin az önce eklemiş olabilir
-  const c = (CFG.codes || []).find(x => x.code === code);
-  if (!c || c.off) { toast("Geçersiz kod"); return; }
-  if (c.expires && today() > c.expires) { toast("Bu kodun süresi dolmuş"); return; }
-  profile.codes = profile.codes || [];
-  if (profile.codes.includes(code)) { toast("Bu kodu zaten kullandın"); return; }
-  if (c.max && (c.used || 0) >= c.max) { toast("Bu kodun kullanım hakkı doldu"); return; }
-  c.used = (c.used || 0) + 1;
-  try { localStorage.setItem(CFG_KEY, JSON.stringify(CFG)); } catch (e) {}
-  profile.codes.push(code);
-  addRobux(c.amount);
-  toast(`🎟️ ${code}: +R$ ${c.amount}!`);
+  try { const r = await rpc("kup_redeem", { p_code: code }); setJeton(r.jeton); toast(`🎟️ ${code}: +R$ ${r.amount}!`); renderEarn(); }
+  catch (e) { toast(errMsg(e)); }
 }
 const fmtTime = s => s < 60 ? `${Math.round(s)} sn` : s < 3600 ? `${Math.floor(s / 60)} dk` : `${(s / 3600).toFixed(1).replace(".", ",")} sa`;
-const today = () => new Date().toISOString().slice(0, 10);
+// Gün Türkiye saatine göre döner (sunucuyla aynı)
+const today = () => new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Istanbul" });
 
 // ================================================================ Blok avatar (three.js)
 function hasWebGL() { try { return !!document.createElement("canvas").getContext("webgl"); } catch (e) { return false; } }
@@ -643,17 +703,20 @@ function renderAvatarOpts() {
     <b>Aksesuar rengi</b>${sw("hatColor", COLORS)}
     <p class="muted">Avatarın oyunlara da taşınır (ör. Evcil Hayvan Simülatörü'nde karakterin, Pizza'da tabelan).</p>`;
 }
-$("avatarOpts").addEventListener("click", e => {
+$("avatarOpts").addEventListener("click", async e => {
   const b = e.target.closest("[data-k]");
   if (!b) return;
   const it = customItem(b.dataset.v);
-  if (it && !owns(it.id)) { // admin mağazasından fiyatlı öğe
+  if (it && !owns(it.id)) { // admin mağazasından fiyatlı öğe: fiyatı sunucu kontrol eder
     if (profile.jeton < it.price) { toast(`Yetersiz Robux: ${it.name} R$ ${it.price}`); return; }
     if (!confirm(`${it.name} R$ ${it.price} karşılığında satın alınsın mı?`)) return;
-    profile.jeton -= it.price;
-    profile.owned = [...(profile.owned || []), it.id];
-    profile.purchases.push({ game: "avatar", id: it.name, price: it.price, at: Date.now() });
-    award("shopper"); toast(`🛍️ ${it.name} senin!`);
+    try {
+      const r = await rpc("kup_buy_avatar", { p_item: it.id });
+      profile.owned = r.owned || [...(profile.owned || []), it.id];
+      setJeton(r.jeton);
+      if (r.badge) badgeToast("shopper", r.badge);
+      toast(`🛍️ ${it.name} senin!`);
+    } catch (err) { toast(errMsg(err)); return; }
   }
   profile.avatar[b.dataset.k] = b.dataset.v;
   persist(); award("stylish");
@@ -670,9 +733,8 @@ function renderProfile() {
     ["🎮", `${played}/${GAMES.filter(g => !g.soon).length}`, "Oynanan oyun"], ["📅", profile.joined, "Katılma"],
   ].map(([i, v, k]) => `<div class="stat"><b>${i} ${v}</b><span>${k}</span></div>`).join("");
   $("profName").value = profile.name;
-  $("accounts").innerHTML = `<span class="btn blue" style="cursor:default">👤 ${profile.name} (aktif)</span>` +
-    accounts.map((a, i) => `<button class="btn" data-acc="${i}">↔️ ${a.name}</button>`).join("") +
-    `<button class="btn play" id="btnNewAcc">➕ Yeni Hesap Ekle</button><button class="btn" id="btnLogout">🚪 Çıkış yap</button><button class="btn red" id="btnCloseAcc">🗑️ Hesabı kapat</button>`;
+  $("accounts").innerHTML = `<span class="btn blue" style="cursor:default">👤 ${escH(profile.name)}</span>` +
+    `<button class="btn" id="btnLogout">🚪 Çıkış yap / hesap değiştir</button><button class="btn red" id="btnCloseAcc">🗑️ Hesabı kapat</button>`;
   $("badges").innerHTML = BADGES.map(b => `<div class="badge ${profile.badges[b.id] ? "" : "off"}"><div>${b.icon}</div><b>${b.name}</b><div class="muted" style="font-size:12px">${b.desc}</div></div>`).join("");
   $("gameStats").innerHTML = GAMES.filter(g => !g.soon).map(g => {
     const s = statsFor(g);
@@ -712,18 +774,19 @@ function launch(id) {
   }
   document.body.style.overflow = "hidden";
   renderTop();
+  fetchGifts(); // oyun kup:ready gönderene kadar en güncel hediyeler gelsin
   clearInterval(playTimer);
-  playTimer = setInterval(() => {
-    if (document.hidden) return;
-    profile.playTime[id] = (profile.playTime[id] || 0) + 10;
-    profile.earnSec = (profile.earnSec || 0) + 10;
-    if (profile.earnSec >= PLAY_REWARD_SEC) {
-      profile.earnSec -= PLAY_REWARD_SEC;
-      addRobux(playR());
-      toast(`⏱️ ${PLAY_REWARD_SEC / 60} dakika oynadın: +R$ ${playR()}`);
-    }
-    if (Object.values(profile.playTime).reduce((s, v) => s + v, 0) >= 3600) award("hour");
-    persist();
+  // Süre ve 5 dk ödülü sunucuda sayılır (en az 8 sn arayla)
+  playTimer = setInterval(async () => {
+    if (document.hidden || !session) return;
+    try {
+      const r = await rpc("kup_tick", { p_game: id });
+      if (r.playTime) profile.playTime = r.playTime;
+      profile.earnSec = r.earnSec || 0;
+      if (r.reward) toast(`⏱️ ${PLAY_REWARD_SEC / 60} dakika oynadın: +R$ ${r.reward}`);
+      if (r.badge) badgeToast("hour", r.badge);
+      setJeton(r.jeton);
+    } catch (e) {}
   }, 10000);
 }
 function exitGame() {
@@ -735,15 +798,18 @@ function exitGame() {
   current = null;
   renderTop(); renderHome();
 }
-// ================================================================ Oyun içi hediyeler (admin panelinden: kupEvreniHediye)
-// pending: [{ gid, to: hesap adı, game, items: [{ key, n, label }], note, at }] · done: teslim edilenler (son 100)
+// ================================================================ Oyun içi hediyeler (admin panelinden, sunucudaki gifts tablosu)
 // Oyun açılıp kup:ready gönderince o oyunun bekleyen hediyeleri kup:gift ile gider; oyun uygulayınca kup:giftAck döner.
-const GIFT_KEY = "kupEvreniHediye";
-function giftStore() {
-  try { const g = JSON.parse(localStorage.getItem(GIFT_KEY) || "null") || {}; return { pending: g.pending || [], done: g.done || [] }; }
-  catch (e) { return { pending: [], done: [] }; }
+let gifts = []; // bekleyen hediyelerim: [{ gid, game, items: [{ key, n, label }] }]
+async function fetchGifts() {
+  if (!sb || !session) return;
+  const { data, error } = await sb.from("gifts").select("gid,game,items").is("got", null).eq("to_id", session.user.id);
+  if (error) return;
+  const before = gifts.length;
+  gifts = data || [];
+  if (!current && (before || gifts.length) && $("home").classList.contains("on")) renderHome();
 }
-const myGifts = game => profile.name ? giftStore().pending.filter(g => g.to === profile.name && (!game || g.game === game)) : [];
+const myGifts = game => gifts.filter(g => !game || g.game === game);
 function sendGifts() {
   const w = $("frame").contentWindow, list = current ? myGifts(current.id) : [];
   if (w && list.length) w.postMessage({ type: "kup:gift", gifts: list.map(g => ({ gid: g.gid, items: g.items.map(({ key, n }) => ({ key, n })) })) }, "*");
@@ -763,12 +829,12 @@ addEventListener("message", e => {
   const m = e.data || {};
   if (m.type === "kup:ready") { sendProfile(); sendGifts(); }
   else if (m.type === "kup:giftAck" && m.gid) {
-    const st = giftStore(), g = st.pending.find(x => x.gid === m.gid && x.to === profile.name && x.game === current.id);
+    const g = gifts.find(x => x.gid === m.gid && x.game === current.id);
     if (!g) return;
     const skipped = Array.isArray(m.skipped) ? m.skipped.map(String).slice(0, 20) : [];
-    st.pending = st.pending.filter(x => x.gid !== g.gid);
-    st.done = [{ gid: g.gid, to: g.to, game: g.game, items: g.items, note: g.note, skipped, at: g.at, got: Date.now() }, ...st.done].slice(0, 100);
-    try { localStorage.setItem(GIFT_KEY, JSON.stringify(st)); } catch (e) {}
+    gifts = gifts.filter(x => x !== g);
+    // Gönderilemese bile sorun yok: oyun aynı gid'i iki kez uygulamaz, sonraki açılışta tekrar onaylanır
+    rpc("kup_gift_ack", { p_gid: g.gid, p_skipped: skipped }).catch(() => {});
     const ok = g.items.filter(it => !skipped.includes(it.key));
     if (ok.length) toast(`🎁 Hediye geldi: ${ok.map(it => it.label || it.key).join(", ")}`);
   }
@@ -789,16 +855,21 @@ addEventListener("message", e => {
     $("buyModal").classList.add("on");
   }
 });
-function answerBuy(ok) {
+// Robux'u sunucu düşer; oyun sonucu ancak sunucu onaylayınca alır
+async function answerBuy(ok) {
   if (!pendingBuy) return;
-  if (ok && profile.jeton >= pendingBuy.price) {
-    profile.jeton -= pendingBuy.price;
-    profile.purchases.push({ game: current.id, id: pendingBuy.id, price: pendingBuy.price, at: Date.now() });
-    persist(); award("shopper");
-  } else ok = false;
-  $("frame").contentWindow.postMessage({ type: "kup:purchaseResult", reqId: pendingBuy.reqId, id: pendingBuy.id, ok, jeton: profile.jeton }, "*");
+  const pb = pendingBuy, game = current, w = $("frame").contentWindow;
   pendingBuy = null;
   $("buyModal").classList.remove("on");
+  if (ok) {
+    try {
+      const r = await rpc("kup_purchase", { p_game: game.id, p_item: pb.name, p_price: pb.price });
+      ok = !!r.ok; setJeton(r.jeton);
+      if (r.badge) badgeToast("shopper", r.badge);
+      if (!ok) toast("Yetersiz Robux");
+    } catch (e) { ok = false; toast(errMsg(e)); }
+  }
+  if (current === game && w) w.postMessage({ type: "kup:purchaseResult", reqId: pb.reqId, id: pb.id, ok, jeton: profile.jeton }, "*");
   renderTop();
 }
 $("btnBuyYes").onclick = () => answerBuy(true);
@@ -815,11 +886,7 @@ document.addEventListener("click", e => {
   if (c) openGameSheet(c.dataset.game);
 });
 $("gameModal").addEventListener("click", e => { if (e.target.id === "gameModal") $("gameModal").classList.remove("on"); });
-$("btnDaily").onclick = () => {
-  if (profile.lastDaily === today()) return;
-  profile.lastDaily = today(); addRobux(dailyR());
-  toast(`🎁 +R$ ${dailyR()}!`); renderHome();
-};
+$("btnDaily").onclick = claimDaily;
 $("btnExit").onclick = exitGame;
 $("jeton").onclick = () => { renderEarn(); $("earnModal").classList.add("on"); };
 $("btnEarnClose").onclick = () => $("earnModal").classList.remove("on");
@@ -828,71 +895,115 @@ $("btnFull").onclick = () => {
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   else document.documentElement.requestFullscreen && document.documentElement.requestFullscreen().catch(() => {});
 };
-$("btnProfName").onclick = () => {
+const NAME_RE = /^[A-Za-z0-9ÇĞİÖŞÜçğıöşü _.-]{2,20}$/;
+$("btnProfName").onclick = async () => {
   const n = $("profName").value.trim();
-  if (n.length < 2) { toast("Kullanıcı adı en az 2 karakter olmalı"); return; }
-  profile.name = n; persist(); renderTop(); renderProfile(); toast("Kaydedildi");
+  if (!NAME_RE.test(n)) { toast("Kullanıcı adı 2-20 harf/rakam olmalı"); return; }
+  if (n === profile.name) return;
+  try { await rpc("kup_rename", { p_name: n }); profile.name = n; cache(); renderTop(); renderProfile(); toast("Kaydedildi. Girişte artık bu adı kullan."); }
+  catch (e) { toast(errMsg(e)); }
 };
-$("accounts").addEventListener("click", e => {
-  if (e.target.id === "btnNewAcc" || e.target.id === "btnLogout") {
-    accounts.push(profile); persistAccounts();
-    localStorage.removeItem(KEY); location.reload(); // açılış ekranına döner
-    return;
-  }
+$("accounts").addEventListener("click", async e => {
+  if (e.target.id === "btnLogout") { logout(); return; }
   if (e.target.id === "btnCloseAcc") {
-    // Aktif hesap kalıcı silinir; diğer hesaplar ve oyunların kendi kayıtları kalır
+    // Hesap sunucudan kalıcı silinir; oyunların bu cihazdaki kendi kayıtları kalır
     if (prompt(`"${profile.name}" hesabı kalıcı olarak kapatılacak (Robux, avatar, rozetler silinir). Onaylamak için kullanıcı adını yazın:`) !== profile.name) { toast("Hesap kapatılmadı"); return; }
-    localStorage.removeItem(KEY); location.reload();
-    return;
+    try { await rpc("kup_delete_me"); } catch (err) { toast(errMsg(err)); return; }
+    logout();
   }
-  const b = e.target.closest("[data-acc]");
-  if (!b) return;
-  const i = +b.dataset.acc, other = accounts[i];
-  accounts[i] = profile; persistAccounts();
-  localStorage.setItem(KEY, JSON.stringify(other)); location.reload();
 });
-$("btnResetAll").onclick = () => {
-  if (!confirm("Platform verisi (ad, avatar, Robux, rozet, süreler) silinsin mi? Oyunların kendi kayıtları korunur.")) return;
-  localStorage.removeItem(KEY); location.reload();
-};
-$("btnName").onclick = () => {
-  const n = $("nameInput").value.trim();
-  if (n.length < 2) { $("nameInput").focus(); return; }
-  if (accounts.some(a => a.name.toLocaleLowerCase("tr") === n.toLocaleLowerCase("tr"))) { toast("Bu kullanıcı adı bu cihazda zaten var"); return; }
-  profile.name = n; persist();
-  $("nameModal").classList.remove("on");
-  $("landing").classList.remove("on");
-  renderTop(); renderHome();
-};
-$("nameInput").addEventListener("keydown", e => { if (e.key === "Enter") $("btnName").click(); });
 
-// ---------------------------------------------------------------- Açılış ekranı / giriş
-function openSignup() {
-  $("loginModal").classList.remove("on");
-  $("nameModal").classList.add("on"); setTimeout(() => $("nameInput").focus(), 50);
+// ---------------------------------------------------------------- Açılış ekranı / giriş (kullanıcı adı + şifre)
+let authMode = "signup", importFrom = null;
+function openAuth(mode, old) {
+  authMode = mode; importFrom = old || null;
+  const su = mode === "signup";
+  $("authTitle").textContent = su ? (importFrom ? "☁️ Hesabını taşı" : "👋 Hesap oluştur") : "Giriş yap";
+  $("authSub").textContent = su
+    ? (importFrom ? `"${importFrom.name}" hesabın buluta taşınacak. Bir şifre belirle; artık her cihazdan bu adla girebilirsin.` : "Bir kullanıcı adı ve şifre seç. Başka cihazlardan da bu bilgilerle girersin.")
+    : "Kullanıcı adın ve şifrenle gir.";
+  $("btnName").textContent = su ? (importFrom ? "Taşı ve başla" : "Başla") : "Giriş yap";
+  $("btnAuthSwitch").textContent = su ? "Zaten hesabın var mı? Giriş yap" : "Hesabın yok mu? Hesap oluştur";
+  $("nameInput").value = importFrom ? importFrom.name : "";
+  $("nameInput").readOnly = !!importFrom;
+  $("passInput").value = ""; $("authErr").textContent = "";
+  $("passInput").autocomplete = su ? "new-password" : "current-password";
+  const olds = oldAccounts();
+  $("oldAccs").innerHTML = su && !importFrom && olds.length
+    ? `<p class="muted" style="margin:18px 0 4px">Bu cihazda eski hesabın var. Seç, Robux'u ve rozetleriyle buluta taşıyalım:</p>` +
+      olds.map((a, i) => `<button class="accRow" data-old="${i}"><span class="face" style="background:${escH(a.avatar?.skin || SKINS[0])}">${faceEmoji(a.avatar?.face)}</span>
+        <span><b>${escH(a.name)}</b><div class="muted" style="font-size:13px">R$ ${a.jeton | 0} · Katılma: ${escH(a.joined || "—")}</div></span></button>`).join("")
+    : "";
+  $("nameModal").classList.add("on");
+  setTimeout(() => (importFrom ? $("passInput") : $("nameInput")).focus(), 50);
 }
-function openLogin() {
-  $("loginList").innerHTML = accounts.length
-    ? accounts.map((a, i) => `<button class="accRow" data-login="${i}"><span class="face" style="background:${a.avatar?.skin || SKINS[0]}">${faceEmoji(a.avatar?.face)}</span>
-        <span><b>${a.name}</b><div class="muted" style="font-size:13px">R$ ${a.jeton} · Katılma: ${a.joined}</div></span></button>`).join("")
-    : `<p class="muted">Bu cihazda kayıtlı hesap yok.</p>`;
-  $("loginModal").classList.add("on");
-}
-$("btnSignup").onclick = openSignup;
-$("btnSignup2").onclick = openSignup;
-$("btnLoginNew").onclick = openSignup;
-$("btnLogin").onclick = openLogin;
-$("lGameRow").addEventListener("click", e => { if (e.target.closest("[data-game]")) { e.stopPropagation(); openSignup(); } });
-$("loginList").addEventListener("click", e => {
-  const b = e.target.closest("[data-login]");
-  if (!b) return;
-  const [acc] = accounts.splice(+b.dataset.login, 1); persistAccounts();
-  localStorage.setItem(KEY, JSON.stringify(acc)); location.reload();
-});
-["nameModal", "loginModal"].forEach(id => $(id).addEventListener("click", e => { if (e.target.id === id && $("landing").classList.contains("on")) $(id).classList.remove("on"); }));
+$("oldAccs").addEventListener("click", e => { const b = e.target.closest("[data-old]"); if (b) openAuth("signup", oldAccounts()[+b.dataset.old]); });
+$("btnAuthSwitch").onclick = () => openAuth(authMode === "signup" ? "login" : "signup");
+$("btnName").onclick = async () => {
+  const n = $("nameInput").value.trim(), pw = $("passInput").value, err = t => { $("authErr").textContent = t; };
+  if (!sb) { err("Sunucuya bağlanılamadı. İnternetini kontrol edip sayfayı yenile."); return; }
+  if (!NAME_RE.test(n) || slug(n).length < 2) { err("Kullanıcı adı 2-20 harf/rakam olmalı"); $("nameInput").focus(); return; }
+  if (pw.length < 6) { err("Şifre en az 6 karakter olmalı"); $("passInput").focus(); return; }
+  $("btnName").disabled = true; err("");
+  try {
+    if (authMode === "signup") {
+      if (await rpc("kup_login_email", { p_name: n })) throw new Error("Bu kullanıcı adı alınmış");
+      const { data, error } = await sb.auth.signUp({ email: emailFor(n), password: pw, options: { data: { name: n } } });
+      if (error) throw new Error(/registered|exists/i.test(error.message) ? "Bu kullanıcı adı alınmış (benzer bir ad var)" : error.message);
+      session = data.session;
+      if (!session) throw new Error("Hesap açıldı ama giriş yapılamadı. Giriş yap'ı dene.");
+      if (importFrom) { try { await rpc("kup_import", { p_old: importFrom }); forgetOld(importFrom.name); } catch (e) { toast("Eski hesap taşınamadı: " + errMsg(e)); } }
+    } else {
+      const email = await rpc("kup_login_email", { p_name: n });
+      if (!email) throw new Error("Bu kullanıcı adıyla hesap yok");
+      const { data, error } = await sb.auth.signInWithPassword({ email, password: pw });
+      if (error) throw new Error(/invalid/i.test(error.message) ? "Şifre yanlış" : error.message);
+      session = data.session;
+    }
+    if (!(await refreshProfile())) throw new Error("Profil yüklenemedi, tekrar dene");
+    $("nameModal").classList.remove("on"); $("landing").classList.remove("on");
+    afterLogin();
+    toast(importFrom ? "☁️ Eski hesabın buluta taşındı!" : `Hoş geldin, ${profile.name}!`);
+  } catch (e) { err(errMsg(e)); }
+  $("btnName").disabled = false;
+};
+$("passInput").addEventListener("keydown", e => { if (e.key === "Enter") $("btnName").click(); });
+$("nameInput").addEventListener("keydown", e => { if (e.key === "Enter") $("passInput").focus(); });
+$("btnSignup").onclick = () => openAuth("signup");
+$("btnSignup2").onclick = () => openAuth("signup");
+$("btnLogin").onclick = () => openAuth("login");
+$("lGameRow").addEventListener("click", e => { if (e.target.closest("[data-game]")) { e.stopPropagation(); openAuth("signup"); } });
+$("nameModal").addEventListener("click", e => { if (e.target.id === "nameModal" && $("landing").classList.contains("on")) $("nameModal").classList.remove("on"); });
 
+// ---------------------------------------------------------------- Ayarlar ve tazeleme
+async function loadCfgRemote() {
+  if (!sb) return;
+  const { data, error } = await sb.from("settings").select("value").eq("key", "cfg").maybeSingle();
+  if (error || !data) return;
+  const txt = JSON.stringify(data.value || {});
+  if (txt === localStorage.getItem(CFG_KEY)) return;
+  try { localStorage.setItem(CFG_KEY, txt); } catch (e) {}
+  loadCfg(); renderTop();
+  if (!current) renderHome();
+  if ($("avatar").classList.contains("on")) renderAvatarOpts();
+  stages.forEach(s => s.update());
+}
+function afterLogin() {
+  renderTop(); renderHome(); stages.forEach(s => s.update());
+  if ($("profile").classList.contains("on")) renderProfile();
+  fetchGifts();
+}
+// Admin değişiklikleri (Robux, duyuru, hediye) sayfa yenilenmeden gelsin
+async function tick() {
+  if (document.hidden) return;
+  loadCfgRemote();
+  if (!session) return;
+  fetchGifts();
+  if (!current && !pendingBuy) { const j = profile.jeton; if (await refreshProfile()) { if (profile.jeton !== j) renderTop(); if ($("home").classList.contains("on")) renderHome(); } }
+}
+setInterval(tick, 45000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) tick(); });
 addEventListener("storage", e => {
-  if (e.key === GIFT_KEY) { renderHome(); return; }
   if (e.key !== CFG_KEY) return;
   loadCfg(); renderTop(); renderHome();
   if ($("avatar").classList.contains("on")) renderAvatarOpts();
@@ -900,14 +1011,24 @@ addEventListener("storage", e => {
 });
 
 // ================================================================ Başlat
+function showLanding() {
+  $("landing").classList.add("on");
+  $("lGameRow").innerHTML = visibleGames().filter(g => !g.soon).map(gameCard).join("");
+  if (!showLanding.done) { showLanding.done = true; avatarStage($("lAvatar")); }
+}
 renderTop();
 renderHome();
 avatarStage($("helloAvatar"), { spin: false, zoom: 2.2 });
-if (!profile.name) {
-  $("landing").classList.add("on");
-  $("lGameRow").innerHTML = visibleGames().filter(g => !g.soon).map(gameCard).join("");
-  avatarStage($("lAvatar"));
-}
+if (!profile.cloud) showLanding(); // önbellekte hesap yoksa hemen açılış ekranı
+(async () => {
+  loadCfgRemote();
+  if (sb) {
+    try { session = (await sb.auth.getSession()).data.session; } catch (e) {}
+    sb.auth.onAuthStateChange((ev, s) => { session = s; });
+  }
+  if (!session) { if (sb && profile.cloud) { try { localStorage.removeItem(KEY); } catch (e) {} profile = structuredClone(DEFAULT); renderTop(); } showLanding(); return; }
+  if (await refreshProfile()) afterLogin();
+})();
 </script>
 </body>
 </html>
