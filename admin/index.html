@@ -10,7 +10,7 @@
   Veriler Supabase'de (supabase/kurulum.sql): oyuncular, satın alımlar, hediyeler, ayarlar, promo kodlar, işlem kaydı.
   Giriş: Küp Evreni hesabı + profiles.is_admin = true. Yetkiyi sunucu kontrol eder (RLS + admin_* fonksiyonları).
   Admin oturumu ana sayfadan ayrı tutulur (storageKey kupAdminAuth).
-  Oyunların kendi kayıtları (saveKey) hâlâ cihazdadır: "Zaten verildi" ve Oyun kaydı sütunu bu cihazı gösterir.
+  Oyun kayıtları (her oyunun kendi ilerlemesi) game_saves tablosunda, hesaba bağlı: "Zaten verildi" seçili oyuncunun kaydına bakar.
 -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/dist/umd/supabase.min.js"></script>
 <style>
@@ -402,17 +402,18 @@ const spentOf = a => (a.purchases || []).reduce((s, p) => s + (p.price || 0), 0)
 
 // ================================================================ Sunucu verisi (Supabase)
 // Panel açılınca her şey DB'ye yüklenir; okuma DB'den (anında), yazma hem DB'ye hem sunucuya (arka planda).
-const DB = { profiles: [], buysBy: {}, purchases: [], gifts: [], cfg: {}, codes: [], packs: [], log: [], uses: {} };
+const DB = { profiles: [], buysBy: {}, purchases: [], gifts: [], cfg: {}, codes: [], packs: [], log: [], uses: {}, saves: [] };
 async function loadAll() {
-  const [p, b, g, s, l, u] = await Promise.all([
+  const [p, b, g, s, l, u, sv] = await Promise.all([
     sb.from("profiles").select("id,name,jeton,data,is_admin,created_at,updated_at").order("created_at"),
     sb.from("purchases").select("user_id,game,item,price,at").order("at", { ascending: false }).limit(5000),
     sb.from("gifts").select("*").order("at", { ascending: false }).limit(1000),
     sb.from("settings").select("key,value"),
     sb.from("admin_log").select("at,text").order("at", { ascending: false }).limit(300),
     sb.from("code_uses").select("code"),
+    sb.from("game_saves").select("user_id,game,data,updated_at"),
   ]);
-  const bad = [p, b, g, s, l, u].find(x => x.error);
+  const bad = [p, b, g, s, l, u, sv].find(x => x.error);
   if (bad) throw new Error(bad.error.message);
   DB.profiles = p.data || [];
   DB.purchases = b.data || [];
@@ -426,11 +427,15 @@ async function loadAll() {
   DB.log = (l.data || []).map(x => ({ at: Date.parse(x.at), text: x.text }));
   DB.uses = {};
   for (const x of u.data || []) DB.uses[x.code] = (DB.uses[x.code] || 0) + 1;
+  DB.saves = sv.data || [];
 }
+const saveOf = (uid, game) => DB.saves.find(x => x.user_id === uid && x.game === game) || null;
+const kb = d => (JSON.stringify(d).length / 1024).toFixed(1) + " KB";
 // Arka planda yaz; hata olursa göster
 function bg(q, what) {
   Promise.resolve(q).then(r => { if (r && r.error) throw r.error; }).catch(e => toast(`${what} kaydedilemedi: ${e.message || e}`, true));
 }
+const MAX_ROBUX = 2000000000;
 const nowIso = () => new Date().toISOString();
 const putSetting = (key, value) => bg(sb.from("settings").upsert({ key, value, updated_at: nowIso() }), "Ayar");
 const giftRow = g => ({ gid: g.gid, to: g.to_name, toId: g.to_id, game: g.game, items: g.items || [], note: g.note || "", skipped: g.skipped || [], at: Date.parse(g.at), got: g.got ? Date.parse(g.got) : null });
@@ -489,7 +494,7 @@ function putUser(uid, acc) {
   const p = DB.profiles.find(x => x.id === uid);
   if (!p) return;
   const patch = { badges: acc.badges || {}, lastDaily: acc.lastDaily || "" };
-  const j = Math.min(2000000000, Math.max(0, Math.floor(acc.jeton || 0)));
+  const j = Math.min(MAX_ROBUX, Math.max(0, Math.floor(acc.jeton || 0)));
   const jChanged = j !== p.jeton;
   p.jeton = j; p.data = { ...(p.data || {}), ...patch };
   bg(sb.rpc("admin_patch", { p_id: uid, p_jeton: jChanged ? j : null, p_data: patch }), p.name);
@@ -718,17 +723,16 @@ function renderGames() {
   $("page").innerHTML = `<div class="card">
     <div class="cardHead"><h2>Oyunlar</h2><span class="sub">Gizli oyun ana sayfada görünmez, bakımdaki oyun açılmaz, YENİ etiketi kartın köşesinde çıkar</span></div>
     <div class="tableWrap" style="margin-top:10px"><table>
-      <thead><tr><th>Oyun</th><th>Görünür</th><th>Bakımda</th><th>YENİ</th><th class="r hideSm">Oyuncu</th><th class="r hideSm">Oynama</th><th class="r hideSm">Satış</th><th class="r">Kayıt</th><th></th></tr></thead>
+      <thead><tr><th>Oyun</th><th>Görünür</th><th>Bakımda</th><th>YENİ</th><th class="r hideSm">Oyuncu</th><th class="r hideSm">Oynama</th><th class="r hideSm">Satış</th><th class="r">Bulut kaydı</th></tr></thead>
       <tbody>${GAMES.map(g => {
-        let raw = null; try { raw = localStorage.getItem(g.saveKey); } catch (e) {}
+        const saves = DB.saves.filter(x => x.game === g.id);
         const players = u.filter(x => x.a.playTime?.[g.id]).length, sec = u.reduce((s, x) => s + (x.a.playTime?.[g.id] || 0), 0);
         const sales = u.reduce((s, x) => s + (x.a.purchases || []).filter(p => p.game === g.id).reduce((t, p) => t + p.price, 0), 0);
         const gc = (cfg().games || {})[g.id] || {};
         return `<tr><td><div class="user"><span class="gameIco" style="background:${g.bg}">${g.icon}</span><div><b>${esc(g.title)}</b><small>${g.saveKey}</small></div></div></td>
           <td>${tg(!gc.hidden, `data-gtog="${g.id}:hidden"`)}</td><td>${tg(gc.maint, `data-gtog="${g.id}:maint"`)}</td><td>${tg(gc.isNew, `data-gtog="${g.id}:isNew"`)}</td>
           <td class="r num hideSm">${players}</td><td class="r num hideSm">${fmtTime(sec)}</td><td class="r robux num hideSm">R$ ${fmtNum(sales)}</td>
-          <td class="r">${raw ? `<span class="pill gold num">${(raw.length / 1024).toFixed(1)} KB</span>` : `<span class="muted">yok</span>`}</td>
-          <td class="r"><button class="btn sm danger" data-wipe="${g.id}" ${raw ? "" : "disabled"} title="Oyun kaydını sil">${ic("trash")}Kayıt</button></td></tr>`;
+          <td class="r">${saves.length ? `<span class="pill gold num">${saves.length} oyuncu</span>` : `<span class="muted">yok</span>`}</td></tr>`;
       }).join("")}</tbody></table></div></div>`;
   $("page").querySelectorAll("[data-gtog]").forEach(b => b.onclick = () => {
     const [id, f] = b.dataset.gtog.split(":"), g = GAMES.find(x => x.id === id);
@@ -753,8 +757,9 @@ function renderSettings() {
       <div class="kv"><span class="muted">Hesaplar</span><code>${u.length}</code></div>
       <div class="kv"><span class="muted">Satın alımlar</span><code>${DB.purchases.length}</code></div>
       <div class="kv"><span class="muted">Hediyeler</span><code>${DB.gifts.length}</code></div>
+      <div class="kv"><span class="muted">Oyun kayıtları</span><code>${DB.saves.length}</code></div>
       <button class="btn" id="btnExport" style="margin-top:12px">${ic("download")}Yedek indir (JSON)</button>
-      <p class="muted" style="font-size:13px;margin:12px 0 0">Yedek: tüm hesaplar, satın alımlar, hediyeler, ayarlar, promo kodlar ve bu cihazdaki oyun kayıtları.</p></div></div>
+      <p class="muted" style="font-size:13px;margin:12px 0 0">Yedek: tüm hesaplar, satın alımlar, hediyeler, ayarlar, promo kodlar ve oyun kayıtları.</p></div></div>
   </div>`;
   $("page").querySelectorAll("[data-eye]").forEach(b => b.onclick = () => {
     const f = $(b.dataset.eye), show = f.type === "password";
@@ -774,8 +779,7 @@ function renderSettings() {
     renderSettings(); toast("Şifre değişti");
   };
   $("btnExport").onclick = () => {
-    const data = { at: nowIso(), profiles: DB.profiles, purchases: DB.purchases, gifts: DB.gifts, cfg: DB.cfg, codes: DB.codes, packs: DB.packs, log: DB.log, deviceSaves: {} };
-    GAMES.forEach(g => data.deviceSaves[g.saveKey] = load(g.saveKey, null));
+    const data = { at: nowIso(), profiles: DB.profiles, purchases: DB.purchases, gifts: DB.gifts, cfg: DB.cfg, codes: DB.codes, packs: DB.packs, log: DB.log, gameSaves: DB.saves };
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
     a.download = `kup-evreni-yedek-${nowIso().slice(0, 10)}.json`;
@@ -1099,9 +1103,10 @@ const GIFT_CATALOG = {
 const giftStore = () => { const g = load(GIFT_KEY, {}) || {}; return { pending: g.pending || [], done: g.done || [] }; };
 const fillTpl = (tpl, vals) => String(tpl).replace(/\{(\w+)\}/g, (_, k) => vals[k] ?? "");
 const getPath = (obj, p) => p.split(".").reduce((o, k) => o == null ? undefined : o[k], obj);
-// Oyun kaydında bu eşyadan kaç tane var (bilinmiyorsa null). Oyun kayıtları hesaba değil cihaza bağlıdır.
-function ownedCount(gameId, item, vals) {
-  const g = GAMES.find(x => x.id === gameId), sv = g && load(g.saveKey, null);
+// Seçili oyuncunun buluttaki oyun kaydında bu eşyadan kaç tane var (bilinmiyorsa / herkes seçiliyse null)
+function ownedCount(gameId, item, vals, uid) {
+  if (!uid) return null;
+  const sv = (saveOf(uid, gameId) || {}).data;
   if (!sv) return item.own || item.ownList ? 0 : null;
   if (item.own) { const v = getPath(sv, fillTpl(item.own, vals)); return typeof v === "number" ? v : v ? 1 : 0; }
   if (item.ownList) {
@@ -1124,7 +1129,7 @@ function renderGifts() {
   if (gift.to !== "*" && !u.some(x => x.a.name === gift.to)) gift.to = "*";
   const cat = GIFT_CATALOG[gift.game] || [], item = cat[gift.item] || cat[0];
   if (item) for (const [p, opts] of Object.entries(item.params || {})) if (!opts.some(o => o[0] === gift.vals[p])) gift.vals[p] = opts[0][0];
-  const own = item ? ownedCount(gift.game, item, gift.vals) : null;
+  const own = item && gift.to !== "*" ? ownedCount(gift.game, item, gift.vals, idByName(gift.to)) : null;
   const key = item ? fillTpl(item.key, gift.vals) : "";
   const waitingFor = [...new Set(st.pending.filter(p => p.game === gift.game && (gift.to === "*" || p.to === gift.to) && p.items.some(it => it.key === key)).map(p => p.to))];
   const inBasket = gift.basket.some(b => b.key === key && b.game === gift.game);
@@ -1270,9 +1275,11 @@ function renderDrawer() {
         <div style="display:flex;align-items:center;gap:10px"><span class="muted" style="flex:1;font-size:13px">${a.lastDaily ? `Son alınma: ${esc(a.lastDaily)}` : "Alınabilir durumda"}</span>
         <button class="btn sm" data-act="daily" ${a.lastDaily ? "" : "disabled"}>${ic("refresh")}Yenile</button></div></div>
       <div class="sec"><h3>Oyunlar</h3><div class="list">${games.length ? games.map(g => `<div><span>${g.icon} ${esc(g.title)}</span><span class="muted num">${fmtTime(a.playTime[g.id])}</span></div>`).join("") : `<div><span class="muted">Henüz oynamadı</span></div>`}</div></div>
+      <div class="sec"><h3>Oyun kayıtları</h3><div class="list">${(() => { const sv = DB.saves.filter(s => s.user_id === x.uid); return sv.length ? sv.map(s => { const g = GAMES.find(q => q.id === s.game) || { icon: "🎮", title: s.game };
+        return `<div><span>${g.icon} ${esc(g.title)} <span class="muted">· ${kb(s.data)} · ${fmtDate(Date.parse(s.updated_at))}</span></span><button class="btn sm danger" data-act="saveDel" data-g="${esc(s.game)}" title="Bu oyundaki ilerlemesini sıfırla">${ic("trash")}</button></div>`; }).join("") : `<div><span class="muted">Bulutta oyun kaydı yok</span></div>`; })()}</div></div>
       <div class="sec"><h3>Satın alımlar</h3><div class="list">${buys.length ? buys.slice(0, 10).map(p => `<div><span>${(GAMES.find(g => g.id === p.game) || {}).icon || "🎮"} ${esc(p.id)} <span class="muted">· ${fmtDate(p.at)}</span></span><span class="robux num">R$ ${fmtNum(p.price)}</span></div>`).join("") : `<div><span class="muted">Satın alım yok</span></div>`}</div></div>
       <div class="sec"><h3 style="color:var(--red)">Tehlikeli bölge</h3><div class="dangerZone">
-        <p>Hesap kalıcı olarak silinir: Robux, avatar, rozetler ve süreler gider. Oyunların kendi kayıtları kalır.</p>
+        <p>Hesap kalıcı olarak silinir: Robux, avatar, rozetler, süreler ve oyun kayıtları gider.</p>
         <button class="btn danger" data-act="delete">${ic("trash")}Hesabı sil</button></div></div>
     </div>`;
 }
@@ -1290,7 +1297,10 @@ $("drawer").addEventListener("click", e => {
   const x = getUser(drawerUid);
   if (!x) { closeDrawer(); return; }
   const a = x.a, amt = $("amt") ? numVal($("amt")) : null;
-  const setBal = v => { const old = a.jeton || 0; a.jeton = Math.max(0, v); putUser(x.uid, a); logAct(`${a.name}: Robux R$ ${fmtNum(old)} → R$ ${fmtNum(a.jeton)}`); toast(`${a.name}: R$ ${fmtNum(a.jeton)}`); };
+  const setBal = v => { // sunucuda Robux en fazla 2 milyar (veritabanı sayı sınırı)
+    const old = a.jeton || 0; a.jeton = Math.min(MAX_ROBUX, Math.max(0, Math.floor(v))); putUser(x.uid, a);
+    logAct(`${a.name}: Robux R$ ${fmtNum(old)} → R$ ${fmtNum(a.jeton)}`);
+    toast(v > MAX_ROBUX ? `En fazla R$ ${fmtNum(MAX_ROBUX)} olabilir: ${a.name} = R$ ${fmtNum(a.jeton)}` : `${a.name}: R$ ${fmtNum(a.jeton)}`, v > MAX_ROBUX); };
   if (act === "add") setBal((a.jeton || 0) + +b.dataset.n);
   else if (act === "plus" || act === "minus" || act === "set") {
     if (amt === null) { toast("Geçerli bir miktar yaz", true); $("amt").focus(); return; }
@@ -1300,6 +1310,13 @@ $("drawer").addEventListener("click", e => {
     const r = BADGES.find(q => q.id === b.dataset.b); logAct(`${a.name}: ${r.icon} ${r.name} rozeti ${on ? "verildi" : "alındı"}`); }
   else if (act === "badgesAll") { a.badges = Object.fromEntries(BADGES.map(r => [r.id, true])); putUser(x.uid, a); logAct(`${a.name}: tüm rozetler verildi`); toast("Tüm rozetler verildi (Robux ödülü yok)"); }
   else if (act === "badgesReset") { a.badges = { welcome: true }; putUser(x.uid, a); logAct(`${a.name}: rozetler sıfırlandı`); toast("Rozetler sıfırlandı"); }
+  else if (act === "saveDel") {
+    const g = GAMES.find(q => q.id === b.dataset.g) || { title: b.dataset.g };
+    if (!confirm(`${a.name} adlı oyuncunun ${g.title} ilerlemesi silinsin mi? Oyuncu bu oyuna sıfırdan başlar.`)) return;
+    DB.saves = DB.saves.filter(s => !(s.user_id === x.uid && s.game === b.dataset.g));
+    bg(sb.from("game_saves").delete().eq("user_id", x.uid).eq("game", b.dataset.g), "Oyun kaydı");
+    logAct(`${a.name}: ${g.title} oyun kaydı silindi`); toast("Oyun kaydı silindi");
+  }
   else if (act === "daily") { a.lastDaily = ""; putUser(x.uid, a); logAct(`${a.name}: günlük ödül yenilendi`); toast("Günlük ödül tekrar alınabilir"); }
   else if (act === "delete") {
     askDelete(a.name, async () => {
@@ -1316,18 +1333,12 @@ $("drawer").addEventListener("click", e => {
   render();
 });
 
-// Sayfa geneli tıklamalar: kullanıcı satırı, "Tümü" bağlantıları, oyun kaydı silme
+// Sayfa geneli tıklamalar: kullanıcı satırı, "Tümü" bağlantıları
 $("page").addEventListener("click", e => {
   if (!sessionOk()) { logout(); return; }
-  const u = e.target.closest("[data-user]"), to = e.target.closest("[data-goto]"), w = e.target.closest("[data-wipe]");
+  const u = e.target.closest("[data-user]"), to = e.target.closest("[data-goto]");
   if (to) go(to.dataset.goto);
   else if (u) openDrawer(u.dataset.user);
-  else if (w) {
-    const g = GAMES.find(x => x.id === w.dataset.wipe);
-    if (!confirm(`${g.title} kaydı bu cihazdan silinsin mi? Bu cihazda bu oyunda oynanan ilerleme gider (oyun kayıtları henüz bulutta değil).`)) return;
-    try { localStorage.removeItem(g.saveKey); } catch (err) {}
-    logAct(`Oyun kaydı silindi (bu cihaz): ${g.title}`); toast("Kayıt silindi"); render();
-  }
 });
 
 // Grafik ipucu (çubuklar)

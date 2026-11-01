@@ -241,7 +241,7 @@
     <div id="gameStats"></div>
     <h2>Hesap</h2>
     <div id="accounts" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center"></div>
-    <p class="muted" style="margin-top:28px">☁️ Hesabın bulutta saklanır: başka bir cihazda kullanıcı adın ve şifrenle giriş yapınca Robux'un, avatarın ve rozetlerin seninle gelir. (Oyunların içindeki ilerleme şimdilik bu cihazda kalır.)</p>
+    <p class="muted" style="margin-top:28px">☁️ Hesabın bulutta saklanır: başka bir cihazda kullanıcı adın ve şifrenle giriş yapınca Robux'un, avatarın, rozetlerin ve oyunlardaki ilerlemen seninle gelir.</p>
   </section>
 </main>
 
@@ -661,7 +661,8 @@ function annClosed(d) { try { return localStorage.getItem(ANN_CLOSED_KEY) === St
 function statsFor(g) {
   // Oyunun kendi bildirdiği özet (postMessage) yoksa localStorage'dan okumayı dene (aynı köken ise)
   let s = profile.gameStats[g.id];
-  if (!s && g.saveKey) {
+  const owner = syncMeta()[g.saveKey];
+  if (!s && g.saveKey && (!owner || (session && owner.uid === session.user.id))) { // cihazdaki kayıt başka hesabınsa gösterme
     try {
       const raw = JSON.parse(localStorage.getItem(g.saveKey) || "null");
       if (raw && g.id === "pizza") s = { "💰 Para": raw.money, "📅 Gün": raw.day };
@@ -753,9 +754,87 @@ function showPage(id) {
   scrollTo(0, 0);
 }
 
+// ================================================================ Oyun kayıtları (bulut: game_saves tablosu)
+// Oyunlar ilerlemeyi kendi localStorage anahtarına yazar (g.saveKey) ve açılırken oradan okur. Platform oyunu açmadan önce
+// hesabın buluttaki kaydını o anahtara koyar; oynarken 20 sn'de bir, çıkışta ve sekme gizlenince değişeni geri gönderir.
+// SYNC_KEY = { saveKey: { uid, h: son eşitlenen metnin özeti, at: sunucudaki kayıt zamanı } } → bu cihazdaki kayıt kimin, gönderildi mi.
+const SYNC_KEY = "kupOyunSenk", SAVE_BACKUP = "kupOyunYedek";
+const hashStr = s => { let h = 5381; for (let i = 0; i < s.length; i++) h = (Math.imul(h, 33) ^ s.charCodeAt(i)) | 0; return (h >>> 0).toString(36) + ":" + s.length; };
+const syncMeta = () => readJSON(SYNC_KEY, {});
+const setMeta = (k, v) => { const m = syncMeta(); if (v) m[k] = v; else delete m[k]; writeJSON(SYNC_KEY, m); };
+const lsGet = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+const lsSet = (k, v) => { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} };
+// Silinmek üzere olan ama buluta gitmemiş olabilecek yerel kayıt: oyun başına son kopya saklanır (kurtarmak için)
+function backupLocal(g, txt, owner) {
+  if (!txt) return;
+  const b = readJSON(SAVE_BACKUP, {}); b[g.saveKey] = { owner: owner || "eski", at: Date.now(), txt }; writeJSON(SAVE_BACKUP, b);
+}
+// Oyun açılmadan önce: bu hesabın kaydını oyunun anahtarına yerleştir
+async function prepareSave(g) {
+  if (!g.saveKey || !sb || !session) return;
+  const uid = session.user.id, key = g.saveKey, local = lsGet(key), m = syncMeta()[key];
+  const mine = !!m && m.uid === uid;
+  const dirty = local != null ? !m || m.h !== hashStr(local) : !!(m && m.h); // gönderilmemiş değişiklik (silme dahil)
+  let row;
+  try {
+    const q = sb.from("game_saves").select("data,updated_at").eq("user_id", uid).eq("game", g.id).maybeSingle();
+    const r = await Promise.race([q, new Promise((_, no) => setTimeout(() => no(new Error("zaman aşımı")), 6000))]);
+    if (r.error) throw r.error;
+    row = r.data;
+  } catch (e) {
+    // Sunucuya ulaşılamadı: kayıt bu hesabınsa/sahipsizse yerelle oyna, başka hesabınsa boş başla
+    if (m && !mine && local != null) { backupLocal(g, local, m.uid); lsSet(key, null); setMeta(key, null); }
+    toast("⚠️ Oyun kaydı buluttan alınamadı, bu cihazdaki kayıtla açılıyor");
+    return;
+  }
+  if (mine && dirty && (!row || m.at === row.updated_at)) { await pushSave(g); return; } // bulut değişmemiş, bu cihaz daha yeni
+  if (!m && local != null && !row) { await pushSave(g); return; }                       // bulut öncesi eski kayıt → bu hesaba taşı
+  if (row) {
+    const txt = JSON.stringify(row.data);
+    if (local != null && local !== txt && (!mine || dirty)) backupLocal(g, local, m ? m.uid : null);
+    lsSet(key, txt); setMeta(key, { uid, h: hashStr(txt), at: row.updated_at });
+  } else { // bu hesabın bu oyunda kaydı yok → sıfırdan başlar (cihazdaki başka hesabın kaydı yedeklenir)
+    if (local != null && !mine) backupLocal(g, local, m ? m.uid : null);
+    lsSet(key, null); setMeta(key, { uid, h: "", at: null });
+  }
+}
+// Yerel kayıt değiştiyse buluta gönder (keep = sayfa kapanıyor, istek arkada tamamlansın)
+const pushing = {};
+async function pushSave(g, keep) {
+  if (!g || !g.saveKey || !sb || !session) return;
+  const uid = session.user.id, key = g.saveKey, local = lsGet(key), m = syncMeta()[key];
+  if (m && m.uid !== uid) return;            // başka hesabın kaydı: dokunma
+  if (!m && local == null) return;
+  const h = local == null ? "" : hashStr(local);
+  if (m && m.h === h) return;                // değişmemiş
+  let data = null;
+  if (local != null) { try { data = JSON.parse(local); } catch (e) { return; } }
+  if (keep) {
+    try {
+      fetch(SB_URL + "/rest/v1/rpc/kup_game_save", { method: "POST", keepalive: true,
+        headers: { apikey: SB_KEY, Authorization: "Bearer " + session.access_token, "Content-Type": "application/json" },
+        body: JSON.stringify({ p_game: g.id, p_data: data }) });
+    } catch (e) {}
+    return;
+  }
+  if (pushing[key]) return;
+  pushing[key] = true;
+  try { const at = await rpc("kup_game_save", { p_game: g.id, p_data: data }); setMeta(key, { uid, h, at }); }
+  catch (e) {} finally { pushing[key] = false; }
+}
+// Açık oyuna "hemen kaydet" de (oyunlar aynı kökende; fonksiyonları üst seviyede: persist(force) ya da pizza'da save())
+function flushGame() {
+  try {
+    const w = $("frame").contentWindow;
+    if (typeof w.persist === "function") w.persist(true); else if (typeof w.save === "function") w.save();
+  } catch (e) {}
+}
+document.addEventListener("visibilitychange", () => { if (document.hidden && current) { flushGame(); pushSave(current); } });
+addEventListener("pagehide", () => { if (current) { flushGame(); pushSave(current, true); } });
+
 // ================================================================ Oyun başlatma + köprü (postMessage)
-let current = null, playTimer = null;
-function launch(id) {
+let current = null, playTimer = null, saveTimer = null;
+async function launch(id) {
   const g = GAMES.find(x => x.id === id);
   if (!playable(g)) { toast("🛠️ Bu oyun şu an bakımda"); return; }
   current = g;
@@ -764,8 +843,7 @@ function launch(id) {
   if (visibleGames().filter(playable).every(x => profile.recent.includes(x.id))) award("explorer");
   persist();
   $("playerTitle").textContent = `${g.icon} ${g.title}`;
-  // Önbellekteki eski oyun sürümü açılmasın (site oyunları 10 dk önbellekte tutuyor; eski sürüm yeni mesajları, ör. hediyeleri, tanımaz)
-  $("frame").src = g.url + "?v=" + Date.now();
+  $("frame").src = "about:blank";
   $("player").classList.add("on");
   // Telefonda Roblox gibi: tam ekran + yatay (tarayıcı izin vermezse sessizce geç)
   // Tüm sayfa tam ekran olmalı: yalnız #player olursa satın alma penceresi (#buyModal) görünmez
@@ -788,10 +866,20 @@ function launch(id) {
       setJeton(r.jeton);
     } catch (e) {}
   }, 10000);
+  // Oyun açılmadan önce bu hesabın buluttaki kaydı yerleşir (tam ekran isteği tıklamaya yakın kalsın diye en sonda)
+  await prepareSave(g);
+  if (current !== g) return; // bu arada oyundan çıkıldı
+  // Önbellekteki eski oyun sürümü açılmasın (site oyunları 10 dk önbellekte tutuyor; eski sürüm yeni mesajları, ör. hediyeleri, tanımaz)
+  $("frame").src = g.url + "?v=" + Date.now();
+  clearInterval(saveTimer);
+  saveTimer = setInterval(() => { if (current === g) pushSave(g); }, 20000);
 }
 function exitGame() {
-  clearInterval(playTimer);
+  clearInterval(playTimer); clearInterval(saveTimer);
+  const g = current;
+  flushGame();
   $("frame").src = "about:blank";
+  if (g) pushSave(g);
   $("player").classList.remove("on");
   document.body.style.overflow = "";
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
@@ -906,8 +994,8 @@ $("btnProfName").onclick = async () => {
 $("accounts").addEventListener("click", async e => {
   if (e.target.id === "btnLogout") { logout(); return; }
   if (e.target.id === "btnCloseAcc") {
-    // Hesap sunucudan kalıcı silinir; oyunların bu cihazdaki kendi kayıtları kalır
-    if (prompt(`"${profile.name}" hesabı kalıcı olarak kapatılacak (Robux, avatar, rozetler silinir). Onaylamak için kullanıcı adını yazın:`) !== profile.name) { toast("Hesap kapatılmadı"); return; }
+    // Hesap sunucudan kalıcı silinir (oyun kayıtları dahil)
+    if (prompt(`"${profile.name}" hesabı kalıcı olarak kapatılacak (Robux, avatar, rozetler ve oyun ilerlemesi silinir). Onaylamak için kullanıcı adını yazın:`) !== profile.name) { toast("Hesap kapatılmadı"); return; }
     try { await rpc("kup_delete_me"); } catch (err) { toast(errMsg(err)); return; }
     logout();
   }
