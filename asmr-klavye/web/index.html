@@ -797,8 +797,8 @@ function buildAvatar(a) {
   const hc = a.hatColor || "#e63946";
   if (a.hat === "cap") { mesh(new THREE.CylinderGeometry(0.66, 0.66, 0.35, 20), lambert(hc), 0, 0.7, 0, headG); mesh(new THREE.BoxGeometry(1.1, 0.08, 0.6), lambert(hc), 0, 0.55, 0.75, headG); }
   else if (a.hat === "crown") {
-    mesh(new THREE.CylinderGeometry(0.6, 0.55, 0.4, 8, 1, true), lambert("#ffd166", { side: THREE.DoubleSide }), 0, 0.8, 0, headG);
-    for (let i = 0; i < 6; i++) { const an = i / 6 * Math.PI * 2; mesh(new THREE.ConeGeometry(0.1, 0.3, 4), lambert("#ffd166"), Math.cos(an) * 0.55, 1.1, Math.sin(an) * 0.55, headG); }
+    mesh(new THREE.CylinderGeometry(0.6, 0.55, 0.4, 8, 1, true), lambert(a.crownColor || "#ffd166", { side: THREE.DoubleSide }), 0, 0.8, 0, headG);
+    for (let i = 0; i < 6; i++) { const an = i / 6 * Math.PI * 2; mesh(new THREE.ConeGeometry(0.1, 0.3, 4), lambert(a.crownColor || "#ffd166"), Math.cos(an) * 0.55, 1.1, Math.sin(an) * 0.55, headG); }
   } else if (a.hat === "headphones") {
     mesh(new THREE.TorusGeometry(0.7, 0.07, 8, 20, Math.PI), lambert(hc), 0, 0.15, 0, headG);
     mesh(new THREE.BoxGeometry(0.25, 0.5, 0.5), lambert(hc), -0.7, 0, 0, headG); mesh(new THREE.BoxGeometry(0.25, 0.5, 0.5), lambert(hc), 0.7, 0, 0, headG);

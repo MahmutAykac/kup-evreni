@@ -536,10 +536,11 @@ function buildAvatar(a) {
   if (hat === "cap") {
     const c = new THREE.Mesh(new THREE.CylinderGeometry(0.66, 0.66, 0.35, 20), m(hc)); c.position.set(0, 5.3, 0); g.add(c);
     part(1.1, 0.08, 0.6, hc, 0, 5.15, 0.75);
-  } else if (hat === "crown") {
-    const c = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.55, 0.4, 8, 1, true), new THREE.MeshLambertMaterial({ color: "#ffd166", side: THREE.DoubleSide }));
+  } else if (hat === "crown") { // hazır taç altın; admin mağazasındaki taç kendi renginde
+    const cc = ch ? hc : "#ffd166";
+    const c = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.55, 0.4, 8, 1, true), new THREE.MeshLambertMaterial({ color: cc, side: THREE.DoubleSide }));
     c.position.set(0, 5.4, 0); g.add(c);
-    for (let i = 0; i < 6; i++) { const s = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.3, 4), m("#ffd166")); const an = i / 6 * Math.PI * 2; s.position.set(Math.cos(an) * 0.55, 5.7, Math.sin(an) * 0.55); g.add(s); }
+    for (let i = 0; i < 6; i++) { const s = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.3, 4), m(cc)); const an = i / 6 * Math.PI * 2; s.position.set(Math.cos(an) * 0.55, 5.7, Math.sin(an) * 0.55); g.add(s); }
   } else if (hat === "headphones") {
     const band = new THREE.Mesh(new THREE.TorusGeometry(0.7, 0.07, 8, 20, Math.PI), m(hc)); band.position.set(0, 4.75, 0); band.rotation.z = 0; g.add(band);
     part(0.25, 0.5, 0.5, hc, -0.7, 4.6, 0); part(0.25, 0.5, 0.5, hc, 0.7, 4.6, 0);
@@ -905,7 +906,7 @@ function sendGifts() {
 function sendProfile() {
   const w = $("frame").contentWindow;
   const av = { ...profile.avatar }, ch = customItem(av.hat);
-  if (ch) { av.hat = ["cap", "crown", "headphones", "helmet"].includes(ch.shape) ? ch.shape : "none"; av.hatColor = ch.color || av.hatColor; }
+  if (ch) { av.hat = ["cap", "crown", "headphones", "helmet"].includes(ch.shape) ? ch.shape : "none"; av.hatColor = ch.color || av.hatColor; if (ch.shape === "crown" && ch.color) av.crownColor = ch.color; }
   if (customItem(av.face)) av.face = "smile";
   if (w) w.postMessage({ type: "kup:profile", name: profile.name, avatar: av, jeton: profile.jeton }, "*");
 }
