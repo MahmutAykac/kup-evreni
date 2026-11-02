@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>Küp Evreni</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#0d0e12">
 <!--
   Küp Evreni: tüm oyunların tek yerden oynandığı platform (Roblox benzeri).
   - Ana sayfa: oyun kartları, devam et, günlük Robux ödülü
@@ -1085,6 +1088,7 @@ function afterLogin() {
 // Admin değişiklikleri (Robux, duyuru, hediye) sayfa yenilenmeden gelsin
 async function tick() {
   if (document.hidden) return;
+  if (offline && navigator.onLine) { connect(); return; }
   loadCfgRemote();
   if (!session) return;
   fetchGifts();
@@ -1109,15 +1113,54 @@ renderTop();
 renderHome();
 avatarStage($("helloAvatar"), { spin: false, zoom: 2.2 });
 if (!profile.cloud) showLanding(); // önbellekte hesap yoksa hemen açılış ekranı
+// ---------------------------------------------------------------- Çevrimdışı mod
+// İnternet yokken: önbellekteki hesapla açılır, oyunlar cihazdaki kayıtla oynanır.
+// Robux kazanma/harcama sunucu ister: internet gelince her şey kendiliğinden eşitlenir.
+let offline = false;
+function setOffline(on) {
+  offline = on;
+  let b = $("offlineBar");
+  if (on && !b) {
+    b = document.createElement("div"); b.id = "offlineBar";
+    b.style.cssText = "position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:60;background:#3a2f12;color:#ffd166;border:1px solid #6b5520;border-radius:12px;padding:9px 14px;font-size:14px;box-shadow:0 6px 20px #0008;max-width:calc(100% - 32px);text-align:center";
+    b.textContent = "📴 İnternet yok: çevrimdışı oynuyorsun. İlerlemen bu cihazda tutuluyor, internet gelince buluta gider. Robux kazanma ve satın alma internet ister.";
+    document.body.appendChild(b);
+  }
+  if (b) b.style.display = on ? "" : "none";
+}
+const netErr = e => !navigator.onLine || /fetch|network|load failed|retryable/i.test(String((e && (e.name + " " + e.message)) || e));
+// Oturumu bul; internet sorunu ile gerçekten çıkış yapılmış olmasını ayır
+async function connect() {
+  if (!sb) { if (profile.cloud) { setOffline(true); afterLogin(); } else showLanding(); return; }
+  let res = null, err = null;
+  try { res = await sb.auth.getSession(); err = res.error; } catch (e) { err = e; }
+  session = (res && res.data && res.data.session) || null;
+  if (!session && profile.cloud && err && netErr(err)) { setOffline(true); afterLogin(); return; } // giriş var ama sunucuya ulaşılamıyor
+  if (!session) {
+    setOffline(false);
+    if (profile.cloud) { try { localStorage.removeItem(KEY); } catch (e) {} profile = structuredClone(DEFAULT); renderTop(); }
+    showLanding(); return;
+  }
+  const ok = await refreshProfile();
+  setOffline(!ok); // profil gelmediyse sunucuya ulaşılamıyor
+  afterLogin();
+  if (ok) syncDirtySaves();
+}
+// Çevrimdışıyken oynanan oyunların kayıtlarını gönder
+function syncDirtySaves() {
+  if (!session) return;
+  const m = syncMeta();
+  for (const g of GAMES) if (g.saveKey && m[g.saveKey] && m[g.saveKey].uid === session.user.id && g !== current) pushSave(g);
+}
+addEventListener("online", () => { if (offline) connect(); else syncDirtySaves(); loadCfgRemote(); });
+addEventListener("offline", () => { if (profile.cloud) setOffline(true); });
 (async () => {
   loadCfgRemote();
-  if (sb) {
-    try { session = (await sb.auth.getSession()).data.session; } catch (e) {}
-    sb.auth.onAuthStateChange((ev, s) => { session = s; });
-  }
-  if (!session) { if (sb && profile.cloud) { try { localStorage.removeItem(KEY); } catch (e) {} profile = structuredClone(DEFAULT); renderTop(); } showLanding(); return; }
-  if (await refreshProfile()) afterLogin();
+  if (sb) sb.auth.onAuthStateChange((ev, s) => { session = s; });
+  await connect();
 })();
+// Sayfayı ve oyunları cihaza kaydet (internet yokken de açılsın)
+if ("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register("sw.js").catch(() => {});
 </script>
 </body>
 </html>
