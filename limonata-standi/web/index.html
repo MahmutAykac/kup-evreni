@@ -224,6 +224,19 @@ const UPGRADES = [
   { id: "cafe", name: "Stand: Kafe", icon: "☕", price: 2000, desc: "Stand kafeye dönüşür: kuyrukta 7 kişi, masalar, en çok müşteri.", requires: "kiosk" },
 ];
 const UP = Object.fromEntries(UPGRADES.map(u => [u.id, u]));
+// Sonsuz (seviyeli) yükseltmeler: her seviye biraz daha güçlü, fiyat her seviyede "grow" katı artar. Seviyeler save.lv içinde.
+const INFINITE = [
+  { id: "brand", name: "Ünlü Marka", icon: "💎", base: 300, grow: 1.55, desc: l => `Müşteriler %${10 * l} daha yüksek fiyatı kabul eder` },
+  { id: "tips", name: "Bahşiş Kavanozu", icon: "🫙", base: 250, grow: 1.5, desc: l => `Her satışta %${10 * l} bahşiş` },
+  { id: "ads", name: "Reklam", icon: "📣", base: 200, grow: 1.5, desc: l => `Müşteriler %${8 * l} daha sık gelir` },
+  { id: "fert", name: "Gübre", icon: "🌱", base: 150, grow: 1.45, desc: l => `Ağaçlar ve çilekler %${15 * l} daha hızlı büyür` },
+  { id: "bag", name: "Sepet Genişletme", icon: "🧺", base: 120, grow: 1.4, desc: l => `+${5 * l} limon taşıma` },
+  { id: "jug", name: "Sürahi Ustası", icon: "🫗", base: 220, grow: 1.6, desc: l => `Her sürahiden +${l} bardak` },
+  { id: "patience", name: "Rahat Kuyruk", icon: "🪑", base: 100, grow: 1.4, desc: l => `Müşteriler +${8 * l} sn daha sabırlı` },
+];
+const INF = Object.fromEntries(INFINITE.map(u => [u.id, u]));
+const lv = id => (save.lv && save.lv[id]) || 0;
+const infCost = u => Math.round(u.base * Math.pow(u.grow, lv(u.id)));
 // Robux (Küp Evreni platform parası) ile alınanlar. Roblox'ta gamepass / developer product
 const PASSES = [
   { id: "double", name: "2x Para", icon: "💰", jeton: 150, desc: "Satışlardan kazandığın her şey 2 katı. Kalıcı." },
@@ -248,13 +261,13 @@ function rollWeather() { let r = Math.random(); for (const [id, p] of WEATHER_RO
 // ================================================================ Kayıt
 const SAVE_KEY = "limonataStandi";
 function freshSave() {
-  return { money: 0, lemons: 0, berries: 0, cups: { klasik: 0, nane: 0, cilek: 0 }, price: 5, owned: {}, passes: {},
+  return { money: 0, lemons: 0, berries: 0, cups: { klasik: 0, nane: 0, cilek: 0 }, price: 5, owned: {}, passes: {}, lv: {},
     day: 1, weather: "ilik", nextWeather: rollWeather(), totalCups: 0, totalEarned: 0, helpSeen: false, muted: false, giftIds: [] };
 }
 let save = freshSave();
 try {
   const s = JSON.parse(localStorage.getItem(SAVE_KEY) || "null");
-  if (s && typeof s === "object") save = { ...save, ...s, cups: { ...save.cups, ...(s.cups || {}) }, owned: { ...(s.owned || {}) },
+  if (s && typeof s === "object") save = { ...save, ...s, cups: { ...save.cups, ...(s.cups || {}) }, owned: { ...(s.owned || {}) }, lv: { ...(s.lv || {}) },
     passes: { ...(s.passes || {}) }, giftIds: Array.isArray(s.giftIds) ? s.giftIds : [] };
 } catch (e) {}
 if (!WEATHERS[save.weather]) save.weather = "ilik";
@@ -270,14 +283,15 @@ function persist(force) {
 
 // ================================================================ Türetilmiş değerler
 const level = () => save.owned.cafe ? 2 : save.owned.kiosk ? 1 : 0;
-const carryCap = () => save.owned.basket ? 20 : 10;
-const pitcherSize = () => save.owned.pitcher ? 10 : 6;
+const carryCap = () => (save.owned.basket ? 20 : 10) + 5 * lv("bag");
+const pitcherSize = () => (save.owned.pitcher ? 10 : 6) + lv("jug");
+const patience = () => PATIENCE + 8 * lv("patience");
 const queueCap = () => LEVELS[level()].queue;
 const totalCups = () => RECIPES.reduce((s, r) => s + (save.cups[r.id] || 0), 0);
 const recipeOk = r => !r.unlock || !!save.owned[r.unlock];
 const cupPrice = r => Math.max(1, Math.round(save.price * r.mult));
-const payBase = () => WEATHERS[save.weather].pay * (save.owned.ice ? 1.35 : 1);
-const spawnEvery = () => WEATHERS[save.weather].spawn * LEVELS[level()].spawn * (save.owned.sign ? 0.7 : 1);
+const payBase = () => WEATHERS[save.weather].pay * (save.owned.ice ? 1.35 : 1) * (1 + 0.1 * lv("brand"));
+const spawnEvery = () => Math.max(0.35, WEATHERS[save.weather].spawn * LEVELS[level()].spawn * (save.owned.sign ? 0.7 : 1) / (1 + 0.08 * lv("ads")));
 // Stokta olan en değerli tarif (önce o satılır)
 function bestRecipe() { for (let i = RECIPES.length - 1; i >= 0; i--) if (save.cups[RECIPES[i].id] > 0) return RECIPES[i]; return null; }
 
@@ -287,7 +301,8 @@ const playerName = () => (platform.profile && platform.profile.name) || "";
 function reportStats() {
   if (!platform.inside) return;
   parent.postMessage({ type: "kup:stats", stats: { "💰 Para": fmt(save.money), "📅 Gün": save.day, "🍋 Satılan bardak": fmt(save.totalCups),
-    "⭐ Stand": LEVELS[level()].name, "🛠️ Yükseltme": Object.keys(save.owned).filter(k => UP[k]).length + "/" + UPGRADES.length } }, "*");
+    "⭐ Stand": LEVELS[level()].name, "🛠️ Yükseltme": Object.keys(save.owned).filter(k => UP[k]).length + "/" + UPGRADES.length,
+    "♾️ Seviye": INFINITE.reduce((t, u) => t + lv(u.id), 0) } }, "*");
 }
 function requestPurchase(item, done) {
   if (!platform.inside) { notify("Robux ile almak için oyunu Küp Evreni'nden aç (ana klasördeki index.html)"); return; }
@@ -329,6 +344,10 @@ function applyGiftItem(key, n) {
     if (u.requires && !save.owned[u.requires]) return false; // önkoşul yoksa uygulanmaz
     grantUpgrade(u);
     return true;
+  }
+  if (kind === "lv") { // sonsuz yükseltmeye n seviye
+    if (!INF[id]) return false;
+    save.lv[id] = lv(id) + Math.max(1, n | 0); applyInfinite(id); return true;
   }
   if (kind === "pass") { // kalıcı Robux geçişleri (tüketilen 1000 Para Paketi hariç; onun yerine "money")
     const p = PASSES.find(x => x.id === id && !x.consumable);
@@ -644,7 +663,7 @@ function syncBerries() {
   solids.push({ x1: BERRY_SPOT.x - 2.4, x2: BERRY_SPOT.x + 2.4, z1: BERRY_SPOT.z - 0.5, z2: BERRY_SPOT.z + 0.5, tag: "berry" });
 }
 function updateTrees(dt) {
-  const k = WEATHERS[save.weather].grow;
+  const k = WEATHERS[save.weather].grow * (1 + 0.15 * lv("fert"));
   for (const t of trees) {
     if (t.lemons >= TREE_MAX) { t.grow = 0; continue; }
     t.grow += dt * k;
@@ -1040,7 +1059,7 @@ function sellFront(by) {
   save.cups[r.id]--;
   save.totalCups++;
   today.sold++; today.happy++; today.streak = 0;
-  addMoney(price);
+  addMoney(price * (1 + 0.1 * lv("tips")));
   leave(c, ratio < 0.55 ? "😍 Çok ucuz!" : ratio < 0.85 ? `😊 ${r.icon} Çok lezzetli!` : "🙂 Biraz pahalı ama olur");
   if (ratio < 0.55 && !today.cheapTip) { today.cheapTip = true; notify("💡 Çok ucuz satıyorsun, fiyatı artırabilirsin (+)"); }
   if (me) pl.work = 0.4;
@@ -1074,7 +1093,7 @@ function updateCustomers(dt) {
         }
         setBubble(c, r ? "🍋 Bir bardak lütfen!" : "🍋 Limonata var mı?");
       }
-      if (c.wait > PATIENCE) angry(c, bestRecipe() ? "😠 Çok bekledim!" : "😠 Limonata yok!");
+      if (c.wait > patience()) angry(c, bestRecipe() ? "😠 Çok bekledim!" : "😠 Limonata yok!");
     } else {
       if ((c.life -= dt) <= 0) setBubble(c, "");
       if (!c.path.length) removeCustomer(c);
@@ -1161,6 +1180,17 @@ function buyUpgrade(id) {
   SFX.good(); notify(`${u.icon} ${u.name} alındı!`);
   return true;
 }
+function buyInfinite(id) {
+  const u = INF[id];
+  if (!u) return false;
+  if (!spend(infCost(u))) return false;
+  save.lv[id] = lv(id) + 1;
+  applyInfinite(id);
+  SFX.good(); notify(`${u.icon} ${u.name} seviye ${lv(id)}!`);
+  persist(true);
+  return true;
+}
+function applyInfinite(id) { if (id === "bag") syncCrate(); if (id === "jug") syncPitchers(); }
 const row = (icon, title, desc, right) => `<div class="rec"><div class="ic">${icon}</div><div><b>${title}</b><div class="muted">${desc}</div></div>${right}</div>`;
 function renderUpgrades() {
   $("upMoney").textContent = `Paran: 💰 ${fmt(save.money)} · Stand: ${LEVELS[level()].name}`;
@@ -1170,11 +1200,18 @@ function renderUpgrades() {
       : lock ? `<button class="btn" disabled>🔒 Önce ${UP[u.requires].name}</button>`
       : `<button class="btn ${save.money >= u.price ? "go" : ""}" data-up="${u.id}">💰 ${fmt(u.price)}</button>`;
     return row(u.icon, u.name, u.desc, right);
+  }).join("") + `<h2 style="margin:18px 0 2px;font-size:18px">♾️ Sonsuz yükseltmeler</h2><div class="muted" style="font-size:13px">İstediğin kadar seviye atlat. Her seviyede biraz daha pahalı olur.</div>` +
+  INFINITE.map(u => {
+    const l = lv(u.id), c = infCost(u);
+    return row(u.icon, `${u.name} <span class="muted" style="font-weight:600">· Sv ${l}</span>`,
+      `${l ? u.desc(l) : "Henüz yok"} → <b>${u.desc(l + 1)}</b>`,
+      `<button class="btn ${save.money >= c ? "go" : ""}" data-inf="${u.id}">💰 ${fmt(c)}</button>`);
   }).join("");
 }
 $("upList").addEventListener("click", e => {
-  const b = e.target.closest("[data-up]");
+  const b = e.target.closest("[data-up]"), inf = e.target.closest("[data-inf]");
   if (b && buyUpgrade(b.dataset.up)) renderUpgrades();
+  if (inf && buyInfinite(inf.dataset.inf)) renderUpgrades();
 });
 
 // ================================================================ Robux mağazası
