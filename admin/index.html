@@ -1292,6 +1292,10 @@ function renderDrawer() {
         <div class="chips">${BADGES.map(b => `<button class="chip ${a.badges?.[b.id] ? "on" : ""}" data-act="badge" data-b="${b.id}"><span class="e">${b.icon}</span>${b.name}<span class="tick"></span></button>`).join("")}</div>
         <div style="display:flex;gap:6px;margin-top:8px"><button class="btn sm" data-act="badgesAll">Hepsini ver</button><button class="btn sm" data-act="badgesReset">Sıfırla</button></div></div>
       <div class="sec"><button class="btn green" data-act="gift" style="width:100%">${ic("gift")}Bu oyuncuya oyun içi hediye gönder</button></div>
+      <div class="sec"><h3>Yetki</h3>
+        <div style="display:flex;align-items:center;gap:10px"><span class="muted" style="flex:1;font-size:13px">${x.admin ? "🛡️ Admin: bu panele girebilir" : "Normal oyuncu"}</span>
+        ${x.uid === adminSession?.user?.id ? `<span class="pill gray">Sensin</span>`
+          : x.admin ? `<button class="btn sm danger" data-act="unadmin">Adminliği kaldır</button>` : `<button class="btn sm" data-act="admin">🛡️ Admin yap</button>`}</div></div>
       <div class="sec"><h3>Günlük ödül</h3>
         <div style="display:flex;align-items:center;gap:10px"><span class="muted" style="flex:1;font-size:13px">${a.lastDaily ? `Son alınma: ${esc(a.lastDaily)}` : "Alınabilir durumda"}</span>
         <button class="btn sm" data-act="daily" ${a.lastDaily ? "" : "disabled"}>${ic("refresh")}Yenile</button></div></div>
@@ -1331,6 +1335,18 @@ $("drawer").addEventListener("click", e => {
     const r = BADGES.find(q => q.id === b.dataset.b); logAct(`${a.name}: ${r.icon} ${r.name} rozeti ${on ? "verildi" : "alındı"}`); }
   else if (act === "badgesAll") { a.badges = Object.fromEntries(BADGES.map(r => [r.id, true])); putUser(x.uid, a); logAct(`${a.name}: tüm rozetler verildi`); toast("Tüm rozetler verildi (Robux ödülü yok)"); }
   else if (act === "badgesReset") { a.badges = { welcome: true }; putUser(x.uid, a); logAct(`${a.name}: rozetler sıfırlandı`); toast("Rozetler sıfırlandı"); }
+  else if (act === "admin" || act === "unadmin") {
+    const on = act === "admin";
+    if (!confirm(on ? `${a.name} admin yapılsın mı?\n\nAdmin olunca bu panele kendi şifresiyle girip herkesin Robux'unu, hesabını ve ayarları değiştirebilir.` : `${a.name} adlı oyuncunun admin yetkisi kaldırılsın mı?`)) return;
+    (async () => {
+      const { error } = await sb.rpc("admin_set_admin", { p_id: x.uid, p_on: on });
+      if (error) { toast("Olmadı: " + error.message, true); return; }
+      const p = DB.profiles.find(q => q.id === x.uid); if (p) p.is_admin = on;
+      logAct(`${a.name}: ${on ? "admin yapıldı" : "admin yetkisi kaldırıldı"}`);
+      toast(on ? `🛡️ ${a.name} artık admin` : `${a.name} artık normal oyuncu`); render();
+    })();
+    return;
+  }
   else if (act === "saveDel") {
     const g = GAMES.find(q => q.id === b.dataset.g) || { title: b.dataset.g };
     if (!confirm(`${a.name} adlı oyuncunun ${g.title} ilerlemesi silinsin mi? Oyuncu bu oyuna sıfırdan başlar.`)) return;
