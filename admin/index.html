@@ -929,32 +929,37 @@ function renderCodes() {
 }
 
 // ================================================================ Avatar mağazası
+// Düzenlenen öğenin kimliği aynı kalır: satın alanların ve takanların elinden gitmez (silip yeniden eklemek gider)
+let editHat = null, editFace = null;
 function renderAvatarShop() {
   const av = cfg().avatar || {}, u = users();
+  const eh = (av.hats || []).find(h => h.id === editHat) || null, ef = (av.faces || []).find(f => f.id === editFace) || null;
+  if (!eh) editHat = null;
+  if (!ef) editFace = null;
   const owners = id => u.filter(x => (x.a.owned || []).includes(id)).length;
   const wearing = (id, k) => u.filter(x => x.a.avatar?.[k] === id).length;
   const swatches = (list, kind) => list.length ? `<div class="swList">${list.map((c, i) => `<div class="swItem" style="background:${esc(c)}" title="${esc(c)}"><button data-sdel="${kind}:${i}" aria-label="Sil">×</button></div>`).join("")}</div>` : `<div class="hint" style="margin-top:8px">Henüz eklenmedi.</div>`;
   const price = p => p > 0 ? `<span class="robux">R$ ${fmtNum(p)}</span>` : `<span class="pill green">Ücretsiz</span>`;
   $("page").innerHTML = `<div class="stack">
-    <div class="card"><div class="cardHead"><h2>Yeni aksesuar</h2></div><div class="cardBody">
+    <div class="card"><div class="cardHead"><h2>${eh ? `Aksesuarı düzenle: ${esc(eh.name)}` : "Yeni aksesuar"}</h2></div><div class="cardBody">
       <div class="formGrid">
-        <div><label class="lbl" for="hName">İsim</label><input class="field" id="hName" maxlength="24" placeholder="Altın Taç"></div>
-        <div><label class="lbl" for="hShape">Şekil</label><select class="field" id="hShape">${SHAPES.map(([k, n]) => `<option value="${k}">${n}</option>`).join("")}</select></div>
-        <div><label class="lbl" for="hColor">Renk</label><input class="field" type="color" id="hColor" value="#ffd166"></div>
-        <div><label class="lbl" for="hPrice">Fiyat (R$)</label><input class="field num" type="text" inputmode="numeric" data-num id="hPrice" value="0"><div class="hint">0 = ücretsiz</div></div>
-      </div><button class="btn primary" id="btnHat" style="margin-top:18px">${ic("plus")}Aksesuar ekle</button></div>
+        <div><label class="lbl" for="hName">İsim</label><input class="field" id="hName" maxlength="24" placeholder="Altın Taç" value="${eh ? esc(eh.name) : ""}"></div>
+        <div><label class="lbl" for="hShape">Şekil</label><select class="field" id="hShape">${SHAPES.map(([k, n]) => `<option value="${k}" ${eh && eh.shape === k ? "selected" : ""}>${n}</option>`).join("")}</select></div>
+        <div><label class="lbl" for="hColor">Renk</label><input class="field" type="color" id="hColor" value="${eh ? esc(eh.color) : "#ffd166"}"></div>
+        <div><label class="lbl" for="hPrice">Fiyat (R$)</label><input class="field num" type="text" inputmode="numeric" data-num id="hPrice" value="${eh ? eh.price || 0 : 0}"><div class="hint">0 = ücretsiz${eh ? " · satın alanlar sahip kalır" : ""}</div></div>
+      </div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:18px"><button class="btn primary" id="btnHat">${eh ? "Değişiklikleri kaydet" : ic("plus") + "Aksesuar ekle"}</button>${eh ? `<button class="btn ghost" id="btnHatCancel">Vazgeç</button>` : ""}</div></div>
       ${(av.hats || []).length ? `<div class="cardBody" style="padding-top:0">${av.hats.map((h, i) => `<div class="rowLine"><span class="itemIco"><span class="dot" style="width:22px;height:22px;background:${esc(h.color)}"></span></span>
         <div class="grow"><b>${esc(h.name)}</b><small>${(SHAPES.find(s => s[0] === h.shape) || [, h.shape])[1]} · ${owners(h.id)} sahip · ${wearing(h.id, "hat")} takıyor</small></div>${price(h.price)}
-        <button class="btn sm danger" data-hdel="${i}">${ic("trash")}</button></div>`).join("")}</div>` : ""}</div>
-    <div class="card"><div class="cardHead"><h2>Yeni yüz</h2></div><div class="cardBody">
+        <button class="btn sm" data-hedit="${esc(h.id)}">Düzenle</button><button class="btn sm danger" data-hdel="${i}">${ic("trash")}</button></div>`).join("")}</div>` : ""}</div>
+    <div class="card"><div class="cardHead"><h2>${ef ? `Yüzü düzenle: ${esc(ef.emoji)} ${esc(ef.name)}` : "Yeni yüz"}</h2></div><div class="cardBody">
       <div class="formGrid">
-        <div><label class="lbl" for="fName">İsim</label><input class="field" id="fName" maxlength="24" placeholder="Havalı Kedi"></div>
-        <div><label class="lbl" for="fEmoji">Emoji</label><input class="field" id="fEmoji" maxlength="8" placeholder="😺" style="font-size:20px"><div class="hint">Yüz olarak kafaya çizilir</div></div>
-        <div><label class="lbl" for="fPrice">Fiyat (R$)</label><input class="field num" type="text" inputmode="numeric" data-num id="fPrice" value="0"><div class="hint">0 = ücretsiz</div></div>
-      </div><button class="btn primary" id="btnFace" style="margin-top:18px">${ic("plus")}Yüz ekle</button></div>
+        <div><label class="lbl" for="fName">İsim</label><input class="field" id="fName" maxlength="24" placeholder="Havalı Kedi" value="${ef ? esc(ef.name) : ""}"></div>
+        <div><label class="lbl" for="fEmoji">Emoji</label><input class="field" id="fEmoji" maxlength="8" placeholder="😺" style="font-size:20px" value="${ef ? esc(ef.emoji) : ""}"><div class="hint">Yüz olarak kafaya çizilir</div></div>
+        <div><label class="lbl" for="fPrice">Fiyat (R$)</label><input class="field num" type="text" inputmode="numeric" data-num id="fPrice" value="${ef ? ef.price || 0 : 0}"><div class="hint">0 = ücretsiz${ef ? " · satın alanlar sahip kalır" : ""}</div></div>
+      </div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:18px"><button class="btn primary" id="btnFace">${ef ? "Değişiklikleri kaydet" : ic("plus") + "Yüz ekle"}</button>${ef ? `<button class="btn ghost" id="btnFaceCancel">Vazgeç</button>` : ""}</div></div>
       ${(av.faces || []).length ? `<div class="cardBody" style="padding-top:0">${av.faces.map((f, i) => `<div class="rowLine"><span class="itemIco">${esc(f.emoji)}</span>
         <div class="grow"><b>${esc(f.name)}</b><small>${owners(f.id)} sahip · ${wearing(f.id, "face")} kullanıyor</small></div>${price(f.price)}
-        <button class="btn sm danger" data-fdel="${i}">${ic("trash")}</button></div>`).join("")}</div>` : ""}</div>
+        <button class="btn sm" data-fedit="${esc(f.id)}">Düzenle</button><button class="btn sm danger" data-fdel="${i}">${ic("trash")}</button></div>`).join("")}</div>` : ""}</div>
     <div class="card"><div class="cardHead"><h2>Yeni renk</h2><span class="sub right">Renkler ücretsizdir</span></div><div class="cardBody">
       <div class="formGrid">
         <div><label class="lbl" for="sTarget">Nereye</label><select class="field" id="sTarget"><option value="colors">Tişört, pantolon, aksesuar</option><option value="skins">Ten rengi</option></select></div>
@@ -968,7 +973,12 @@ function renderAvatarShop() {
     const name = $("hName").value.trim(), p = price0("hPrice");
     if (name.length < 2) { toast("Aksesuara bir isim ver", true); return; }
     if (p === null) { toast("Fiyat 0 ile 100.000 arası olmalı", true); return; }
-    setCfg(c => { c.avatar = c.avatar || {}; c.avatar.hats = [...(c.avatar.hats || []), { id: newId(), name, shape: $("hShape").value, color: $("hColor").value, price: p }]; });
+    const it = { name, shape: $("hShape").value, color: $("hColor").value, price: p };
+    if (eh) {
+      setCfg(c => { const h = (c.avatar?.hats || []).find(x => x.id === eh.id); if (h) Object.assign(h, it); });
+      logAct(`Avatar aksesuarı düzenlendi: ${name} (${p ? "R$ " + p : "ücretsiz"})`); toast(`${name} kaydedildi`); editHat = null; render(); return;
+    }
+    setCfg(c => { c.avatar = c.avatar || {}; c.avatar.hats = [...(c.avatar.hats || []), { id: newId(), ...it }]; });
     logAct(`Avatar aksesuarı eklendi: ${name} (${p ? "R$ " + p : "ücretsiz"})`); toast(`${name} eklendi`); render();
   };
   $("btnFace").onclick = () => {
@@ -976,6 +986,10 @@ function renderAvatarShop() {
     if (name.length < 2) { toast("Yüze bir isim ver", true); return; }
     if (!emoji) { toast("Bir emoji yaz (ör. 😺)", true); return; }
     if (p === null) { toast("Fiyat 0 ile 100.000 arası olmalı", true); return; }
+    if (ef) {
+      setCfg(c => { const f = (c.avatar?.faces || []).find(x => x.id === ef.id); if (f) Object.assign(f, { name, emoji, price: p }); });
+      logAct(`Avatar yüzü düzenlendi: ${emoji} ${name} (${p ? "R$ " + p : "ücretsiz"})`); toast(`${name} kaydedildi`); editFace = null; render(); return;
+    }
     setCfg(c => { c.avatar = c.avatar || {}; c.avatar.faces = [...(c.avatar.faces || []), { id: newId(), name, emoji, price: p }]; });
     logAct(`Avatar yüzü eklendi: ${emoji} ${name} (${p ? "R$ " + p : "ücretsiz"})`); toast(`${name} eklendi`); render();
   };
@@ -985,9 +999,16 @@ function renderAvatarShop() {
     setCfg(c => { c.avatar = c.avatar || {}; c.avatar[t] = [...(c.avatar[t] || []), col]; });
     logAct(`Avatar rengi eklendi: ${col} (${t === "skins" ? "ten" : "kıyafet"})`); toast("Renk eklendi"); render();
   };
+  $("page").querySelectorAll("[data-hedit]").forEach(b => b.onclick = () => { editHat = b.dataset.hedit; render(); scrollTo(0, 0); });
+  $("page").querySelectorAll("[data-fedit]").forEach(b => b.onclick = () => { editFace = b.dataset.fedit; render(); });
+  if ($("btnHatCancel")) $("btnHatCancel").onclick = () => { editHat = null; render(); };
+  if ($("btnFaceCancel")) $("btnFaceCancel").onclick = () => { editFace = null; render(); };
   const del = (attr, key, label) => $("page").querySelectorAll(`[${attr}]`).forEach(b => b.onclick = () => {
     const i = +b.getAttribute(attr), it = (cfg().avatar?.[key] || [])[i];
-    if (!it || !confirm(`${label(it)} silinsin mi? Satın alanlarda da kaybolur.`)) return;
+    if (!it) return;
+    const o = owners(it.id), w = wearing(it.id, key === "hats" ? "hat" : "face");
+    const warn = o || w ? `\n\n⚠️ ${o} oyuncu bunu satın aldı, ${w} oyuncu şu an takıyor. Silersen hepsinden gider (Robux geri verilmez).\nSadece rengini, adını ya da fiyatını değiştireceksen "Düzenle"yi kullan.` : "";
+    if (!confirm(`${label(it)} silinsin mi?${warn}`)) return;
     setCfg(c => c.avatar[key].splice(i, 1)); logAct(`Avatar öğesi silindi: ${label(it)}`); toast("Silindi"); render();
   });
   del("data-hdel", "hats", h => h.name); del("data-fdel", "faces", f => `${f.emoji} ${f.name}`);

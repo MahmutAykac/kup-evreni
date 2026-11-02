@@ -697,7 +697,10 @@ let avatarPreview = null;
 const owns = id => { const it = customItem(id); return !it || !(it.price > 0) || (profile.owned || []).includes(id); };
 const priceTag = id => owns(id) ? "" : `<span class="price">R$ ${customItem(id).price}</span>`;
 function renderAvatarOpts() {
-  const a = profile.avatar;
+  // Mağazadan silinmiş bir öğe takılıysa seçili olarak "Yok" / varsayılan yüz görünsün
+  const a = { ...profile.avatar };
+  if (!HATS.some(h => h[0] === a.hat)) a.hat = "none";
+  if (!FACES.some(f => f[0] === a.face)) a.face = "smile";
   const sw = (key, list) => `<div class="swatches">${list.map(c => `<button class="sw ${a[key] === c ? "on" : ""}" data-k="${key}" data-v="${c}" style="background:${c}"></button>`).join("")}</div>`;
   $("avatarOpts").innerHTML = `
     <b>Ten rengi</b>${sw("skin", SKINS)}
