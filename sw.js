@@ -2,7 +2,7 @@
 // Sayfalar: önce internet (güncel sürüm gelsin), yoksa cihazdaki kopya.
 // Sürüm numaralı kütüphaneler (three.js, supabase-js): önce cihazdaki kopya (değişmezler).
 // Supabase istekleri (hesap, Robux) hiç saklanmaz: onlar her zaman sunucuya gider.
-const CACHE = "kup-evreni-v1";
+const CACHE = "kup-evreni-v2";
 const GAMES = ["pizza-kulesi-tycoon", "evcil-hayvan-gezegenler", "cilgin-fabrika", "tekne-kazasi", "asmr-klavye", "kasaba-hayati", "limonata-standi"];
 const PAGES = ["./", "./index.html", "./manifest.json", "./icon.svg", ...GAMES.map(g => `./${g}/web/index.html`)];
 const LIBS = [
@@ -14,7 +14,9 @@ self.addEventListener("install", e => {
   e.waitUntil((async () => {
     const c = await caches.open(CACHE);
     // Biri inmezse diğerleri yine saklansın
-    await Promise.all([...PAGES, ...LIBS].map(u => c.add(new Request(u, { cache: "reload" })).catch(() => {})));
+    await Promise.all([...PAGES, ...LIBS].map(async u => {
+      try { const r = await fetch(new Request(u, { cache: "reload" })); if (r.ok) await c.put(u, await clean(r)); } catch (e) {}
+    }));
     self.skipWaiting();
   })());
 });
@@ -35,6 +37,8 @@ self.addEventListener("fetch", e => {
   e.respondWith(networkFirst(req));
 });
 
+// Yönlendirilmiş cevap (Cloudflare: /x/index.html → /x/) sayfa olarak verilemez: aynı içerikle temiz bir cevap yap
+const clean = async res => res.redirected ? new Response(await res.blob(), { status: res.status, statusText: res.statusText, headers: res.headers }) : res;
 async function cacheFirst(req) {
   const hit = await caches.match(req);
   if (hit) return hit;
@@ -46,7 +50,7 @@ async function networkFirst(req) {
   const c = await caches.open(CACHE);
   const key = new URL(req.url); key.search = ""; // oyunlar ?v=... ile açılıyor: tek kopya tut
   try {
-    const res = await fetch(req.url, { cache: "no-store" }); // sayfa isteğine (navigate) ayar eklenemez, adresle yeniden iste
+    const res = await clean(await fetch(req.url, { cache: "no-store" })); // sayfa isteğine (navigate) ayar eklenemez, adresle yeniden iste
     if (res.ok) c.put(key.href, res.clone());
     return res;
   } catch (err) {
