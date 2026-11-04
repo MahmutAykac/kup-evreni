@@ -1,0 +1,1721 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Küp Arena</title>
+<!--
+  Küp Arena: üçüncü şahıs atış oyunu, botlara karşı "Herkes Herkese" maçları.
+  Küp Evreni platformunda çalışır (tek başına da açılır). Kayıt anahtarı: kupArena.
+  Maç: MATCH_TIME sn ya da KILL_LIMIT vuruş, 7 bot. Vurulan karakter küp parçalarına ayrılır (kan yok), RESPAWN sn sonra yeniden doğar.
+  Silahlar (WEAPONS): Glock 17 (her zaman yanında), AK-47, Remington 870, Remington 700. Bölgesel hasar: kafa ×2,5, gövde ×1, bacak ×0,75.
+  Kontroller: fare bak · sol tık ateş · sağ tık nişan · WASD yürü · Shift koş · Space zıpla · C çömel · R doldur · 1/2/Q/tekerlek silah · Tab skor · Esc duraklat
+  Dokunmatik: sol yarı joystick · sağ yarı sürükle-bak · ateş (basılıyken sürükleyerek de bakılır) · nişan · doldur · zıpla · çömel · silah değiştir.
+  Test kancası: window.step(sn) oyun mantığını elle ilerletir.
+-->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+  :root { --panel: rgba(22, 26, 36, 0.78); --line: rgba(255,255,255,0.2); --text: #fff; --accent: #ffb703; --ok: #6ee7a0; --bad: #ff5d5d; --card: #f4f6fb; --ink: #1f2430; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #9fb4c8; color: var(--text); font-family: "Trebuchet MS", system-ui, sans-serif;
+    overflow: hidden; -webkit-user-select: none; user-select: none; touch-action: none; }
+  button { font: inherit; color: inherit; }
+  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  .pill { background: var(--panel); border-radius: 14px; padding: 8px 12px; }
+  #hud { display: none; }
+  body.playing #hud { display: block; }
+  #status { position: fixed; left: 14px; top: 12px; min-width: 190px; }
+  #hpRow { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 17px; }
+  #hpBar { flex: 1; height: 12px; border-radius: 6px; background: rgba(255,255,255,0.18); overflow: hidden; min-width: 100px; }
+  #hpFill { height: 100%; width: 100%; background: var(--ok); transition: width 0.12s; }
+  #ammoRow { margin-top: 6px; display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
+  #wName { font-size: 14px; color: #cfd6e4; }
+  #ammo { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  #ammo small { font-size: 14px; color: #cfd6e4; font-weight: 400; }
+  #ammo.low { color: var(--bad); }
+  #reloadBar { height: 4px; border-radius: 2px; background: var(--accent); width: 0; margin-top: 4px; }
+  #clock { position: fixed; left: 50%; top: 12px; transform: translateX(-50%); text-align: center; white-space: nowrap; cursor: pointer; }
+  #timeTxt { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  #timeTxt.late { color: var(--bad); }
+  #leadTxt { font-size: 13px; color: #dfe5f0; }
+  #menuBtns { position: fixed; right: 14px; top: 12px; display: flex; gap: 6px; }
+  #menuBtns button { border: 2px solid var(--line); background: var(--panel); border-radius: 14px; padding: 8px 12px; cursor: pointer; font-size: 15px; }
+  #feed { position: fixed; right: 14px; top: 62px; display: flex; flex-direction: column; gap: 4px; align-items: flex-end; pointer-events: none; }
+  .kf { background: rgba(0,0,0,0.55); padding: 4px 10px; border-radius: 8px; font-size: 14px; animation: kfade 5s forwards; white-space: nowrap; }
+  .kf.me { background: rgba(255,183,3,0.35); border: 1px solid rgba(255,183,3,0.8); }
+  .kf .w { color: #cfd6e4; font-size: 12px; margin: 0 4px; }
+  @keyframes kfade { 0%, 85% { opacity: 1; } 100% { opacity: 0; } }
+  #cross { position: fixed; left: 50%; top: 50%; width: 0; height: 0; pointer-events: none; }
+  #cross i { position: absolute; background: #fff; box-shadow: 0 0 2px rgba(0,0,0,0.9); }
+  #cross .h { width: 9px; height: 2px; margin-top: -1px; }
+  #cross .v { width: 2px; height: 9px; margin-left: -1px; }
+  #cross .dot { width: 3px; height: 3px; margin: -1.5px 0 0 -1.5px; border-radius: 50%; }
+  #hitm { position: fixed; left: 50%; top: 50%; width: 26px; height: 26px; margin: -13px 0 0 -13px; pointer-events: none; opacity: 0; }
+  #hitm::before, #hitm::after { content: ""; position: absolute; left: 12px; top: 0; width: 2px; height: 26px; background: #fff; box-shadow: 0 0 2px #000;
+    clip-path: polygon(0 0, 100% 0, 100% 35%, 0 35%, 0 65%, 100% 65%, 100% 100%, 0 100%); }
+  #hitm::before { transform: rotate(45deg); } #hitm::after { transform: rotate(-45deg); }
+  #hitm.kill::before, #hitm.kill::after { background: var(--bad); }
+  #hurt { position: fixed; inset: 0; pointer-events: none; opacity: 0; background: radial-gradient(ellipse at center, rgba(220,30,30,0) 55%, rgba(220,30,30,0.8) 100%); }
+  #hurtDir { position: fixed; left: 50%; top: 50%; width: 0; height: 0; pointer-events: none; opacity: 0; }
+  #hurtDir div { position: absolute; left: -22px; top: -150px; width: 44px; height: 24px; background: rgba(255,60,60,0.9);
+    clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+  #scope { position: fixed; inset: 0; pointer-events: none; display: none;
+    background: radial-gradient(circle at center, transparent 0, transparent 32vmin, #000 32.3vmin); }
+  #scope::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: rgba(0,0,0,0.85); }
+  #scope::after { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; background: rgba(0,0,0,0.85); }
+  #big { position: fixed; left: 50%; top: 30%; transform: translate(-50%, -50%); text-align: center; pointer-events: none; font-size: 30px; font-weight: 700;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.7); white-space: nowrap; }
+  #big small { display: block; font-size: 17px; font-weight: 400; margin-top: 4px; }
+  .pop { animation: popin 1.6s forwards; }
+  @keyframes popin { 0% { transform: translate(-50%, -50%) scale(0.6); opacity: 0; } 12% { transform: translate(-50%, -50%) scale(1.1); opacity: 1; }
+    20%, 80% { transform: translate(-50%, -50%) scale(1); opacity: 1; } 100% { opacity: 0; } }
+  #toasts { position: fixed; top: 92px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 6px; align-items: center;
+    pointer-events: none; z-index: 20; width: max-content; max-width: calc(100vw - 32px); }
+  .toast { background: rgba(244,246,251,0.96); color: var(--ink); padding: 6px 14px; border-radius: 10px; font-size: 15px; animation: tfade 3s forwards; text-align: center; }
+  @keyframes tfade { 0%, 82% { opacity: 1; } 100% { opacity: 0; transform: translateY(-8px); } }
+  #lockHint { position: fixed; left: 50%; bottom: 22%; transform: translateX(-50%); pointer-events: none; display: none; }
+  #board { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); display: none; min-width: 300px; z-index: 6; }
+  #board table { border-collapse: collapse; width: 100%; font-size: 15px; }
+  #board td, #board th { padding: 4px 10px; text-align: left; }
+  #board th { color: #cfd6e4; font-weight: 400; font-size: 13px; }
+  #board tr.me td { color: var(--accent); font-weight: 700; }
+  #board td.n { text-align: right; font-variant-numeric: tabular-nums; }
+  /* Dokunmatik */
+  #touch { display: none; }
+  body.touch.playing #touch { display: block; }
+  .tb { position: fixed; border-radius: 50%; border: 2px solid rgba(255,255,255,0.5); background: rgba(20,24,34,0.45); display: flex;
+    align-items: center; justify-content: center; font-size: 20px; font-weight: 700; touch-action: none; }
+  .tb.on { background: rgba(255,183,3,0.55); }
+  #tFire { right: 22px; bottom: 26px; width: 92px; height: 92px; font-size: 30px; background: rgba(220,50,50,0.5); }
+  #tAim { right: 128px; bottom: 30px; width: 60px; height: 60px; }
+  #tJump { right: 24px; bottom: 132px; width: 58px; height: 58px; }
+  #tCrouch { right: 96px; bottom: 112px; width: 52px; height: 52px; font-size: 18px; }
+  #tReload { right: 196px; bottom: 26px; width: 52px; height: 52px; }
+  #tSwap { right: 24px; bottom: 202px; width: 52px; height: 52px; font-size: 17px; }
+  #stick { position: fixed; width: 110px; height: 110px; margin: -55px 0 0 -55px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.45);
+    background: rgba(0,0,0,0.22); display: none; pointer-events: none; }
+  #stick div { position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px; border-radius: 50%; background: rgba(255,255,255,0.75); }
+  /* Menüler */
+  .overlay { position: fixed; inset: 0; display: none; align-items: flex-start; justify-content: center; background: rgba(8,10,16,0.6);
+    padding: 16px; overflow-y: auto; touch-action: pan-y; z-index: 10; }
+  .overlay.show { display: flex; }
+  .card { background: var(--card); color: var(--ink); border-radius: 18px; padding: 18px 22px; width: 100%; max-width: 560px; margin: auto 0; line-height: 1.45;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.35); }
+  .card h1 { margin: 0 0 6px; font-size: 26px; color: #c2410c; }
+  .card h2 { margin: 14px 0 6px; font-size: 16px; color: #4b5563; }
+  .card ol, .card ul { padding-left: 22px; margin: 8px 0; }
+  .card li { margin: 3px 0; }
+  .muted { color: #5b6270; font-size: 14px; }
+  .btn { border: 0; border-radius: 12px; padding: 10px 14px; cursor: pointer; font-weight: 700; background: #e2e6ef; color: #2b3140; }
+  .btn.go { background: #e85d04; color: #fff; }
+  .btn.blue { background: #3a86ff; color: #fff; }
+  .btn.sel { background: #1f2430; color: #fff; }
+  .btn:disabled { opacity: 0.5; cursor: default; }
+  .rowb { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  .rowb .btn { flex: 1; }
+  .seg { display: flex; gap: 6px; flex-wrap: wrap; }
+  .seg .btn { flex: 1; padding: 8px 10px; font-size: 14px; }
+  .money { font-weight: 700; color: #b45309; }
+  .wrow { display: grid; grid-template-columns: 44px 1fr auto; gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid #e2e6ef; }
+  .wrow .ic { font-size: 30px; text-align: center; }
+  .wrow .btn { font-size: 14px; min-width: 96px; }
+  .bars { display: grid; grid-template-columns: 74px 1fr; gap: 2px 8px; font-size: 12px; color: #5b6270; margin-top: 4px; }
+  .bar { height: 7px; border-radius: 4px; background: #e2e6ef; margin-top: 5px; overflow: hidden; }
+  .bar b { display: block; height: 100%; background: #e85d04; }
+  #endTable { width: 100%; border-collapse: collapse; font-size: 15px; margin: 6px 0; }
+  #endTable td, #endTable th { padding: 4px 6px; border-bottom: 1px solid #e2e6ef; text-align: left; }
+  #endTable th { font-weight: 400; color: #5b6270; font-size: 13px; }
+  #endTable .n { text-align: right; font-variant-numeric: tabular-nums; }
+  #endTable tr.me td { color: #c2410c; font-weight: 700; }
+  #earn td { padding: 2px 0; } #earn td:last-child { text-align: right; font-weight: 700; padding-left: 16px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 6px; margin: 8px 0; }
+  .stats div { background: #e9edf5; border-radius: 10px; padding: 6px 8px; font-size: 13px; color: #5b6270; }
+  .stats b { display: block; font-size: 17px; color: var(--ink); }
+  input[type=range] { width: 100%; }
+  #noWebgl { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 16px; text-align: center; font-size: 18px; color: #222; }
+  @media (max-width: 760px), (max-height: 480px) {
+    #status { min-width: 160px; padding: 6px 10px; }
+    #hpRow { font-size: 14px; }
+    #ammo { font-size: 18px; }
+    #wName { font-size: 12px; }
+    #timeTxt { font-size: 16px; }
+    #leadTxt { font-size: 11px; }
+    #menuBtns button { padding: 6px 9px; font-size: 14px; }
+    #feed { top: 52px; }
+    .kf { font-size: 12px; padding: 3px 8px; }
+    #big { font-size: 22px; }
+    #big small { font-size: 14px; }
+    .card { padding: 14px 16px; }
+    .card h1 { font-size: 21px; }
+    #toasts { top: 70px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud">
+  <div id="status" class="pill">
+    <div id="hpRow">❤️ <span id="hpTxt">100</span><div id="hpBar"><div id="hpFill"></div></div></div>
+    <div id="ammoRow"><span id="ammo">0</span><span id="wName"></span></div>
+    <div id="reloadBar"></div>
+  </div>
+  <div id="clock" class="pill" title="Skor tablosu (Tab)"><div id="timeTxt">3:00</div><div id="leadTxt"></div></div>
+  <div id="menuBtns"><button id="bPause" title="Duraklat (Esc)"><b>❚❚</b></button></div>
+  <div id="feed"></div>
+  <div id="cross"><i class="h" id="cL"></i><i class="h" id="cR"></i><i class="v" id="cU"></i><i class="v" id="cD"></i><i class="dot"></i></div>
+  <div id="hitm"></div>
+  <div id="hurtDir"><div></div></div>
+  <div id="lockHint" class="pill">🖱️ Nişan almak için ekrana tıkla</div>
+  <div id="board" class="pill"></div>
+  <div id="touch">
+    <div class="tb" id="tFire">🔥</div>
+    <div class="tb" id="tAim">🎯</div>
+    <div class="tb" id="tJump">⤒</div>
+    <div class="tb" id="tCrouch">⬇</div>
+    <div class="tb" id="tReload">R</div>
+    <div class="tb" id="tSwap">🔄</div>
+  </div>
+</div>
+<div id="scope"></div>
+<div id="hurt"></div>
+<div id="big"></div>
+<div id="toasts"></div>
+<div id="stick"><div></div></div>
+
+<div id="ovMenu" class="overlay show"><div class="card">
+  <h1>🔫 Küp Arena</h1>
+  <div class="muted">Depoda 7 rakibe karşı herkes herkese! 3 dakikada en çok vuruşu yapan ya da ilk <b>20</b> vuruşa ulaşan kazanır.</div>
+  <div class="stats" id="menuStats"></div>
+  <h2>Ana silahın</h2>
+  <div class="seg" id="primSel"></div>
+  <h2>Zorluk</h2>
+  <div class="seg" id="diffSel"></div>
+  <div class="rowb">
+    <button class="btn go" id="bStart" style="font-size:18px;flex-basis:100%">▶ Maça başla</button>
+    <button class="btn" id="bArmory">🔫 Cephanelik</button>
+    <button class="btn" id="bShop">R$ Mağaza</button>
+    <button class="btn" id="bHelp">❓ Nasıl oynanır</button>
+  </div>
+</div></div>
+<div id="ovHelp" class="overlay"><div class="card">
+  <h1>❓ Nasıl oynanır</h1>
+  <ol>
+    <li>🎯 Rakipleri vur, vurulma! Her vuruş <b>💰 para</b> kazandırır, kafadan vuruş (🎯) hem daha çok hasar hem ekstra para.</li>
+    <li>💥 Hasar: <b>kafa ×2,5</b> · gövde ×1 · bacak ×0,75. Canın 100; 5 saniye vurulmazsan yavaş yavaş dolar.</li>
+    <li>🏃 Koşarken ve zıplarken isabet düşer, <b>çömelince ve nişan alınca</b> artar. Uzun tarama yaparsan namlu yukarı kayar: kısa atışlar yap.</li>
+    <li>🧰 Haritada <b>❤️ ilk yardım</b> ve <b>📦 cephane</b> kutuları var. Ortadaki yüksek platformdan her yer görünür ama sen de görünürsün!</li>
+    <li>🔫 Kazandığın parayla <b>Cephanelik</b>'ten yeni silah al.</li>
+  </ol>
+  <p class="muted">Klavye: fare ile bak · sol tık ateş · sağ tık nişan · WASD yürü · Shift koş · Space zıpla · C çömel · R doldur · 1 / 2 / Q / tekerlek silah değiştir · Tab skor · Esc duraklat.<br>
+    Dokunmatik: sol yarı joystick · sağ yarı sürükle-bak · 🔥 ateş (basılıyken sürükleyerek de nişan alınır) · 🎯 nişan · R doldur · ⤒ zıpla · ⬇ çömel · 🔄 silah.</p>
+  <div class="rowb"><button class="btn go" data-close>Tamam</button></div>
+</div></div>
+<div id="ovArmory" class="overlay"><div class="card">
+  <h1>🔫 Cephanelik</h1>
+  <div class="money" id="armMoney"></div>
+  <div id="armList"></div>
+  <div class="rowb"><button class="btn" data-close>Kapat</button></div>
+</div></div>
+<div id="ovShop" class="overlay"><div class="card">
+  <h1>R$ Robux Mağazası</h1>
+  <div class="money" id="shopJeton"></div>
+  <div id="passList"></div>
+  <div class="muted" id="shopNote" style="margin-top:8px"></div>
+  <div class="rowb"><button class="btn" data-close>Kapat</button></div>
+</div></div>
+<div id="ovPause" class="overlay"><div class="card">
+  <h1>⏸ Duraklatıldı</h1>
+  <h2>Fare / dokunma hassasiyeti: <span id="sensTxt"></span></h2>
+  <input type="range" id="sens" min="0.3" max="2.5" step="0.1">
+  <div class="rowb">
+    <button class="btn go" id="bResume">▶ Devam et</button>
+    <button class="btn" id="bMute">🔊 Ses</button>
+    <button class="btn" id="bQuit">🚪 Maçtan çık</button>
+  </div>
+</div></div>
+<div id="ovEnd" class="overlay"><div class="card">
+  <h1 id="endTitle">🏆 Maç bitti</h1>
+  <table id="endTable"></table>
+  <h2>Kazancın</h2>
+  <table id="earn"></table>
+  <div class="rowb">
+    <button class="btn go" id="bAgain">▶ Tekrar oyna</button>
+    <button class="btn" id="bHome">🏠 Menü</button>
+  </div>
+</div></div>
+<div id="noWebgl">3D için WebGL gerekli; bu tarayıcıda açılamadı. Chrome / Edge ile açmayı dene.</div>
+
+<script>
+"use strict";
+// ================================================================ Yardımcılar
+const $ = id => document.getElementById(id);
+const rand = (a, b) => a + Math.random() * (b - a);
+const pick = l => l[Math.floor(Math.random() * l.length)];
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+const fmt = n => Math.round(n).toLocaleString("tr-TR");
+function angDiff(a, b) { let d = (b - a) % (Math.PI * 2); if (d > Math.PI) d -= Math.PI * 2; if (d < -Math.PI) d += Math.PI * 2; return d; }
+function setText(el, t) { if (el._t !== t) { el._t = t; el.textContent = t; } }
+function notify(msg) {
+  const el = document.createElement("div");
+  el.className = "toast"; el.textContent = msg;
+  $("toasts").appendChild(el);
+  setTimeout(() => el.remove(), 3000);
+  while ($("toasts").children.length > 3) $("toasts").firstChild.remove();
+}
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+// ================================================================ Config
+const MATCH_TIME = 180, KILL_LIMIT = 20, BOT_COUNT = 7, RESPAWN = 3, PROTECT = 2;
+const MAX_HP = 100, REGEN_DELAY = 5, REGEN_RATE = 12;
+const WALK = 5.2, RUN = 7.8, CROUCH_SPEED = 2.6, AIM_SPEED = 3.4, JUMP_V = 7, GRAVITY = 20, STEP = 0.5, RADIUS = 0.38, HEIGHT = 1.8;
+const HALF = 32;               // harita: -32..32
+const PART_MULT = { head: 2.5, body: 1, legs: 0.75 };
+const BASE_FOV = 70;
+// Değerler oyun dengesi için; gerçek balistik değil. hip/aim: koni yarıçapı (radyan), rpm: dakikada atış, falloff: [başlangıç m, bitiş m, en düşük çarpan]
+const WEAPONS = [
+  { id: "glock", name: "Glock 17", cat: "Tabanca", icon: "🔫", slot: 2, price: 0, dmg: 20, rpm: 380, auto: false, mag: 17, reserve: Infinity,
+    reload: 1.5, tac: 1.25, hip: 0.018, aim: 0.006, recoil: 0.022, recoilH: 0.01, bloom: 0.012, falloff: [15, 40, 0.6], zoom: 1.25, range: 60,
+    desc: "Her maçta yanında. Hızlı, isabetli, sınırsız yedek şarjör." },
+  { id: "ak", name: "AK-47", cat: "Piyade tüfeği", icon: "🔫", slot: 1, price: 0, dmg: 32, rpm: 600, auto: true, mag: 30, reserve: 120,
+    reload: 2.4, tac: 2.0, hip: 0.028, aim: 0.007, recoil: 0.03, recoilH: 0.018, bloom: 0.009, falloff: [35, 80, 0.8], zoom: 1.45, range: 120,
+    desc: "Güçlü otomatik tüfek. Her mesafede iş görür ama geri tepmesi sert: kısa taramalar yap." },
+  { id: "m870", name: "Remington 870", cat: "Pompalı tüfek", icon: "💥", slot: 1, price: 600, dmg: 12, pellets: 7, rpm: 70, auto: false, mag: 6, reserve: 30,
+    shell: 0.5, hip: 0.075, aim: 0.06, recoil: 0.07, recoilH: 0.02, bloom: 0, falloff: [6, 22, 0.15], zoom: 1.2, range: 40,
+    desc: "7 saçma × 12 hasar. Yakında tek atışta vurur, uzakta etkisiz. Fişekleri tek tek doldurur." },
+  { id: "m700", name: "Remington 700", cat: "Keskin nişancı", icon: "🎯", slot: 1, price: 1200, dmg: 90, rpm: 48, auto: false, mag: 5, reserve: 20,
+    reload: 3.0, tac: 2.6, hip: 0.09, aim: 0.0006, recoil: 0.09, recoilH: 0.01, bloom: 0, falloff: [200, 300, 1], zoom: 4, range: 200, scope: true,
+    desc: "Sürgülü, dürbünlü. Gövdeye 90, kafaya tek atış. Nişan almadan isabet çok düşük." },
+];
+const WEAP = Object.fromEntries(WEAPONS.map(w => [w.id, w]));
+const PRIMARIES = WEAPONS.filter(w => w.slot === 1);
+const DIFFS = {
+  kolay: { name: "Kolay", react: 0.75, err: 0.085, turn: 3.2, head: 0.08, dmg: 0.6, reward: 0.75 },
+  normal: { name: "Normal", react: 0.45, err: 0.055, turn: 5, head: 0.18, dmg: 0.8, reward: 1 },
+  zor: { name: "Zor", react: 0.28, err: 0.034, turn: 8, head: 0.3, dmg: 1, reward: 1.5 },
+};
+const REWARD = { kill: 25, head: 10, place: [150, 80, 40], play: 20 };
+const STREAKS = { 3: "🔥 3 Seri!", 5: "⚡ Durdurulamaz! (5)", 8: "👑 Efsane! (8)", 12: "🌟 Tanrısal! (12)" };
+// Robux (Küp Evreni platform parası) ile alınanlar
+const PASSES = [
+  { id: "double", name: "2x Para", icon: "💰", jeton: 150, desc: "Maçlardan kazandığın her şey 2 katı. Kalıcı." },
+  { id: "gold", name: "Altın Silahlar", icon: "✨", jeton: 120, desc: "Bütün silahların altın kaplama görünür. Kalıcı." },
+  { id: "cash1000", name: "1000 Para Paketi", icon: "⚡", jeton: 50, consumable: true, desc: "Anında 💰 1.000. İstediğin kadar alabilirsin." },
+];
+const BOT_NAMES = ["KüpAvcısı", "Bora_77", "Nişancı Ece", "Tilki", "Demir", "Kartal42", "GölgeX", "Pixel Kaya", "Usta Can", "Fırtına", "Zıpzıp", "Kuzey",
+  "Mavi Şimşek", "Defne_K", "Turbo", "Yıldız", "Kaptan Arda", "Neon", "Sessiz Ada", "Rüzgar"];
+const SKINS = ["#ffdbac", "#f1c27d", "#e0ac69", "#c68642", "#8d5524"];
+const SHIRTS = ["#e63946", "#118ab2", "#06d6a0", "#ffd166", "#9b5de5", "#f15bb5", "#ff8c42", "#4a4e69", "#2a9d8f"];
+const PANTS = ["#2b2d42", "#3a5a40", "#6c584c", "#1d3557", "#5c4d7d", "#3d405b"];
+const FACES = ["smile", "grin", "wow", "cool"];
+const HATS = ["cap", "none", "headphones", "none", "cap"];
+
+// ================================================================ Kayıt
+const SAVE_KEY = "kupArena";
+function freshSave() {
+  return { money: 0, owned: { glock: true, ak: true }, primary: "ak", passes: {}, diff: "normal", sens: 1,
+    matches: 0, wins: 0, kills: 0, deaths: 0, headshots: 0, bestStreak: 0, bestKills: 0, helpSeen: false, muted: false, giftIds: [] };
+}
+let save = freshSave();
+try {
+  const s = JSON.parse(localStorage.getItem(SAVE_KEY) || "null");
+  if (s && typeof s === "object") save = { ...save, ...s, owned: { ...save.owned, ...(s.owned || {}) }, passes: { ...(s.passes || {}) },
+    giftIds: Array.isArray(s.giftIds) ? s.giftIds : [] };
+} catch (e) {}
+if (!WEAP[save.primary] || WEAP[save.primary].slot !== 1 || !save.owned[save.primary]) save.primary = "ak";
+if (!DIFFS[save.diff]) save.diff = "normal";
+save.sens = clamp(+save.sens || 1, 0.3, 2.5);
+let lastSave = 0;
+function persist(force) {
+  if (!force && performance.now() - lastSave < 4000) return;
+  lastSave = performance.now();
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) {}
+  reportStats();
+}
+
+// ================================================================ Küp Evreni köprüsü
+const platform = { inside: window.parent !== window, profile: null, reqs: {} };
+const playerName = () => (platform.profile && platform.profile.name) || "Sen";
+function reportStats() {
+  if (!platform.inside) return;
+  parent.postMessage({ type: "kup:stats", stats: { "🏆 Galibiyet": fmt(save.wins), "💀 Vuruş": fmt(save.kills), "🎯 Kafadan": fmt(save.headshots),
+    "🔥 En iyi seri": save.bestStreak, "🎮 Maç": fmt(save.matches), "💰 Para": fmt(save.money) } }, "*");
+}
+function requestPurchase(item, done) {
+  if (!platform.inside) { notify("Robux ile almak için oyunu Küp Evreni'nden aç (ana klasördeki index.html)"); return; }
+  const reqId = Math.random().toString(36).slice(2);
+  platform.reqs[reqId] = done;
+  parent.postMessage({ type: "kup:purchase", reqId, id: item.id, name: item.name, price: item.jeton, icon: item.icon }, "*");
+}
+addEventListener("message", e => {
+  if (!platform.inside || e.source !== parent) return;
+  const m = e.data || {};
+  if (m.type === "kup:profile") { platform.profile = m; if (player) { rebuildChar(player); drawTag(player); } rerenderOpen(); }
+  else if (m.type === "kup:purchaseResult") {
+    if (platform.profile) platform.profile.jeton = m.jeton;
+    const done = platform.reqs[m.reqId]; delete platform.reqs[m.reqId];
+    if (done) done(!!m.ok);
+    rerenderOpen();
+  }
+  else if (m.type === "kup:gift") receiveGifts(m.gifts);
+});
+if (platform.inside) parent.postMessage({ type: "kup:ready" }, "*");
+
+// ================================================================ Küp Evreni hediyeleri (admin panelinden)
+// kup:gift { gifts: [{ gid, items: [{ key, n }] }] } → uygula, kaydet → kup:giftAck { gid, skipped }
+function applyGiftItem(key, n) {
+  if (key === "money") { save.money = Math.min(1e12, save.money + Math.min(n, 1e9)); return true; }
+  const [kind, id] = key.split(":");
+  if (kind === "weapon") {
+    if (!WEAP[id] || save.owned[id]) return false;
+    save.owned[id] = true; return true;
+  }
+  if (kind === "pass") {
+    const p = PASSES.find(x => x.id === id && !x.consumable);
+    if (!p || save.passes[id]) return false;
+    save.passes[id] = true; applyPass(id); return true;
+  }
+  return false;
+}
+function receiveGifts(gifts) {
+  save.giftIds = save.giftIds || [];
+  let any = false;
+  const acks = [];
+  for (const g of Array.isArray(gifts) ? gifts : []) {
+    if (!g || !g.gid) continue;
+    const skipped = [];
+    if (!save.giftIds.includes(g.gid)) {
+      for (const it of g.items || []) {
+        const n = Math.max(1, Math.floor(Number(it.n) || 1));
+        if (applyGiftItem(String(it.key), n)) any = true; else skipped.push(String(it.key));
+      }
+      save.giftIds = [g.gid, ...save.giftIds].slice(0, 200);
+    }
+    acks.push({ type: "kup:giftAck", gid: g.gid, skipped });
+  }
+  persist(true);
+  if (platform.inside) for (const a of acks) parent.postMessage(a, "*");
+  if (any) { SFX.pickup(); notify("🎁 Hediye alındı!"); rerenderOpen(); }
+}
+
+// ================================================================ Ses (WebAudio ile sentezlenir)
+const A = { ctx: null };
+function initAudio() {
+  if (A.ctx) { if (A.ctx.state === "suspended") A.ctx.resume(); return; }
+  try { A.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return; }
+  A.master = A.ctx.createGain(); A.master.gain.value = save.muted ? 0 : 0.45; A.master.connect(A.ctx.destination);
+  A.noise = A.ctx.createBuffer(1, A.ctx.sampleRate, A.ctx.sampleRate);
+  const d = A.noise.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+}
+function tone(freq, dur, type = "sine", gain = 0.1, freqEnd, delay = 0) {
+  if (!A.ctx || A.ctx.state !== "running" || gain < 0.002) return;
+  const t0 = A.ctx.currentTime + delay, o = A.ctx.createOscillator(), g = A.ctx.createGain();
+  o.type = type; o.frequency.setValueAtTime(freq, t0);
+  if (freqEnd) o.frequency.exponentialRampToValueAtTime(freqEnd, t0 + dur);
+  g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(gain, t0 + 0.005); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  o.connect(g).connect(A.master); o.start(t0); o.stop(t0 + dur + 0.05);
+}
+function noise(dur, gain, freq, type = "lowpass", delay = 0) {
+  if (!A.ctx || A.ctx.state !== "running" || gain < 0.002) return;
+  const t0 = A.ctx.currentTime + delay, s = A.ctx.createBufferSource(), f = A.ctx.createBiquadFilter(), g = A.ctx.createGain();
+  s.buffer = A.noise; s.loopStart = Math.random() * 0.5; f.type = type; f.frequency.value = freq;
+  g.gain.setValueAtTime(gain, t0); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  s.connect(f).connect(g).connect(A.master); s.start(t0, Math.random() * 0.5); s.stop(t0 + dur + 0.05);
+}
+const SFX = {
+  shot(id, v) {
+    if (id === "glock") { noise(0.12, 0.4 * v, 2600); tone(170, 0.08, "square", 0.06 * v, 60); }
+    else if (id === "ak") { noise(0.17, 0.5 * v, 1700); tone(115, 0.11, "sawtooth", 0.07 * v, 45); }
+    else if (id === "m870") { noise(0.32, 0.7 * v, 1000); tone(80, 0.22, "sine", 0.18 * v, 38); if (v > 0.6) { this.click(0.35); this.click(0.5); } }
+    else { noise(0.5, 0.7 * v, 1300); tone(70, 0.3, "sine", 0.18 * v, 32); noise(0.5, 0.15 * v, 700, "lowpass", 0.18); if (v > 0.6) { this.click(0.45); this.click(0.7); } }
+  },
+  click: (d = 0) => tone(1500, 0.03, "square", 0.04, undefined, d),
+  empty: () => tone(2100, 0.03, "square", 0.05),
+  reload: () => { tone(900, 0.04, "square", 0.05); tone(600, 0.05, "square", 0.05, undefined, 0.12); },
+  shell: () => tone(1100, 0.04, "triangle", 0.06),
+  hit: () => tone(1300, 0.04, "square", 0.05),
+  head: () => { tone(1900, 0.08, "triangle", 0.1); tone(2500, 0.1, "triangle", 0.08, undefined, 0.04); },
+  kill: () => { tone(660, 0.1, "square", 0.06); tone(990, 0.16, "square", 0.06, undefined, 0.08); },
+  hurt: () => { tone(160, 0.12, "sawtooth", 0.08, 90); noise(0.08, 0.15, 800); },
+  pop: v => { noise(0.25, 0.35 * v, 1500, "bandpass"); tone(300, 0.2, "triangle", 0.08 * v, 90); },
+  pickup: () => [660, 880, 1100].forEach((f, i) => tone(f, 0.1, "triangle", 0.07, undefined, i * 0.06)),
+  beep: (hi) => tone(hi ? 1320 : 880, 0.12, "triangle", 0.09),
+  win: () => [523, 659, 784, 1046].forEach((f, i) => tone(f, 0.25, "triangle", 0.09, undefined, i * 0.12)),
+  lose: () => [523, 440, 349].forEach((f, i) => tone(f, 0.25, "triangle", 0.08, undefined, i * 0.15)),
+};
+function shotVolume(c) { if (c === player) return 1; const d = Math.hypot(c.x - player.x, c.z - player.z); return clamp(1 - d / 70, 0, 1) * 0.7; }
+
+// ================================================================ 3D sahne
+const canvas = $("game");
+let renderer;
+try { renderer = new THREE.WebGLRenderer({ canvas, antialias: true }); }
+catch (e) { $("noWebgl").style.display = "flex"; throw e; }
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xb5c9dc);
+scene.fog = new THREE.Fog(0xb5c9dc, 60, 160);
+const camera = new THREE.PerspectiveCamera(BASE_FOV, 1, 0.05, 400);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x6b6f75, 0.75));
+const sun = new THREE.DirectionalLight(0xfff1d6, 0.8);
+sun.position.set(20, 40, 12);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -40, right: 40, top: 40, bottom: -40, near: 1, far: 110 });
+scene.add(sun);
+
+const lambert = (color, extra = {}) => new THREE.MeshLambertMaterial({ color, ...extra });
+function mesh(geo, material, x = 0, y = 0, z = 0, parent = scene, shadow = true) {
+  const m = new THREE.Mesh(geo, material);
+  m.position.set(x, y, z); m.castShadow = shadow; m.receiveShadow = true;
+  parent.add(m); return m;
+}
+function canvasTex(w, h, draw, rx = 1, ry = 1) {
+  const c = document.createElement("canvas"); c.width = w; c.height = h;
+  draw(c.getContext("2d"), w, h);
+  const t = new THREE.CanvasTexture(c); t.anisotropy = 4;
+  if (rx !== 1 || ry !== 1) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(rx, ry); }
+  return t;
+}
+function fitText(g, text, maxW, size, weight = 700) {
+  g.font = `${weight} ${size}px "Trebuchet MS", system-ui, sans-serif`;
+  const w = g.measureText(text).width;
+  if (w > maxW) g.font = `${weight} ${Math.floor(size * maxW / w)}px "Trebuchet MS", system-ui, sans-serif`;
+}
+
+// ================================================================ Çarpışma kutuları ve ışın testleri
+// Her engel eksenlere hizalı bir kutu: { x1, x2, y1, y2, z1, z2 }. Karakterler STEP'ten alçak kutulara çıkabilir.
+const boxes = [];
+function solid(cx, y0, cz, w, h, d, material, col = true) {
+  const m = mesh(new THREE.BoxGeometry(w, h, d), material, cx, y0 + h / 2, cz);
+  if (col) boxes.push({ x1: cx - w / 2, x2: cx + w / 2, y1: y0, y2: y0 + h, z1: cz - d / 2, z2: cz + d / 2 });
+  return m;
+}
+function rayBox(ox, oy, oz, dx, dy, dz, b, maxT) {
+  let t0 = 0, t1 = maxT;
+  const o = [ox, oy, oz], d = [dx, dy, dz], mn = [b.x1, b.y1, b.z1], mx = [b.x2, b.y2, b.z2];
+  for (let i = 0; i < 3; i++) {
+    if (Math.abs(d[i]) < 1e-9) { if (o[i] < mn[i] || o[i] > mx[i]) return -1; continue; }
+    let ta = (mn[i] - o[i]) / d[i], tb = (mx[i] - o[i]) / d[i];
+    if (ta > tb) { const t = ta; ta = tb; tb = t; }
+    if (ta > t0) t0 = ta;
+    if (tb < t1) t1 = tb;
+    if (t0 > t1) return -1;
+  }
+  return t0;
+}
+// Dünyaya (kutular + zemin) çarpma mesafesi; yoksa maxT
+function worldRay(ox, oy, oz, dx, dy, dz, maxT) {
+  let best = maxT;
+  if (dy < -1e-6) { const t = -oy / dy; if (t >= 0 && t < best) best = t; }
+  for (const b of boxes) { const t = rayBox(ox, oy, oz, dx, dy, dz, b, best); if (t >= 0 && t < best) best = t; }
+  return best;
+}
+function raySphere(ox, oy, oz, dx, dy, dz, cx, cy, cz, r, maxT) {
+  const lx = cx - ox, ly = cy - oy, lz = cz - oz, tca = lx * dx + ly * dy + lz * dz;
+  const d2 = lx * lx + ly * ly + lz * lz - tca * tca;
+  if (d2 > r * r) return -1;
+  const thc = Math.sqrt(r * r - d2);
+  let t = tca - thc; if (t < 0) t = tca + thc;
+  return t >= 0 && t <= maxT ? t : -1;
+}
+// Karakter vuruş kutuları (çömelince alçalır)
+function hitParts(c) {
+  const k = c.crouch ? 0.72 : 1, x = c.x, y = c.y, z = c.z;
+  return {
+    head: [x, y + 1.66 * k, z, 0.25],
+    body: { x1: x - 0.4, x2: x + 0.4, y1: y + 0.72 * k, y2: y + 1.46 * k, z1: z - 0.3, z2: z + 0.3 },
+    legs: { x1: x - 0.36, x2: x + 0.36, y1: y, y2: y + 0.72 * k, z1: z - 0.26, z2: z + 0.26 },
+  };
+}
+// Atış ışını: en yakın engel ya da karakter
+function shootRay(shooter, ox, oy, oz, dx, dy, dz, maxT) {
+  let t = worldRay(ox, oy, oz, dx, dy, dz, maxT), who = null, part = null;
+  for (const c of chars) {
+    if (c === shooter || !c.alive) continue;
+    if (Math.abs(c.x - ox) + Math.abs(c.z - oz) > t + 2) continue;
+    const p = hitParts(c);
+    const th = raySphere(ox, oy, oz, dx, dy, dz, p.head[0], p.head[1], p.head[2], p.head[3], t);
+    if (th >= 0 && th < t) { t = th; who = c; part = "head"; }
+    const tb = rayBox(ox, oy, oz, dx, dy, dz, p.body, t);
+    if (tb >= 0 && tb < t) { t = tb; who = c; part = "body"; }
+    const tl = rayBox(ox, oy, oz, dx, dy, dz, p.legs, t);
+    if (tl >= 0 && tl < t) { t = tl; who = c; part = "legs"; }
+  }
+  return { t, who, part };
+}
+function clearLine(ax, ay, az, bx, by, bz) {
+  const dx = bx - ax, dy = by - ay, dz = bz - az, L = Math.hypot(dx, dy, dz);
+  if (L < 0.01) return true;
+  return worldRay(ax, ay, az, dx / L, dy / L, dz / L, L) >= L - 0.05;
+}
+// Hareket çarpışması
+function blockedAt(x, z, feet, h) {
+  if (x < -HALF + 1 + RADIUS || x > HALF - 1 - RADIUS || z < -HALF + 1 + RADIUS || z > HALF - 1 - RADIUS) return true;
+  for (const b of boxes)
+    if (x > b.x1 - RADIUS && x < b.x2 + RADIUS && z > b.z1 - RADIUS && z < b.z2 + RADIUS && b.y2 > feet + STEP && b.y1 < feet + h) return true;
+  return false;
+}
+function groundAt(x, z, feet) {
+  let g = 0;
+  const r = RADIUS * 0.7;
+  for (const b of boxes)
+    if (x > b.x1 - r && x < b.x2 + r && z > b.z1 - r && z < b.z2 + r && b.y2 <= feet + STEP + 0.001 && b.y2 > g) g = b.y2;
+  return g;
+}
+
+// ================================================================ Harita: Depo
+const spawnPts = [], waypoints = [], pickups = [];
+function buildWorld() {
+  // Beton zemin + boyalı çizgiler
+  const floorTex = canvasTex(256, 256, (g, w, h) => {
+    g.fillStyle = "#9a9da2"; g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 1400; i++) { const v = 140 + Math.random() * 30 | 0; g.fillStyle = `rgb(${v},${v + 2},${v + 5})`; g.fillRect(Math.random() * w, Math.random() * h, 2, 2); }
+    g.strokeStyle = "rgba(60,62,66,0.35)"; g.lineWidth = 2; g.strokeRect(0, 0, w, h);
+  }, 16, 16);
+  const floor = mesh(new THREE.PlaneGeometry(HALF * 2, HALF * 2), new THREE.MeshLambertMaterial({ map: floorTex }), 0, 0, 0, scene, false);
+  floor.rotation.x = -Math.PI / 2;
+  const outside = mesh(new THREE.PlaneGeometry(400, 400), lambert(0x7d8a6a), 0, -0.02, 0, scene, false);
+  outside.rotation.x = -Math.PI / 2;
+  const paint = lambert(0xf2c230);
+  for (const [x, z, w, d] of [[0, -12.5, 14, 0.25], [0, 12.5, 14, 0.25], [-12.5, 0, 0.25, 14], [12.5, 0, 0.25, 14], [-20, -27, 10, 0.25], [20, 27, 10, 0.25]])
+    mesh(new THREE.BoxGeometry(w, 0.02, d), paint, x, 0.01, z, scene, false);
+  // Çevre duvarları
+  const wallTex = canvasTex(256, 128, (g, w, h) => {
+    g.fillStyle = "#6f7782"; g.fillRect(0, 0, w, h);
+    g.fillStyle = "#636b75"; for (let x = 0; x < w; x += 32) g.fillRect(x, 0, 4, h);
+    g.fillStyle = "#c0392b"; g.fillRect(0, h - 22, w, 10);
+  }, 10, 1);
+  const wallMat = new THREE.MeshLambertMaterial({ map: wallTex });
+  solid(0, 0, -HALF + 0.5, HALF * 2, 5, 1, wallMat); solid(0, 0, HALF - 0.5, HALF * 2, 5, 1, wallMat);
+  solid(-HALF + 0.5, 0, 0, 1, 5, HALF * 2, wallMat); solid(HALF - 0.5, 0, 0, 1, 5, HALF * 2, wallMat);
+  // Orta platform (2,25 m) + iki yanında merdiven
+  const steel = lambert(0x5b6573), steelDark = lambert(0x434b57);
+  solid(0, 0, 0, 8, 2.25, 8, steel);
+  mesh(new THREE.BoxGeometry(8.2, 0.12, 8.2), lambert(0xf2c230), 0, 2.27, 0, scene, false);
+  for (const s of [-1, 1]) for (let i = 0; i < 5; i++) {
+    const h = 0.45 * (i + 1);
+    solid(0, 0, s * (4 + 0.8 * (5 - i) - 0.4), 3, h, 0.8, i % 2 ? steel : steelDark);
+  }
+  // Konteynerler
+  const contTex = col => canvasTex(128, 128, (g, w, h) => {
+    g.fillStyle = col; g.fillRect(0, 0, w, h);
+    g.fillStyle = "rgba(0,0,0,0.18)"; for (let x = 0; x < w; x += 16) g.fillRect(x, 0, 6, h);
+    g.fillStyle = "rgba(255,255,255,0.12)"; g.fillRect(0, 0, w, 6); g.fillRect(0, h - 6, w, 6);
+  }, 3, 1);
+  const contCols = ["#c0392b", "#2e86de", "#27ae60", "#e67e22", "#8e44ad", "#16a085"];
+  const container = (x, z, alongX, i) => {
+    const m = new THREE.MeshLambertMaterial({ map: contTex(contCols[i % contCols.length]) });
+    solid(x, 0, z, alongX ? 6 : 2.5, 2.6, alongX ? 2.5 : 6, m);
+  };
+  [[-18, -14, true], [-18, 14, true], [18, -14, true], [18, 14, true], [-8, 24, true], [8, -24, true], [25, 3, false], [-25, -3, false],
+    [-26, 22, false], [26, -22, false]].forEach(([x, z, a], i) => container(x, z, a, i));
+  // Ahşap kasalar (zıplayarak çıkılır)
+  const crateTex = canvasTex(64, 64, (g, w, h) => {
+    g.fillStyle = "#b7834f"; g.fillRect(0, 0, w, h);
+    g.strokeStyle = "#7a5230"; g.lineWidth = 5; g.strokeRect(3, 3, w - 6, h - 6);
+    g.beginPath(); g.moveTo(4, 4); g.lineTo(w - 4, h - 4); g.stroke();
+  });
+  const crateMat = new THREE.MeshLambertMaterial({ map: crateTex });
+  const crate = (x, z, stack = 1) => { for (let i = 0; i < stack; i++) solid(x, i, z, 1, 1, 1, crateMat); };
+  for (const [x, z, s] of [[-8, -12, 1], [-7, -12, 2], [8, 12, 1], [7, 12, 2], [-14, 5, 1], [-14, 6, 1], [14, -5, 1], [14, -6, 2], [0, -19, 1], [1, -19, 1],
+    [0, 19, 1], [-1, 19, 2], [-24, -24, 2], [-23, -24, 1], [24, 24, 2], [23, 24, 1], [-11, -26, 1], [11, 26, 1], [-28, 10, 1], [28, -10, 1]]) crate(x, z, s);
+  // Alçak siper duvarları (çömelince saklar)
+  const conc = lambert(0xa8adb5);
+  for (const [x, z, w, d] of [[-6, 8, 4, 0.6], [6, -8, 4, 0.6], [-21, 6, 0.6, 4], [21, -6, 0.6, 4], [12, 22, 4, 0.6], [-12, -22, 4, 0.6],
+    [-6, -27, 0.6, 3], [6, 27, 0.6, 3], [27, 14, 3, 0.6], [-27, -14, 3, 0.6]]) solid(x, 0, z, w, 1.1, d, conc);
+  // Kolonlar
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) solid(sx * 10, 0, sz * 10, 1, 5, 1, steelDark);
+  // Variller
+  const barrelMat = lambert(0x2e7d32);
+  for (const [x, z] of [[-29, -29], [-28, -29], [29, 29], [28, 29], [-29, 29], [29, -29], [16, 6], [-16, -6]]) {
+    mesh(new THREE.CylinderGeometry(0.45, 0.45, 1.2, 12), barrelMat, x, 0.6, z);
+    boxes.push({ x1: x - 0.42, x2: x + 0.42, y1: 0, y2: 1.2, z1: z - 0.42, z2: z + 0.42 });
+  }
+  // Uzakta binalar (manzara)
+  const far = lambert(0x8d98a6);
+  for (let i = 0; i < 18; i++) {
+    const a = i / 18 * Math.PI * 2, r = rand(60, 90), w = rand(8, 18), h = rand(8, 26);
+    mesh(new THREE.BoxGeometry(w, h, w), far, Math.cos(a) * r, h / 2, Math.sin(a) * r, scene, false);
+  }
+  // Doğma noktaları ve bot gezinme noktaları (boş zeminler)
+  for (const [x, z] of [[-28, 0], [28, 0], [0, -28], [0, 28], [-28, -18], [28, 18], [-18, 28], [18, -28], [-28, 28], [28, -28], [-12, 0], [12, 0],
+    [-20, -22], [20, 22], [-4, 15], [4, -15]])
+    if (!blockedAt(x, z, 0, HEIGHT)) spawnPts.push({ x, z });
+  for (let x = -28; x <= 28; x += 4) for (let z = -28; z <= 28; z += 4)
+    if (!blockedAt(x, z, 0, HEIGHT) && !blockedAt(x + 0.6, z, 0, HEIGHT) && !blockedAt(x - 0.6, z, 0, HEIGHT) && !blockedAt(x, z + 0.6, 0, HEIGHT) && !blockedAt(x, z - 0.6, 0, HEIGHT))
+      waypoints.push({ x, z });
+  // Toplanabilirler
+  addPickup("health", 0, 2.25, 0);
+  addPickup("health", -27, 0, 27); addPickup("health", 27, 0, -27);
+  addPickup("ammo", -20, 0, 0); addPickup("ammo", 20, 0, 0); addPickup("ammo", 0, 0, -10); addPickup("ammo", 0, 0, 10);
+}
+function addPickup(kind, x, y, z) {
+  const g = new THREE.Group(); g.position.set(x, y + 0.5, z); scene.add(g);
+  if (kind === "health") {
+    mesh(new THREE.BoxGeometry(0.7, 0.5, 0.5), lambert(0xffffff), 0, 0, 0, g);
+    mesh(new THREE.BoxGeometry(0.4, 0.12, 0.52), lambert(0xe63946, { emissive: 0x440000 }), 0, 0, 0, g);
+    mesh(new THREE.BoxGeometry(0.12, 0.4, 0.52), lambert(0xe63946, { emissive: 0x440000 }), 0, 0, 0, g);
+  } else {
+    mesh(new THREE.BoxGeometry(0.8, 0.45, 0.5), lambert(0x556b2f), 0, 0, 0, g);
+    mesh(new THREE.BoxGeometry(0.82, 0.08, 0.52), lambert(0xf2c230, { emissive: 0x332800 }), 0, 0.1, 0, g);
+  }
+  pickups.push({ kind, x, y, z, g, cd: 0 });
+}
+
+// ================================================================ Avatar ve silah modelleri
+function drawFace(kind) {
+  const c = document.createElement("canvas"); c.width = c.height = 128;
+  const x = c.getContext("2d");
+  x.fillStyle = "#1b1b1b"; x.strokeStyle = "#1b1b1b"; x.lineWidth = 7; x.lineCap = "round";
+  if (kind === "cool") { x.fillRect(22, 40, 36, 18); x.fillRect(70, 40, 36, 18); x.fillRect(56, 44, 16, 5); }
+  else { x.beginPath(); x.ellipse(44, 50, 7, kind === "wow" ? 12 : 10, 0, 0, 7); x.ellipse(84, 50, 7, kind === "wow" ? 12 : 10, 0, 0, 7); x.fill(); }
+  x.beginPath();
+  if (kind === "wow") { x.ellipse(64, 92, 10, 13, 0, 0, 7); x.fill(); }
+  else if (kind === "grin") { x.moveTo(36, 82); x.quadraticCurveTo(64, 116, 92, 82); x.closePath(); x.fill(); }
+  else { x.arc(64, 74, 26, 0.25 * Math.PI, 0.75 * Math.PI); x.stroke(); }
+  return c;
+}
+const faceTex = {};
+function buildAvatar(a) {
+  const g = new THREE.Group(), inner = new THREE.Group();
+  g.add(inner); inner.scale.setScalar(0.36);
+  const part = (w, h, d, c, x, y, z) => mesh(new THREE.BoxGeometry(w, h, d), lambert(c), x, y, z, inner);
+  const legs = [part(0.9, 2, 1, a.pants, -0.5, 1, 0), part(0.9, 2, 1, a.pants, 0.5, 1, 0)];
+  legs.forEach(l => { l.geometry.translate(0, -1, 0); l.position.y = 2; });
+  part(2, 2, 1, a.shirt, 0, 3, 0);
+  const arms = [part(0.9, 2, 1, a.skin, -1.45, 3, 0), part(0.9, 2, 1, a.skin, 1.45, 3, 0)];
+  arms.forEach(l => { l.geometry.translate(0, -0.8, 0); l.position.y = 3.8; });
+  mesh(new THREE.CylinderGeometry(0.62, 0.62, 1.2, 16), lambert(a.skin), 0, 4.6, 0, inner);
+  const face = FACES.includes(a.face) ? a.face : "smile";
+  if (!faceTex[face]) faceTex[face] = new THREE.CanvasTexture(drawFace(face));
+  mesh(new THREE.PlaneGeometry(0.9, 0.9), new THREE.MeshBasicMaterial({ map: faceTex[face], transparent: true }), 0, 4.6, 0.63, inner, false);
+  const hc = a.hatColor || "#e63946";
+  if (a.hat === "cap") { mesh(new THREE.CylinderGeometry(0.66, 0.66, 0.35, 16), lambert(hc), 0, 5.3, 0, inner); part(1.1, 0.08, 0.6, hc, 0, 5.15, 0.75); }
+  else if (a.hat === "crown") {
+    mesh(new THREE.CylinderGeometry(0.6, 0.55, 0.4, 8, 1, true), lambert(a.crownColor || "#ffd166", { side: THREE.DoubleSide }), 0, 5.4, 0, inner);
+    for (let i = 0; i < 6; i++) { const an = i / 6 * Math.PI * 2; mesh(new THREE.ConeGeometry(0.1, 0.3, 4), lambert(a.crownColor || "#ffd166"), Math.cos(an) * 0.55, 5.7, Math.sin(an) * 0.55, inner); }
+  } else if (a.hat === "headphones") {
+    mesh(new THREE.TorusGeometry(0.7, 0.07, 8, 20, Math.PI), lambert(hc), 0, 4.75, 0, inner);
+    part(0.25, 0.5, 0.5, hc, -0.7, 4.6, 0); part(0.25, 0.5, 0.5, hc, 0.7, 4.6, 0);
+  } else if (a.hat === "helmet") mesh(new THREE.SphereGeometry(0.95, 20, 14), lambert("#cfe8ff", { transparent: true, opacity: 0.35, depthWrite: false }), 0, 4.65, 0, inner, false);
+  // Silah tutan düzen: rig omuz hizasında, bakış açısıyla döner
+  const rig = new THREE.Group(); rig.position.set(-0.18, 1.33, 0.12); g.add(rig);
+  return { group: g, legs, arms, rig };
+}
+// Silah modelleri (metre, namlu +z yönünde). Altın görünüm metal parçaları boyar.
+const GUN_MATS = {};
+function gunMat(col, gold) {
+  const key = col + (gold ? "g" : "");
+  if (!GUN_MATS[key]) GUN_MATS[key] = gold && col === "metal" ? lambert(0xd4a017, { emissive: 0x3a2a00 }) : lambert(col === "metal" ? 0x23262b : col);
+  return GUN_MATS[key];
+}
+function buildGun(id, gold) {
+  const g = new THREE.Group();
+  const b = (w, h, d, col, x, y, z) => mesh(new THREE.BoxGeometry(w, h, d), gunMat(col, gold), x, y, z, g);
+  const tip = new THREE.Object3D(); g.add(tip);
+  if (id === "glock") {
+    b(0.06, 0.08, 0.22, "metal", 0, 0.02, 0.06); b(0.055, 0.12, 0.06, "metal", 0, -0.06, -0.02);
+    tip.position.set(0, 0.03, 0.2);
+  } else if (id === "ak") {
+    b(0.07, 0.1, 0.38, "metal", 0, 0, 0.12); b(0.03, 0.03, 0.34, "metal", 0, 0.02, 0.48);
+    b(0.06, 0.07, 0.22, 0x8b4a1c, 0, -0.01, 0.38); b(0.06, 0.1, 0.26, 0x8b4a1c, 0, -0.03, -0.18);
+    const mag = b(0.05, 0.2, 0.08, "metal", 0, -0.12, 0.18); mag.rotation.x = 0.35;
+    b(0.04, 0.1, 0.05, 0x8b4a1c, 0, -0.08, 0.0);
+    tip.position.set(0, 0.02, 0.66);
+  } else if (id === "m870") {
+    b(0.07, 0.1, 0.3, "metal", 0, 0, 0.1); b(0.04, 0.04, 0.5, "metal", 0, 0.03, 0.48);
+    b(0.06, 0.06, 0.22, 0x6d3f1e, 0, -0.03, 0.38); b(0.06, 0.1, 0.3, 0x6d3f1e, 0, -0.03, -0.18);
+    tip.position.set(0, 0.03, 0.74);
+  } else {
+    b(0.07, 0.09, 0.9, 0x5c3a1e, 0, -0.03, 0.12); b(0.03, 0.03, 0.5, "metal", 0, 0.03, 0.7);
+    b(0.06, 0.06, 0.3, "metal", 0, 0.02, 0.15);
+    const sc = mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.32, 10), gunMat("metal", gold), 0, 0.1, 0.16, g); sc.rotation.x = Math.PI / 2;
+    tip.position.set(0, 0.03, 0.95);
+  }
+  return { group: g, tip };
+}
+
+// ================================================================ Karakterler (oyuncu + botlar)
+const chars = [];
+let player = null;
+function randomAvatar() { return { skin: pick(SKINS), shirt: pick(SHIRTS), pants: pick(PANTS), hat: pick(HATS), hatColor: pick(SHIRTS), face: pick(FACES) }; }
+const DEFAULT_AVATAR = { skin: "#e0ac69", shirt: "#e85d04", pants: "#2b2d42", hat: "cap", hatColor: "#1d3557", face: "cool" };
+function makeChar(name, isPlayer) {
+  const c = { name, isPlayer, x: 0, y: 0, z: 0, vy: 0, yaw: 0, pitch: 0, kick: 0, onGround: true, crouch: false, moving: false, running: false, walk: 0,
+    hp: MAX_HP, alive: false, respawnT: 0, protectT: 0, lastHurt: -99, kills: 0, deaths: 0, streak: 0, heads: 0,
+    weapons: [], cur: 0, prev: 1, ammo: {}, fireCd: 0, reloadT: 0, reloadTotal: 0, bloom: 0, aim: 0, aiming: false, trigger: false, flashT: 0,
+    avatar: isPlayer ? null : randomAvatar(), group: null, parts: null, gun: null, gunId: null, tag: null, ai: null };
+  chars.push(c);
+  return c;
+}
+function rebuildChar(c) {
+  if (c.group) scene.remove(c.group);
+  const a = c.isPlayer ? (platform.profile && platform.profile.avatar) || DEFAULT_AVATAR : c.avatar;
+  c.parts = buildAvatar(a);
+  c.group = c.parts.group;
+  c.group.visible = c.alive;
+  scene.add(c.group);
+  c.gunId = null;
+  equipModel(c);
+}
+function equipModel(c) {
+  const id = c.weapons[c.cur];
+  const gold = c.isPlayer && save.passes.gold;
+  const key = id + (gold ? "g" : "");
+  if (!id || c.gunId === key) return;
+  if (c.gun) c.parts.rig.remove(c.gun.group);
+  c.gun = buildGun(id, gold);
+  c.parts.rig.add(c.gun.group);
+  c.gunId = key;
+}
+function drawTag(c) {
+  if (!c.tag) {
+    const cv = document.createElement("canvas"); cv.width = 512; cv.height = 96;
+    c.tagCanvas = cv;
+    c.tag = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), transparent: true }));
+    c.tag.scale.set(2.4, 0.45, 1); c.tag.visible = false;
+    scene.add(c.tag);
+  }
+  const g = c.tagCanvas.getContext("2d"), name = (c.isPlayer ? playerName() : c.name).slice(0, 18);
+  g.clearRect(0, 0, 512, 96); g.textAlign = "center"; g.textBaseline = "middle"; g.lineWidth = 9; g.strokeStyle = "rgba(0,0,0,0.75)";
+  fitText(g, name, 480, 54); g.strokeText(name, 256, 50); g.fillStyle = c.isPlayer ? "#ffd166" : "#ff8a8a"; g.fillText(name, 256, 50);
+  c.tag.material.map.needsUpdate = true;
+}
+function giveLoadout(c, prim) {
+  c.weapons = [prim, "glock"];
+  c.ammo = {};
+  for (const id of c.weapons) { const w = WEAP[id]; c.ammo[id] = { mag: w.mag, reserve: w.reserve }; }
+  c.cur = 0; c.prev = 1; c.reloadT = 0; c.fireCd = 0.3;
+  if (c.group) equipModel(c);
+}
+function spawn(c) {
+  // Düşmanlardan en uzak doğma noktası (biraz rastgele)
+  let best = null, bestScore = -1;
+  for (const p of spawnPts) {
+    let md = 999;
+    for (const o of chars) if (o !== c && o.alive) md = Math.min(md, Math.hypot(o.x - p.x, o.z - p.z));
+    const s = md + rand(0, 8);
+    if (s > bestScore) { bestScore = s; best = p; }
+  }
+  c.x = best.x; c.z = best.z; c.y = 0; c.vy = 0;
+  c.yaw = Math.atan2(-c.x, -c.z) + rand(-0.4, 0.4); c.pitch = 0; c.kick = 0;
+  c.hp = MAX_HP; c.alive = true; c.protectT = PROTECT; c.crouch = false; c.bloom = 0; c.aim = 0; c.trigger = false;
+  giveLoadout(c, c.isPlayer ? save.primary : c.botPrim);
+  c.group.visible = true;
+  if (c.ai) Object.assign(c.ai, { target: null, seeT: 0, goal: null, stuckT: 0, lastSeen: null, huntT: 0 });
+}
+
+// ================================================================ Silahlar ve atış
+const curW = c => WEAP[c.weapons[c.cur]];
+const curAmmo = c => c.ammo[c.weapons[c.cur]];
+function spreadOf(c) {
+  const w = curW(c);
+  let s = lerp(w.hip, w.aim, c.aim);
+  const hv = c.moving ? (c.running ? 2.2 : 1.6) : 1;
+  if (w.scope && c.moving) s += 0.03 * c.aim;
+  s *= hv;
+  if (!c.onGround) s *= 2.5;
+  if (c.crouch) s *= 0.7;
+  return s + c.bloom;
+}
+function startReload(c) {
+  const w = curW(c), a = curAmmo(c);
+  if (c.reloadT > 0 || a.mag >= w.mag || a.reserve <= 0) return;
+  c.reloadTotal = w.shell ? w.shell : a.mag > 0 ? w.tac : w.reload;
+  c.reloadT = c.reloadTotal;
+  if (c === player) SFX.reload();
+}
+function finishReload(c) {
+  const w = curW(c), a = curAmmo(c);
+  const n = w.shell ? 1 : Math.min(w.mag - a.mag, a.reserve);
+  a.mag += n; if (a.reserve !== Infinity) a.reserve -= n;
+  if (c === player) (w.shell ? SFX.shell : SFX.click)();
+  if (w.shell && a.mag < w.mag && a.reserve > 0) { c.reloadT = c.reloadTotal = w.shell; } // sonraki fişek
+}
+function switchWeapon(c, i) {
+  if (i === c.cur || !c.weapons[i]) return;
+  c.prev = c.cur; c.cur = i; c.reloadT = 0; c.fireCd = Math.max(c.fireCd, 0.35); c.bloom = 0;
+  equipModel(c);
+  if (c === player) SFX.click();
+}
+const _v = new THREE.Vector3();
+function perturb(dx, dy, dz, s) {
+  // dx,dy,dz birim vektör; s yarıçaplı koni içinde rastgele yön
+  const r = s * Math.sqrt(Math.random()), a = Math.random() * Math.PI * 2;
+  let ux = -dz, uy = 0, uz = dx; let ul = Math.hypot(ux, uz);
+  if (ul < 1e-4) { ux = 1; uz = 0; ul = 1; }
+  ux /= ul; uz /= ul;
+  const vx = dy * uz - dz * uy, vy = dz * ux - dx * uz, vz = dx * uy - dy * ux;
+  const ca = Math.cos(a) * r, sa = Math.sin(a) * r;
+  const nx = dx + ux * ca + vx * sa, ny = dy + uy * ca + vy * sa, nz = dz + uz * ca + vz * sa, L = Math.hypot(nx, ny, nz);
+  return [nx / L, ny / L, nz / L];
+}
+const eyeH = c => (c.crouch ? 1.15 : 1.58);
+function tryFire(c) {
+  if (!c.alive || c.fireCd > 0) return false;
+  const w = curW(c), a = curAmmo(c);
+  if (c.reloadT > 0) { if (w.shell && a.mag > 0) c.reloadT = 0; else return false; }
+  if (a.mag <= 0) {
+    if (c === player) SFX.empty();
+    c.fireCd = 0.25;
+    startReload(c);
+    return false;
+  }
+  a.mag--;
+  c.fireCd = 60 / w.rpm;
+  // Nişan yönü
+  const ox = c.x, oy = c.y + eyeH(c), oz = c.z;
+  let dx, dy, dz;
+  if (c === player) {
+    // Ekranın ortasındaki noktaya doğru: önce kamera ışını, sonra gözden o noktaya
+    const cd = camDir, cp = camera.position;
+    const hit = shootRay(c, cp.x, cp.y, cp.z, cd.x, cd.y, cd.z, w.range + 20);
+    const tx = cp.x + cd.x * hit.t, ty = cp.y + cd.y * hit.t, tz = cp.z + cd.z * hit.t;
+    dx = tx - ox; dy = ty - oy; dz = tz - oz;
+    const L = Math.hypot(dx, dy, dz);
+    if (L < 1.2) { dx = cd.x; dy = cd.y; dz = cd.z; } else { dx /= L; dy /= L; dz /= L; }
+  } else {
+    const p = c.ai.aimPt;
+    dx = p.x - ox; dy = p.y - oy; dz = p.z - oz;
+    const L = Math.hypot(dx, dy, dz) || 1;
+    [dx, dy, dz] = perturb(dx / L, dy / L, dz / L, c.ai.err);
+  }
+  const s = spreadOf(c);
+  const tipP = c.gun ? c.gun.tip.getWorldPosition(_v) : _v.set(ox, oy, oz);
+  const tpx = tipP.x, tpy = tipP.y, tpz = tipP.z;
+  let anyHit = false, killed = false, head = false;
+  for (let i = 0; i < (w.pellets || 1); i++) {
+    const [ex, ey, ez] = perturb(dx, dy, dz, s);
+    const r = shootRay(c, ox, oy, oz, ex, ey, ez, w.range);
+    const hx = ox + ex * r.t, hy = oy + ey * r.t, hz = oz + ez * r.t;
+    tracer(tpx, tpy, tpz, hx, hy, hz, w.pellets ? 0.5 : 1);
+    if (r.who) {
+      const [f0, f1, fmin] = w.falloff;
+      const fall = r.t <= f0 ? 1 : r.t >= f1 ? fmin : lerp(1, fmin, (r.t - f0) / (f1 - f0));
+      let dmg = w.dmg * PART_MULT[r.part] * fall;
+      if (!c.isPlayer && r.who.isPlayer) dmg *= DIFFS[save.diff].dmg;
+      const res = damage(r.who, c, dmg, r.part, w.id, ox, oz);
+      if (res) { anyHit = true; if (res === "kill") killed = true; if (r.part === "head") head = true; }
+      sparks(hx, hy, hz, 0xffffff, 3);
+    } else if (r.t < w.range - 0.01) sparks(hx, hy, hz, 0x8d8d8d, w.pellets ? 1 : 4);
+  }
+  if (c === player && anyHit) hitMarker(killed, head);
+  // Geri tepme ve dağılma
+  const rk = w.recoil * (c.crouch ? 0.8 : 1) * (c.aiming ? 0.75 : 1);
+  if (c === player) { c.pitch = clamp(c.pitch + rk * 0.4, -1.3, 1.3); c.kick += rk * 0.6; c.yaw += (Math.random() - 0.5) * w.recoilH * 2; }
+  c.bloom = Math.min(0.06, c.bloom + w.bloom);
+  c.flashT = 0.05;
+  SFX.shot(w.id, shotVolume(c));
+  if (c.ai) c.ai.shots = (c.ai.shots || 0) + 1;
+  // Ateş sesi yakındaki botları uyarır
+  for (const o of chars) if (o.ai && o !== c && o.alive && !o.ai.target && Math.hypot(o.x - c.x, o.z - c.z) < 30) { o.ai.lastSeen = { x: c.x, z: c.z }; o.ai.huntT = 4; }
+  return true;
+}
+function damage(v, attacker, amount, part, wid, fromX, fromZ) {
+  if (!v.alive) return null;
+  if (v.protectT > 0) return null;
+  v.hp -= amount; v.lastHurt = now;
+  if (v === player) { flashHurt(fromX, fromZ); SFX.hurt(); }
+  if (v.ai && attacker.alive) { v.ai.attacker = attacker; v.ai.attackT = 3; }
+  if (attacker === player) (part === "head" ? SFX.head : SFX.hit)();
+  if (v.hp <= 0) { kill(v, attacker, wid, part === "head"); return "kill"; }
+  return "hit";
+}
+function kill(v, k, wid, head) {
+  v.alive = false; v.hp = 0; v.deaths++; v.streak = 0; v.respawnT = RESPAWN; v.killer = k;
+  v.group.visible = false; v.trigger = false; v.aiming = false;
+  debris(v);
+  SFX.pop(shotVolume(v));
+  if (k && k !== v) {
+    k.kills++; k.streak++; if (head) k.heads++;
+    if (k === player) {
+      match.kills++; if (head) match.heads++;
+      const earn = Math.round((REWARD.kill + (head ? REWARD.head : 0)) * DIFFS[save.diff].reward * (save.passes.double ? 2 : 1));
+      match.earned += earn; save.money += earn;
+      save.kills++; if (head) save.headshots++;
+      save.bestStreak = Math.max(save.bestStreak, k.streak);
+      SFX.kill();
+      bigMsg(STREAKS[k.streak] || (head ? "🎯 Kafadan!" : "💀 Vuruldu!"), `${v.name} · +💰${earn}`);
+      persist();
+    }
+  }
+  if (v === player) { save.deaths++; bigMsg("💥 Vuruldun!", k && k !== v ? `${k.isPlayer ? "" : k.name} · ${WEAP[wid].name}` : "", RESPAWN); }
+  killFeed(k, v, wid, head);
+  if (k && k.kills >= KILL_LIMIT) endMatch();
+}
+
+// ================================================================ Efektler (iz, kıvılcım, küp parçaları)
+const fx = [];
+const tracerMat = new THREE.MeshBasicMaterial({ color: 0xffe08a, transparent: true, opacity: 0.85 });
+const tracerGeo = new THREE.BoxGeometry(0.025, 0.025, 1); tracerGeo.translate(0, 0, 0.5);
+const tracerPool = [];
+function tracer(ax, ay, az, bx, by, bz, op) {
+  let m = tracerPool.pop();
+  if (!m) { m = new THREE.Mesh(tracerGeo, tracerMat); m.castShadow = false; }
+  const L = Math.hypot(bx - ax, by - ay, bz - az);
+  m.position.set(ax, ay, az); m.scale.set(1, 1, L); m.lookAt(bx, by, bz);
+  scene.add(m);
+  fx.push({ m, life: 0.05 * op + 0.02, pool: tracerPool });
+}
+const sparkGeo = new THREE.BoxGeometry(0.08, 0.08, 0.08);
+const sparkMats = {};
+function sparks(x, y, z, col, n) {
+  if (!sparkMats[col]) sparkMats[col] = new THREE.MeshBasicMaterial({ color: col });
+  for (let i = 0; i < n; i++) {
+    const m = new THREE.Mesh(sparkGeo, sparkMats[col]);
+    m.position.set(x, y, z); scene.add(m);
+    fx.push({ m, life: rand(0.2, 0.4), vx: rand(-2, 2), vy: rand(0.5, 3), vz: rand(-2, 2), g: 9, shrink: true });
+  }
+}
+const debrisGeo = new THREE.BoxGeometry(1, 1, 1);
+const debrisMats = {};
+function debris(c) {
+  const a = c.isPlayer ? (platform.profile && platform.profile.avatar) || DEFAULT_AVATAR : c.avatar;
+  const cols = [a.skin, a.skin, a.shirt, a.shirt, a.shirt, a.pants, a.pants];
+  for (let i = 0; i < 16; i++) {
+    const col = cols[i % cols.length];
+    if (!debrisMats[col]) debrisMats[col] = lambert(col);
+    const m = new THREE.Mesh(debrisGeo, debrisMats[col]);
+    const s = rand(0.14, 0.3);
+    m.scale.setScalar(s); m.castShadow = true;
+    m.position.set(c.x + rand(-0.3, 0.3), c.y + rand(0.2, 1.7), c.z + rand(-0.3, 0.3));
+    scene.add(m);
+    fx.push({ m, life: rand(1.8, 2.6), vx: rand(-3, 3), vy: rand(2, 6), vz: rand(-3, 3), g: GRAVITY, bounce: true, spin: rand(-8, 8), s, shrinkEnd: true });
+  }
+}
+function updateFx(dt) {
+  for (let i = fx.length - 1; i >= 0; i--) {
+    const f = fx[i];
+    f.life -= dt;
+    if (f.vx !== undefined) {
+      f.vy -= f.g * dt;
+      f.m.position.x += f.vx * dt; f.m.position.y += f.vy * dt; f.m.position.z += f.vz * dt;
+      if (f.bounce && f.m.position.y < f.s / 2) { f.m.position.y = f.s / 2; f.vy *= -0.35; f.vx *= 0.6; f.vz *= 0.6; f.spin *= 0.6; }
+      if (f.spin) { f.m.rotation.x += f.spin * dt; f.m.rotation.z += f.spin * dt * 0.7; }
+      if (f.shrink) f.m.scale.setScalar(Math.max(0.01, f.life * 3));
+      if (f.shrinkEnd && f.life < 0.4) f.m.scale.setScalar(Math.max(0.01, f.s * f.life / 0.4));
+    }
+    if (f.life <= 0) { scene.remove(f.m); if (f.pool) f.pool.push(f.m); fx.splice(i, 1); }
+  }
+}
+const flashMat = new THREE.MeshBasicMaterial({ color: 0xffd36b, transparent: true, opacity: 0.9 });
+const flashGeo = new THREE.OctahedronGeometry(0.1, 0);
+
+// ================================================================ Botlar
+function makeBot(name) {
+  const c = makeChar(name, false);
+  const r = Math.random();
+  c.botPrim = r < 0.5 ? "ak" : r < 0.78 ? "m870" : "m700";
+  c.ai = { target: null, visible: false, seeT: 0, losT: rand(0, 0.2), goal: null, stuckT: 0, lastPos: { x: 0, z: 0 }, detour: 0, detourT: 0,
+    strafe: 1, strafeT: 0, burstT: 0, pauseT: 0, lastSeen: null, huntT: 0, attacker: null, attackT: 0, aimPt: { x: 0, y: 0, z: 0 }, err: 0.05,
+    jumpT: rand(3, 8), crouchT: 0, aimYaw: 0, aimPitch: 0 };
+  return c;
+}
+const PREF_RANGE = { glock: 12, ak: 18, m870: 6, m700: 34 };
+function canSee(c, t) {
+  const ex = c.x, ey = c.y + eyeH(c), ez = c.z;
+  const tp = hitParts(t);
+  if (clearLine(ex, ey, ez, t.x, (tp.body.y1 + tp.body.y2) / 2, t.z)) return "body";
+  if (clearLine(ex, ey, ez, tp.head[0], tp.head[1], tp.head[2])) return "head";
+  return null;
+}
+function pickGoal(c) {
+  const ai = c.ai, w = curW(c), a = curAmmo(c);
+  const needHp = c.hp < 55, needAmmo = a.reserve !== Infinity && a.reserve + a.mag < w.mag * 1.2;
+  if (needHp || needAmmo) {
+    let best = null, bd = 1e9;
+    for (const p of pickups) if (p.cd <= 0 && p.y === 0 && p.kind === (needHp ? "health" : "ammo")) { const d = Math.hypot(p.x - c.x, p.z - c.z); if (d < bd) { bd = d; best = p; } }
+    if (best) { ai.goal = { x: best.x, z: best.z }; return; }
+  }
+  ai.goal = pick(waypoints);
+}
+function updateBot(c, dt) {
+  const ai = c.ai, w = curW(c), D = DIFFS[save.diff];
+  ai.attackT -= dt; ai.huntT -= dt; ai.losT -= dt; ai.jumpT -= dt;
+  // Hedef seçimi (5 kez/sn)
+  if (ai.losT <= 0) {
+    ai.losT = rand(0.18, 0.26);
+    let best = null, bestD = 1e9, bestVis = null;
+    for (const o of chars) {
+      if (o === c || !o.alive) continue;
+      const dx = o.x - c.x, dz = o.z - c.z, d = Math.hypot(dx, dz);
+      if (d > 75) continue;
+      const inFov = Math.abs(angDiff(c.yaw, Math.atan2(dx, dz))) < 1.15 || d < 5 || (o === ai.attacker && ai.attackT > 0);
+      if (!inFov) continue;
+      let score = d - (o === ai.target ? 6 : 0) - (o === ai.attacker && ai.attackT > 0 ? 10 : 0);
+      if (score >= bestD) continue;
+      const vis = canSee(c, o);
+      if (vis) { best = o; bestD = score; bestVis = vis; }
+    }
+    if (best !== ai.target) { ai.seeT = 0; ai.burstT = 0; ai.headPick = Math.random() < D.head; }
+    ai.target = best; ai.visible = bestVis;
+    if (best) { ai.lastSeen = { x: best.x, z: best.z }; ai.huntT = 5; }
+  }
+  const t = ai.target && ai.target.alive ? ai.target : null;
+  let mx = 0, mz = 0, wantRun = false;
+  c.trigger = false; c.aiming = false;
+  if (t) {
+    ai.seeT += dt;
+    const dx = t.x - c.x, dz = t.z - c.z, d = Math.hypot(dx, dz);
+    // Nişan noktası (bazen kafa)
+    const tp = hitParts(t);
+    if (ai.visible === "head" || ai.headPick) ai.aimPt = { x: tp.head[0], y: tp.head[1], z: tp.head[2] };
+    else ai.aimPt = { x: t.x, y: (tp.body.y1 + tp.body.y2) / 2, z: t.z };
+    const ty = Math.atan2(ai.aimPt.x - c.x, ai.aimPt.z - c.z);
+    const tpch = Math.atan2(ai.aimPt.y - (c.y + eyeH(c)), d);
+    const turn = D.turn * dt;
+    c.yaw += clamp(angDiff(c.yaw, ty), -turn, turn);
+    c.pitch += clamp(tpch - c.pitch, -turn, turn);
+    const off = Math.abs(angDiff(c.yaw, ty)) + Math.abs(tpch - c.pitch);
+    // Hata: mesafe ve takip süresiyle
+    ai.err = D.err * (1 + d / 45) * Math.max(0.4, 1.3 - ai.seeT * 0.5) * (t.moving ? 1.25 : 1) * (t.crouch ? 1.1 : 1);
+    if (w.scope) { c.aiming = true; ai.err *= 0.6; }
+    // Hareket: tercih ettiği mesafede kal, yana kay
+    const pref = PREF_RANGE[w.id] || 15;
+    const fx_ = dx / (d || 1), fz_ = dz / (d || 1);
+    let fwd = d > pref + 4 ? 1 : d < pref - 4 ? -0.7 : 0;
+    wantRun = w.id === "m870" && d > pref + 4;
+    ai.strafeT -= dt;
+    if (ai.strafeT <= 0) { ai.strafeT = rand(0.7, 1.8); ai.strafe = pick([-1, 1, 1, -1, 0]); }
+    const strafe = w.scope ? ai.strafe * 0.3 : ai.strafe;
+    mx = fx_ * fwd + -fz_ * strafe * 0.8; mz = fz_ * fwd + fx_ * strafe * 0.8;
+    // Ateş
+    const a = curAmmo(c);
+    if (a.mag === 0 && a.reserve <= 0 && c.cur === 0) switchWeapon(c, 1);
+    if (ai.seeT > D.react && off < 0.12 && d < w.range * 0.8) {
+      if (w.auto) {
+        ai.burstT -= dt;
+        if (ai.burstT > 0) c.trigger = true;
+        else if (ai.burstT < -rand(0.25, 0.5)) ai.burstT = rand(0.35, 0.9) * (d < 12 ? 2 : 1);
+      } else if (c.fireCd <= 0 && Math.random() < dt * (w.scope ? 1.4 : 5)) c.trigger = true;
+    }
+    if (w.scope && d < 7 && c.cur === 0) switchWeapon(c, 1);
+    if (!w.scope && c.botPrim === "m700" && c.cur === 1 && d > 12) switchWeapon(c, 0);
+  } else {
+    ai.seeT = 0;
+    const pa = c.ammo[c.weapons[0]];
+    if (c.cur === 1 && pa && (pa.mag > 0 || pa.reserve > 0)) switchWeapon(c, 0);
+    // Yeniden doldur
+    const a = curAmmo(c);
+    if (a.mag < curW(c).mag * 0.5 && c.reloadT <= 0) startReload(c);
+    // Son görülen yere git, yoksa gezin
+    if (ai.huntT > 0 && ai.lastSeen) {
+      if (Math.hypot(ai.lastSeen.x - c.x, ai.lastSeen.z - c.z) < 2) ai.huntT = 0;
+      else ai.goal = ai.lastSeen;
+    } else if (!ai.goal || Math.hypot(ai.goal.x - c.x, ai.goal.z - c.z) < 1.5) pickGoal(c);
+    if (ai.goal) {
+      const dx = ai.goal.x - c.x, dz = ai.goal.z - c.z, d = Math.hypot(dx, dz) || 1;
+      mx = dx / d; mz = dz / d;
+      wantRun = ai.huntT > 0 || c.hp < 40;
+    }
+    // Yürüdüğü yöne bak
+    if (mx || mz) { const ty = Math.atan2(mx, mz); c.yaw += clamp(angDiff(c.yaw, ty), -4 * dt, 4 * dt); }
+    c.pitch *= 1 - Math.min(1, 3 * dt);
+  }
+  // Engel etrafından dolaşma
+  if (ai.detourT > 0) {
+    ai.detourT -= dt;
+    const a = Math.atan2(mx, mz) + ai.detour;
+    const L = Math.hypot(mx, mz);
+    mx = Math.sin(a) * L; mz = Math.cos(a) * L;
+  }
+  const L = Math.hypot(mx, mz);
+  if (L > 1) { mx /= L; mz /= L; }
+  const sp = c.crouch ? CROUCH_SPEED : wantRun ? RUN : c.aiming ? AIM_SPEED : WALK;
+  const bx = c.x, bz = c.z;
+  moveChar(c, mx * sp, mz * sp, dt);
+  c.running = wantRun;
+  const moved = Math.hypot(c.x - bx, c.z - bz);
+  if (L > 0.2 && moved < sp * dt * 0.3) {
+    ai.stuckT += dt;
+    if (ai.detourT <= 0) { ai.detour = pick([-1, 1]) * rand(0.8, 1.7); ai.detourT = rand(0.4, 0.9); }
+    if (ai.stuckT > 1.4) { ai.stuckT = 0; ai.goal = pick(waypoints); ai.huntT = 0; if (c.onGround) c.vy = JUMP_V; }
+  } else ai.stuckT = Math.max(0, ai.stuckT - dt);
+  // Ara sıra zıpla / çömel
+  if (t && ai.jumpT <= 0 && c.onGround && !w.scope) { ai.jumpT = rand(3, 9); if (Math.random() < 0.4) c.vy = JUMP_V; }
+  ai.crouchT -= dt;
+  if (ai.crouchT <= 0) { ai.crouchT = rand(1.5, 4); c.crouch = !!t && (w.scope || Math.random() < 0.25) && !c.running; }
+  if (!t) c.crouch = false;
+}
+
+// ================================================================ Hareket
+function moveChar(c, vx, vz, dt) {
+  const h = c.crouch ? HEIGHT * 0.72 : HEIGHT;
+  const nx = c.x + vx * dt;
+  if (!blockedAt(nx, c.z, c.y, h)) c.x = nx;
+  const nz = c.z + vz * dt;
+  if (!blockedAt(c.x, nz, c.y, h)) c.z = nz;
+  c.moving = Math.hypot(vx, vz) > 0.5;
+  // Dikey: yerçekimi, basamak
+  const g = groundAt(c.x, c.z, c.y);
+  if (c.vy > 0 || c.y > g + 0.001) {
+    c.vy -= GRAVITY * dt; c.y += c.vy * dt;
+    // tavan: zıplarken bir kutunun altına çarpma
+    if (c.vy > 0 && blockedAt(c.x, c.z, c.y, h) ) { c.y -= c.vy * dt; c.vy = 0; }
+    if (c.y <= g) { c.y = g; c.vy = 0; c.onGround = true; } else c.onGround = false;
+  } else { c.y = g; c.onGround = true; }
+  if (c.moving && c.onGround) c.walk += dt * (c.running ? 13 : 9);
+}
+
+// ================================================================ Oyuncu girdisi
+const keys = new Set();
+const input = { look: { dx: 0, dy: 0 }, aimHold: false, touchAim: false, touchCrouch: false };
+let pointerLocked = false, noLock = false, mouseDown = false;
+const stick = { id: null, ox: 0, oy: 0, x: 0, y: 0 };
+const isTouch = matchMedia("(pointer: coarse)").matches || "ontouchstart" in window;
+if (isTouch) document.body.classList.add("touch");
+
+function updatePlayer(dt) {
+  const c = player;
+  if (!c.alive) return;
+  // Bakış
+  const fovK = camera.fov / BASE_FOV;
+  c.yaw -= input.look.dx * 0.0022 * save.sens * fovK;
+  c.pitch = clamp(c.pitch - input.look.dy * 0.0022 * save.sens * fovK, -1.3, 1.3);
+  input.look.dx = input.look.dy = 0;
+  // Hareket
+  let f = 0, s = 0;
+  if (keys.has("KeyW") || keys.has("ArrowUp")) f += 1;
+  if (keys.has("KeyS") || keys.has("ArrowDown")) f -= 1;
+  if (keys.has("KeyD") || keys.has("ArrowRight")) s += 1;
+  if (keys.has("KeyA") || keys.has("ArrowLeft")) s -= 1;
+  let run = keys.has("ShiftLeft") || keys.has("ShiftRight");
+  if (stick.id !== null) { f = -stick.y; s = stick.x; run = Math.hypot(stick.x, stick.y) > 0.92; }
+  const L = Math.hypot(f, s);
+  if (L > 1) { f /= L; s /= L; }
+  c.crouch = keys.has("KeyC") || input.touchCrouch;
+  c.aiming = input.aimHold || input.touchAim;
+  run = run && f > 0.3 && !c.crouch && !c.aiming && !c.trigger;
+  const sp = c.crouch ? CROUCH_SPEED : c.aiming ? AIM_SPEED : run ? RUN : WALK;
+  const fx = Math.sin(c.yaw), fz = Math.cos(c.yaw), rx = -Math.cos(c.yaw), rz = Math.sin(c.yaw);
+  moveChar(c, (fx * f + rx * s) * sp, (fz * f + rz * s) * sp, dt);
+  c.running = run && c.moving;
+  if (keys.has("Space") && c.onGround && !c.crouch) { c.vy = JUMP_V; c.onGround = false; }
+  c.trigger = mouseDown || touchFire.on;
+}
+
+// ================================================================ Karakter güncelleme (ortak)
+function updateChar(c, dt) {
+  if (!c.alive) {
+    c.respawnT -= dt;
+    if (c.respawnT <= 0 && match.on) spawn(c);
+    return;
+  }
+  c.protectT = Math.max(0, c.protectT - dt);
+  c.fireCd = Math.max(0, c.fireCd - dt);
+  c.flashT = Math.max(0, c.flashT - dt);
+  c.bloom = Math.max(0, c.bloom - dt * 0.12);
+  c.kick *= Math.max(0, 1 - dt * 9);
+  c.aim = clamp(c.aim + (c.aiming && c.reloadT <= 0 ? dt * 7 : -dt * 7), 0, 1);
+  if (c.reloadT > 0) { c.reloadT -= dt; if (c.reloadT <= 0) finishReload(c); }
+  if (c.trigger) {
+    const w = curW(c);
+    if (w.auto || !c.semiHeld) { if (tryFire(c) && !w.auto) c.semiHeld = true; }
+  } else c.semiHeld = false;
+  if (!c.isPlayer) c.semiHeld = false;
+  // Otomatik doldurma (şarjör boşsa)
+  if (curAmmo(c).mag === 0 && c.reloadT <= 0 && !c.trigger) startReload(c);
+  // Can yenilenmesi
+  if (now - c.lastHurt > REGEN_DELAY && c.hp < MAX_HP) c.hp = Math.min(MAX_HP, c.hp + REGEN_RATE * dt);
+  // Toplanabilirler
+  for (const p of pickups) {
+    if (p.cd > 0 || Math.hypot(p.x - c.x, p.z - c.z) > 1.1 || Math.abs(c.y - p.y) > 1.2) continue;
+    if (p.kind === "health") { if (c.hp >= MAX_HP) continue; c.hp = Math.min(MAX_HP, c.hp + 50); }
+    else {
+      let need = false;
+      for (const id of c.weapons) { const a = c.ammo[id], w = WEAP[id]; if (a.reserve !== Infinity && a.reserve < w.reserve) { a.reserve = w.reserve; need = true; } }
+      if (!need) continue;
+    }
+    p.cd = 20; p.g.visible = false;
+    if (c === player) { SFX.pickup(); notify(p.kind === "health" ? "❤️ +50 can" : "📦 Cephane doldu"); }
+  }
+}
+
+// ================================================================ Maç
+const match = { on: false, time: MATCH_TIME, kills: 0, heads: 0, earned: 0, ended: false };
+function setupBots() {
+  const names = [...BOT_NAMES].sort(() => Math.random() - 0.5);
+  for (let i = 0; i < BOT_COUNT; i++) { const b = makeBot(names[i]); rebuildChar(b); drawTag(b); }
+}
+function startMatch() {
+  initAudio();
+  // Botların isimlerini ve silahlarını karıştır
+  const names = [...BOT_NAMES].sort(() => Math.random() - 0.5);
+  chars.forEach((c, i) => {
+    c.kills = c.deaths = c.streak = c.heads = 0; c.alive = false; c.group.visible = false;
+    if (c.ai) {
+      c.name = names[i]; c.avatar = randomAvatar(); const r = Math.random();
+      c.botPrim = r < 0.5 ? "ak" : r < 0.78 ? "m870" : "m700";
+      rebuildChar(c); drawTag(c);
+    }
+  });
+  for (const f of fx) { scene.remove(f.m); if (f.pool) f.pool.push(f.m); }
+  fx.length = 0;
+  for (const p of pickups) { p.cd = 0; p.g.visible = true; }
+  Object.assign(match, { on: true, time: MATCH_TIME, kills: 0, heads: 0, earned: 0, ended: false });
+  for (const c of chars) spawn(c);
+  player.protectT = PROTECT;
+  $("feed").innerHTML = "";
+  document.body.classList.add("playing");
+  hideAll();
+  bigMsg("🔫 Maç başladı!", `İlk ${KILL_LIMIT} vuruşa ulaşan kazanır`);
+  SFX.beep(true);
+  lockPointer();
+}
+function ranking() { return [...chars].sort((a, b) => b.kills - a.kills || a.deaths - b.deaths || (a.isPlayer ? -1 : 1)); }
+function endMatch() {
+  if (match.ended) return;
+  match.ended = true; match.on = false;
+  for (const c of chars) { c.trigger = false; }
+  mouseDown = false; touchFire.on = false;
+  const rank = ranking(), place = rank.indexOf(player) + 1;
+  const mul = DIFFS[save.diff].reward * (save.passes.double ? 2 : 1);
+  const placeBonus = Math.round((REWARD.place[place - 1] || 0) * mul), playBonus = Math.round(REWARD.play * mul);
+  save.money += placeBonus + playBonus; match.earned += placeBonus + playBonus;
+  save.matches++; if (place === 1) save.wins++;
+  save.bestKills = Math.max(save.bestKills, player.kills);
+  persist(true);
+  unlockPointer();
+  document.body.classList.remove("playing");
+  $("scope").style.display = "none";
+  $("endTitle").textContent = place === 1 ? "🏆 Kazandın! 1. oldun" : `🎖️ ${place}. oldun`;
+  $("endTable").innerHTML = "<tr><th>#</th><th>Oyuncu</th><th class='n'>💀 Vuruş</th><th class='n'>☠️ Ölüm</th><th class='n'>🎯</th></tr>" +
+    rank.map((c, i) => `<tr class="${c.isPlayer ? "me" : ""}"><td>${i + 1}</td><td>${esc(c.isPlayer ? playerName() : c.name)}</td><td class="n">${c.kills}</td><td class="n">${c.deaths}</td><td class="n">${c.heads}</td></tr>`).join("");
+  const killPart = match.earned - placeBonus - playBonus;
+  $("earn").innerHTML = `<tr><td>💀 Vuruşlar (${match.kills}, kafadan ${match.heads})</td><td>💰 ${fmt(killPart)}</td></tr>` +
+    `<tr><td>🏅 Sıralama bonusu</td><td>💰 ${fmt(placeBonus)}</td></tr><tr><td>🎮 Katılım</td><td>💰 ${fmt(playBonus)}</td></tr>` +
+    `<tr><td><b>Toplam</b>${save.passes.double ? " (2x Para)" : ""} · Zorluk: ${DIFFS[save.diff].name}</td><td>💰 ${fmt(match.earned)}</td></tr>` +
+    `<tr><td class="muted">Toplam paran</td><td>💰 ${fmt(save.money)}</td></tr>`;
+  (place === 1 ? SFX.win : SFX.lose)();
+  show("ovEnd");
+}
+function quitMatch() {
+  match.on = false;
+  for (const c of chars) c.trigger = false;
+  document.body.classList.remove("playing");
+  $("scope").style.display = "none";
+  persist(true);
+  openMenu();
+}
+
+// ================================================================ HUD
+let bigTimer = 0;
+function bigMsg(t, sub = "", secs = 0) {
+  const el = $("big");
+  el.innerHTML = esc(t) + (sub ? `<small>${esc(sub)}</small>` : "");
+  el.dataset.count = secs ? "1" : "";
+  el.classList.remove("pop"); void el.offsetWidth; el.classList.add("pop");
+  bigTimer = secs;
+}
+let hitT = 0;
+function hitMarker(kill, head) {
+  const el = $("hitm");
+  el.classList.toggle("kill", kill || head);
+  hitT = kill ? 0.35 : 0.18;
+}
+let hurtT = 0, hurtAng = 0;
+function flashHurt(fx_, fz_) {
+  hurtT = 0.6;
+  if (fx_ !== undefined) hurtAng = angDiff(Math.atan2(fx_ - player.x, fz_ - player.z), player.yaw);
+}
+function killFeed(k, v, wid, head) {
+  const el = document.createElement("div");
+  const nm = c => esc(c.isPlayer ? playerName() : c.name);
+  el.className = "kf" + (k === player || v === player ? " me" : "");
+  el.innerHTML = k && k !== v ? `${nm(k)}<span class="w">${WEAP[wid].icon} ${esc(WEAP[wid].name)}${head ? " 🎯" : ""}</span>${nm(v)}` : `💥 ${nm(v)}`;
+  $("feed").prepend(el);
+  while ($("feed").children.length > 5) $("feed").lastChild.remove();
+  setTimeout(() => el.remove(), 5000);
+}
+function renderBoard() {
+  const rank = ranking();
+  $("board").innerHTML = "<table><tr><th>#</th><th>Oyuncu</th><th>💀</th><th>☠️</th></tr>" +
+    rank.map((c, i) => `<tr class="${c.isPlayer ? "me" : ""}"><td>${i + 1}</td><td>${esc(c.isPlayer ? playerName() : c.name)}${c.alive ? "" : " 💥"}</td><td class="n">${c.kills}</td><td class="n">${c.deaths}</td></tr>`).join("") + "</table>";
+}
+let boardOpen = false, boardT = 0;
+function updateHud(dt) {
+  if (!match.on && !match.ended) return;
+  const c = player, w = curW(c), a = curAmmo(c);
+  setText($("hpTxt"), String(Math.ceil(c.hp)));
+  $("hpFill").style.width = clamp(c.hp, 0, 100) + "%";
+  $("hpFill").style.background = c.hp > 60 ? "var(--ok)" : c.hp > 30 ? "#ffd166" : "var(--bad)";
+  const ammoTxt = `${a.mag}<small> / ${a.reserve === Infinity ? "∞" : a.reserve}</small>`;
+  if ($("ammo")._h !== ammoTxt) { $("ammo")._h = ammoTxt; $("ammo").innerHTML = ammoTxt; }
+  $("ammo").classList.toggle("low", a.mag <= Math.ceil(w.mag * 0.25));
+  setText($("wName"), `${w.icon} ${w.name}`);
+  $("reloadBar").style.width = c.reloadT > 0 ? (100 * (1 - c.reloadT / c.reloadTotal)) + "%" : "0";
+  const t = Math.max(0, Math.ceil(match.time));
+  setText($("timeTxt"), `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`);
+  $("timeTxt").classList.toggle("late", t <= 20);
+  const lead = ranking()[0];
+  setText($("leadTxt"), `Sen: ${c.kills} · Lider: ${lead.isPlayer ? "sensin" : lead.name} (${lead.kills}/${KILL_LIMIT})`);
+  // Nişangah: dağılmaya göre açılır
+  const s = c.alive ? spreadOf(c) : 0;
+  const px = 4 + s * (innerHeight / 2) / Math.tan(camera.fov * Math.PI / 360);
+  const gap = Math.min(80, px);
+  $("cL").style.left = (-gap - 9) + "px"; $("cR").style.left = gap + "px"; $("cU").style.top = (-gap - 9) + "px"; $("cD").style.top = gap + "px";
+  const scoped = c.alive && w.scope && c.aim > 0.85;
+  $("cross").style.display = scoped || !c.alive ? "none" : "";
+  $("scope").style.display = scoped ? "block" : "none";
+  hitT -= dt; $("hitm").style.opacity = hitT > 0 ? 1 : 0;
+  hurtT -= dt; $("hurt").style.opacity = clamp(hurtT, 0, 0.6) + (c.alive && c.hp < 30 ? 0.25 : 0);
+  $("hurtDir").style.opacity = clamp(hurtT * 1.5, 0, 1);
+  $("hurtDir").style.transform = `rotate(${hurtAng}rad)`;
+  if (bigTimer > 0) {
+    bigTimer -= dt;
+    if (!c.alive && c.killer) {
+      const el = $("big");
+      el.classList.remove("pop");
+      el.innerHTML = `💥 Vuruldun!<small>${esc(c.killer.isPlayer ? "" : c.killer.name)} · ${Math.max(1, Math.ceil(c.respawnT))} sn sonra yeniden doğuyorsun</small>`;
+      el.style.opacity = 1;
+    }
+  } else if ($("big").dataset.count) { $("big").dataset.count = ""; $("big").innerHTML = ""; }
+  // Skor tablosu
+  boardT -= dt;
+  const showB = boardOpen || boardT > 0;
+  $("board").style.display = showB ? "block" : "none";
+  if (showB) renderBoard();
+  $("lockHint").style.display = !isTouch && !pointerLocked && !noLock && match.on && !anyOverlay() ? "block" : "none";
+}
+
+// ================================================================ Kamera ve sahne senkronu
+const camDir = new THREE.Vector3(0, 0, 1);
+function updateCamera(dt) {
+  const c = player;
+  const w = curW(c);
+  let back = lerp(3.6, w.scope ? 0 : 1.9, c.aim), side = lerp(1.05, w.scope ? 0 : 0.7, c.aim), up = lerp(0.42, w.scope ? 0 : 0.2, c.aim);
+  const zoom = lerp(1, w.zoom, c.aim);
+  let pitch = c.pitch + c.kick, yaw = c.yaw;
+  let px = c.x, py = c.y + eyeH(c), pz = c.z;
+  if (!c.alive) {
+    // Ölünce: yukarıdan ve geriden, katile bakarak
+    back = 6; side = 0; up = 2.5;
+    if (c.killer && c.killer.alive) { yaw = Math.atan2(c.killer.x - px, c.killer.z - pz); pitch = -0.3; }
+  }
+  const cp = Math.cos(pitch);
+  camDir.set(Math.sin(yaw) * cp, Math.sin(pitch), Math.cos(yaw) * cp);
+  const rx = -Math.cos(yaw), rz = Math.sin(yaw);
+  let tx = px - camDir.x * back + rx * side, ty = py - camDir.y * back + up, tz = pz - camDir.z * back + rz * side;
+  // Kamera duvara girmesin
+  const dx = tx - px, dy = ty - py, dz = tz - pz, L = Math.hypot(dx, dy, dz);
+  if (L > 0.01) {
+    const hit = worldRay(px, py, pz, dx / L, dy / L, dz / L, L + 0.3);
+    if (hit < L + 0.3) { const k = Math.max(0.05, hit - 0.3) / L; tx = px + dx * k; ty = py + dy * k; tz = pz + dz * k; }
+  }
+  camera.position.set(tx, ty, tz);
+  camera.lookAt(tx + camDir.x, ty + camDir.y, tz + camDir.z);
+  const fov = fitFov(BASE_FOV) / zoom;
+  if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
+  // Oyuncu çok yakınsa ya da dürbünle bakarken görünmesin
+  const dCam = Math.hypot(tx - px, tz - pz, ty - py);
+  if (c.group) c.group.visible = c.alive && dCam > 0.8;
+}
+const flashes = new Map();
+function syncChars() {
+  for (const c of chars) {
+    if (!c.group) continue;
+    if (c.alive && c !== player) c.group.visible = c.protectT > 0 ? Math.floor(now * 10) % 2 === 0 : true;
+    c.group.position.set(c.x, c.y, c.z);
+    c.group.rotation.y = c.yaw;
+    c.group.scale.y = c.crouch ? 0.72 : 1;
+    const sw = c.moving && c.onGround ? Math.sin(c.walk) * 0.7 : 0;
+    c.parts.legs[0].rotation.x = sw; c.parts.legs[1].rotation.x = -sw;
+    const p = c.pitch + c.kick;
+    const reloadBob = c.reloadT > 0 ? Math.sin(now * 14) * 0.15 - 0.35 : 0;
+    c.parts.arms[0].rotation.x = -Math.PI / 2 - p + reloadBob;
+    c.parts.arms[1].rotation.x = -Math.PI / 2 - p + reloadBob;
+    c.parts.arms[1].rotation.y = -0.35;
+    c.parts.rig.rotation.x = -p + reloadBob;
+    c.parts.rig.position.z = 0.12 - c.kick * 0.6;
+    // Namlu alevi
+    let fl = flashes.get(c);
+    if (c.flashT > 0 && c.gun && c.group.visible) {
+      if (!fl) { fl = new THREE.Mesh(flashGeo, flashMat); flashes.set(c, fl); }
+      c.gun.tip.getWorldPosition(fl.position);
+      fl.scale.setScalar(rand(0.8, 1.6)); fl.rotation.set(rand(0, 3), rand(0, 3), 0);
+      if (!fl.parent) scene.add(fl);
+    } else if (fl && fl.parent) scene.remove(fl);
+    if (c.tag) {
+      c.tag.visible = c.alive && c !== player && c.group.visible;
+      c.tag.position.set(c.x, c.y + (c.crouch ? 1.75 : 2.3), c.z);
+    }
+  }
+  for (const p of pickups) if (p.g.visible) { p.g.rotation.y = now * 1.5; p.g.position.y = p.y + 0.5 + Math.sin(now * 3) * 0.1; }
+}
+
+// ================================================================ Menüler
+const overlays = ["ovMenu", "ovHelp", "ovArmory", "ovShop", "ovPause", "ovEnd"];
+const anyOverlay = () => overlays.some(id => $(id).classList.contains("show"));
+let stack = [];
+function show(id) { $(id).classList.add("show"); stack.push(id); if (match.on) unlockPointer(); renderOpen(id); }
+function hide(id) { $(id).classList.remove("show"); stack = stack.filter(x => x !== id); }
+function hideAll() { for (const id of overlays) $(id).classList.remove("show"); stack = []; }
+function renderOpen(id) {
+  if (id === "ovMenu") renderMenu();
+  else if (id === "ovArmory") renderArmory();
+  else if (id === "ovShop") renderShop();
+  else if (id === "ovPause") { $("sens").value = save.sens; setText($("sensTxt"), save.sens.toFixed(1)); $("bMute").textContent = save.muted ? "🔇 Ses kapalı" : "🔊 Ses açık"; }
+}
+function rerenderOpen() { for (const id of overlays) if ($(id).classList.contains("show")) renderOpen(id); }
+document.querySelectorAll("[data-close]").forEach(b => b.addEventListener("click", () => {
+  const ov = b.closest(".overlay"); hide(ov.id); SFX.click();
+  if (ov.id === "ovHelp" && !save.helpSeen) { save.helpSeen = true; persist(true); }
+  if (!match.on && !anyOverlay()) openMenu();
+}));
+function openMenu() {
+  match.ended = false;
+  for (const c of chars) { c.alive = false; if (c.group) c.group.visible = false; if (c.tag) c.tag.visible = false; }
+  for (const f of flashes.values()) if (f.parent) scene.remove(f);
+  hideAll(); show("ovMenu");
+}
+function renderMenu() {
+  $("menuStats").innerHTML = [["💰 Para", fmt(save.money)], ["🏆 Galibiyet", fmt(save.wins)], ["💀 Vuruş", fmt(save.kills)], ["🎯 Kafadan", fmt(save.headshots)],
+    ["🔥 En iyi seri", save.bestStreak], ["🎮 Maç", fmt(save.matches)]].map(([k, v]) => `<div>${k}<b>${v}</b></div>`).join("");
+  $("primSel").innerHTML = PRIMARIES.map(w => save.owned[w.id]
+    ? `<button class="btn ${save.primary === w.id ? "sel" : ""}" data-prim="${w.id}">${w.icon} ${esc(w.name)}</button>`
+    : `<button class="btn" data-arm="1" title="Cephanelikten al">🔒 ${esc(w.name)} · 💰${fmt(w.price)}</button>`).join("");
+  $("primSel").querySelectorAll("[data-prim]").forEach(b => b.onclick = () => { save.primary = b.dataset.prim; SFX.click(); persist(true); renderMenu(); });
+  $("primSel").querySelectorAll("[data-arm]").forEach(b => b.onclick = () => { SFX.click(); show("ovArmory"); });
+  $("diffSel").innerHTML = Object.entries(DIFFS).map(([id, d]) =>
+    `<button class="btn ${save.diff === id ? "sel" : ""}" data-diff="${id}">${d.name}<br><small style="font-weight:400">ödül ×${String(d.reward).replace(".", ",")}</small></button>`).join("");
+  $("diffSel").querySelectorAll("[data-diff]").forEach(b => b.onclick = () => { save.diff = b.dataset.diff; SFX.click(); persist(true); renderMenu(); });
+}
+function statBars(w) {
+  const rows = [["Hasar", Math.min(1, w.dmg * (w.pellets || 1) / 90)], ["Atış hızı", Math.min(1, w.rpm / 650)], ["Şarjör", Math.min(1, w.mag / 30)],
+    ["Menzil", Math.min(1, w.falloff[0] / 60)], ["İsabet", Math.min(1, 0.006 / Math.max(w.aim, 0.006))]];
+  return `<div class="bars">${rows.map(([k, v]) => `<span>${k}</span><div class="bar"><b style="width:${Math.round(v * 100)}%"></b></div>`).join("")}</div>`;
+}
+function renderArmory() {
+  $("armMoney").textContent = "💰 " + fmt(save.money);
+  $("armList").innerHTML = WEAPONS.map(w => {
+    let btn;
+    if (w.slot === 2) btn = `<button class="btn" disabled>Her zaman</button>`;
+    else if (save.owned[w.id]) btn = save.primary === w.id ? `<button class="btn sel" disabled>✔ Seçili</button>` : `<button class="btn blue" data-eq="${w.id}">Seç</button>`;
+    else btn = `<button class="btn go" data-buy="${w.id}" ${save.money < w.price ? "disabled" : ""}>💰 ${fmt(w.price)}</button>`;
+    return `<div class="wrow"><div class="ic">${w.icon}</div><div><b>${esc(w.name)}</b> <span class="muted">· ${esc(w.cat)} · ${w.mag} mermi</span>
+      <div class="muted">${esc(w.desc)}</div>${statBars(w)}</div>${btn}</div>`;
+  }).join("");
+  $("armList").querySelectorAll("[data-buy]").forEach(b => b.onclick = () => {
+    const w = WEAP[b.dataset.buy];
+    if (save.money < w.price || save.owned[w.id]) return;
+    save.money -= w.price; save.owned[w.id] = true; save.primary = w.id;
+    SFX.pickup(); notify(`🔫 ${w.name} alındı ve seçildi!`); persist(true); rerenderOpen();
+  });
+  $("armList").querySelectorAll("[data-eq]").forEach(b => b.onclick = () => { save.primary = b.dataset.eq; SFX.click(); persist(true); rerenderOpen(); });
+}
+function applyPass(id) { if (id === "gold" && player) { player.gunId = null; equipModel(player); } }
+function renderShop() {
+  const j = platform.profile ? platform.profile.jeton : null;
+  $("shopJeton").textContent = j == null ? "" : `Robux bakiyen: R$ ${fmt(j)}`;
+  $("passList").innerHTML = PASSES.map(p => {
+    const own = !p.consumable && save.passes[p.id];
+    return `<div class="wrow"><div class="ic">${p.icon}</div><div><b>${esc(p.name)}</b><div class="muted">${esc(p.desc)}</div></div>
+      ${own ? `<button class="btn" disabled>✔ Sende</button>` : `<button class="btn go" data-pass="${p.id}">R$ ${p.jeton}</button>`}</div>`;
+  }).join("");
+  $("passList").querySelectorAll("[data-pass]").forEach(b => b.onclick = () => {
+    const p = PASSES.find(x => x.id === b.dataset.pass);
+    requestPurchase(p, ok => {
+      if (!ok) return;
+      if (p.consumable) { save.money += 1000; notify("⚡ +💰1.000"); }
+      else { save.passes[p.id] = true; applyPass(p.id); notify(`${p.icon} ${p.name} senin!`); }
+      SFX.pickup(); persist(true); rerenderOpen();
+    });
+  });
+  $("shopNote").textContent = platform.inside ? "Satın alımı Küp Evreni onaylar; Robux bakiyenden düşer." : "Robux ile almak için oyunu Küp Evreni'nden aç.";
+}
+function pauseGame() { if (match.on && !anyOverlay()) show("ovPause"); }
+$("bStart").onclick = () => { SFX.click(); startMatch(); };
+$("bArmory").onclick = () => { SFX.click(); show("ovArmory"); };
+$("bShop").onclick = () => { SFX.click(); show("ovShop"); };
+$("bHelp").onclick = () => { SFX.click(); show("ovHelp"); };
+$("bPause").onclick = e => { e.stopPropagation(); initAudio(); pauseGame(); };
+$("bResume").onclick = () => { hide("ovPause"); SFX.click(); lockPointer(); };
+$("bQuit").onclick = () => { SFX.click(); quitMatch(); };
+$("bMute").onclick = () => {
+  initAudio(); save.muted = !save.muted;
+  if (A.master) A.master.gain.value = save.muted ? 0 : 0.45;
+  persist(true); renderOpen("ovPause");
+};
+$("sens").oninput = () => { save.sens = +$("sens").value; setText($("sensTxt"), save.sens.toFixed(1)); persist(); };
+$("bAgain").onclick = () => { SFX.click(); startMatch(); };
+$("bHome").onclick = () => { SFX.click(); openMenu(); };
+$("clock").addEventListener("pointerdown", e => { e.stopPropagation(); boardT = boardT > 0 ? 0 : 4; });
+
+// ================================================================ Girdi olayları
+function lockPointer() {
+  if (isTouch || noLock) return;
+  try { const r = canvas.requestPointerLock(); if (r && r.catch) r.catch(() => {}); } catch (e) {}
+}
+function unlockPointer() { try { if (document.pointerLockElement) document.exitPointerLock(); } catch (e) {} }
+document.addEventListener("pointerlockchange", () => {
+  const was = pointerLocked;
+  pointerLocked = document.pointerLockElement === canvas;
+  if (was && !pointerLocked) { mouseDown = false; input.aimHold = false; if (match.on && !anyOverlay()) show("ovPause"); }
+});
+noLock = !isTouch && !canvas.requestPointerLock;
+addEventListener("mousemove", e => {
+  if (!match.on || anyOverlay()) return;
+  if (pointerLocked || (noLock && (e.buttons & 2))) {
+    // Bazı tarayıcılar kilitlenince ilk harekette dev sıçrama verir: yok say
+    if (Math.abs(e.movementX) > 250 || Math.abs(e.movementY) > 250) return;
+    input.look.dx += e.movementX; input.look.dy += e.movementY;
+  }
+});
+canvas.addEventListener("mousedown", e => {
+  initAudio();
+  if (!match.on || anyOverlay()) return;
+  if (!pointerLocked && !noLock) { lockPointer(); return; }
+  if (e.button === 0) mouseDown = true;
+  if (e.button === 2) input.aimHold = true;
+});
+addEventListener("mouseup", e => { if (e.button === 0) mouseDown = false; if (e.button === 2) input.aimHold = false; });
+addEventListener("contextmenu", e => e.preventDefault());
+let wheelT = 0;
+addEventListener("wheel", () => {
+  if (!match.on || !player.alive || anyOverlay() || performance.now() - wheelT < 250) return;
+  wheelT = performance.now(); switchWeapon(player, 1 - player.cur);
+}, { passive: true });
+addEventListener("keydown", e => {
+  if (e.code === "Tab") { e.preventDefault(); if (match.on) boardOpen = true; return; }
+  if (e.repeat) return;
+  keys.add(e.code);
+  if (e.code === "Space" || e.code.startsWith("Arrow")) e.preventDefault();
+  if (!match.on || anyOverlay()) { if (e.code === "Escape" && $("ovPause").classList.contains("show")) { hide("ovPause"); lockPointer(); } return; }
+  initAudio();
+  if (e.code === "KeyR") startReload(player);
+  if (e.code === "Digit1") switchWeapon(player, 0);
+  if (e.code === "Digit2") switchWeapon(player, 1);
+  if (e.code === "KeyQ") switchWeapon(player, player.prev);
+  if (e.code === "KeyP" || (e.code === "Escape" && (isTouch || noLock))) pauseGame();
+  if (e.code === "KeyM") { save.muted = !save.muted; if (A.master) A.master.gain.value = save.muted ? 0 : 0.45; notify(save.muted ? "🔇 Ses kapalı" : "🔊 Ses açık"); persist(true); }
+});
+addEventListener("keyup", e => { keys.delete(e.code); if (e.code === "Tab") boardOpen = false; });
+addEventListener("blur", () => { keys.clear(); mouseDown = false; input.aimHold = false; boardOpen = false; });
+document.addEventListener("visibilitychange", () => { if (document.hidden) { persist(true); pauseGame(); } });
+
+// Dokunmatik: sol yarı joystick, sağ yarı bakış, butonlar
+const touchFire = { on: false, id: null, lx: 0, ly: 0 };
+const looks = new Map();
+canvas.addEventListener("pointerdown", e => {
+  if (e.pointerType === "mouse" || !match.on || anyOverlay()) return;
+  initAudio();
+  if (e.clientX < innerWidth * 0.42 && stick.id === null) {
+    stick.id = e.pointerId; stick.ox = e.clientX; stick.oy = e.clientY; stick.x = stick.y = 0;
+    const el = $("stick"); el.style.left = e.clientX + "px"; el.style.top = e.clientY + "px"; el.style.display = "block";
+  } else looks.set(e.pointerId, { x: e.clientX, y: e.clientY });
+});
+addEventListener("pointermove", e => {
+  if (e.pointerId === stick.id) {
+    let dx = e.clientX - stick.ox, dy = e.clientY - stick.oy;
+    const L = Math.hypot(dx, dy), max = 50;
+    if (L > max) { dx *= max / L; dy *= max / L; }
+    stick.x = dx / max; stick.y = dy / max;
+    $("stick").firstChild.style.transform = `translate(${dx}px, ${dy}px)`;
+    return;
+  }
+  const l = looks.get(e.pointerId) || (e.pointerId === touchFire.id ? touchFire : null);
+  if (!l) return;
+  const dx = e.clientX - (l.x ?? l.lx), dy = e.clientY - (l.y ?? l.ly);
+  if (l === touchFire) { touchFire.lx = e.clientX; touchFire.ly = e.clientY; } else { l.x = e.clientX; l.y = e.clientY; }
+  input.look.dx += dx * 2.2; input.look.dy += dy * 2.2;
+});
+function endPtr(e) {
+  if (e.pointerId === stick.id) { stick.id = null; stick.x = stick.y = 0; $("stick").style.display = "none"; $("stick").firstChild.style.transform = ""; }
+  looks.delete(e.pointerId);
+  if (e.pointerId === touchFire.id) { touchFire.id = null; touchFire.on = false; $("tFire").classList.remove("on"); }
+}
+addEventListener("pointerup", endPtr);
+addEventListener("pointercancel", endPtr);
+function tbtn(id, fn) { $(id).addEventListener("pointerdown", e => { e.preventDefault(); e.stopPropagation(); initAudio(); if (match.on && player.alive) fn(e); }); }
+tbtn("tFire", e => { touchFire.on = true; touchFire.id = e.pointerId; touchFire.lx = e.clientX; touchFire.ly = e.clientY; $("tFire").classList.add("on"); });
+tbtn("tAim", () => { input.touchAim = !input.touchAim; $("tAim").classList.toggle("on", input.touchAim); });
+tbtn("tCrouch", () => { input.touchCrouch = !input.touchCrouch; $("tCrouch").classList.toggle("on", input.touchCrouch); });
+tbtn("tJump", () => { if (player.onGround) { player.vy = JUMP_V; player.onGround = false; if (input.touchCrouch) { input.touchCrouch = false; $("tCrouch").classList.remove("on"); } } });
+tbtn("tReload", () => startReload(player));
+tbtn("tSwap", () => switchWeapon(player, 1 - player.cur));
+
+// Dik telefonda yatay görüş daralmasın
+function fitFov(base) {
+  const a = innerWidth / innerHeight;
+  if (a >= 1) return base;
+  return Math.min(100, 2 * Math.atan(Math.tan(base * Math.PI / 360) / a) * 180 / Math.PI);
+}
+function resize() {
+  renderer.setPixelRatio(Math.min(1.5, devicePixelRatio || 1));
+  renderer.setSize(innerWidth, innerHeight, false);
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+}
+addEventListener("resize", resize);
+
+// ================================================================ Döngü
+let now = 0, last = performance.now(), menuT = 0;
+function update(dt) {
+  const paused = anyOverlay();
+  if (match.on && !paused) {
+    now += dt;
+    match.time -= dt;
+    if (match.time <= 10 && Math.ceil(match.time) !== Math.ceil(match.time + dt)) SFX.beep(match.time <= 1);
+    updatePlayer(dt);
+    for (const c of chars) if (c.ai && c.alive) updateBot(c, dt);
+    for (const c of chars) updateChar(c, dt);
+    for (const p of pickups) if (p.cd > 0) { p.cd -= dt; if (p.cd <= 0) p.g.visible = true; }
+    updateFx(dt);
+    if (match.time <= 0) endMatch();
+  }
+  if (match.on || match.ended) updateHud(dt);
+  persist();
+}
+function frame(t) {
+  const dt = Math.min(0.05, (t - last) / 1000);
+  last = t;
+  update(dt);
+  if (match.on || match.ended) { syncChars(); updateCamera(dt); }
+  else {
+    // Menüde: depo üzerinde yavaş dönen kamera
+    menuT += dt * 0.08;
+    camera.position.set(Math.sin(menuT) * 30, 16, Math.cos(menuT) * 30);
+    camera.lookAt(0, 0, 0);
+    if (Math.abs(camera.fov - fitFov(BASE_FOV)) > 0.01) { camera.fov = fitFov(BASE_FOV); camera.updateProjectionMatrix(); }
+  }
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+// Test kancası: tarayıcı rAF'ı yavaşlattığında oyun mantığını elle ilerletir
+window.step = sec => { for (let t = 0; t < sec; t += 1 / 30) { update(1 / 30); if (match.on || match.ended) { syncChars(); updateCamera(1 / 30); } } renderer.render(scene, camera); };
+
+// ================================================================ Başlat
+buildWorld();
+player = makeChar("Sen", true);
+rebuildChar(player);
+setupBots();
+resize();
+// Efekt malzemelerini önceden derle (ilk atışta takılma olmasın)
+(() => {
+  const tmp = [new THREE.Mesh(tracerGeo, tracerMat), new THREE.Mesh(flashGeo, flashMat), new THREE.Mesh(sparkGeo, new THREE.MeshBasicMaterial({ color: 0xffffff }))];
+  sparkMats[0xffffff] = tmp[2].material;
+  for (const m of tmp) scene.add(m);
+  try { renderer.compile(scene, camera); } catch (e) {}
+  for (const m of tmp) scene.remove(m);
+})();
+openMenu();
+if (!save.helpSeen) show("ovHelp");
+setInterval(() => persist(true), 10000);
+requestAnimationFrame(frame);
+</script>
+<div id="rotateHint" style="display:none;position:fixed;left:50%;top:30%;transform:translate(-50%,-50%);z-index:99;max-width:80vw;padding:12px 16px;border-radius:14px;background:rgba(0,0,0,0.78);color:#fff;font:600 15px system-ui,sans-serif;text-align:center;pointer-events:auto">📱↻ Daha geniş görmek için telefonu yan çevir<br><small style="opacity:.7">(kapatmak için dokun)</small></div>
+<script>
+// Dik tutulan telefonda bir kez "yan çevir" ipucu
+(() => {
+  const el = document.getElementById("rotateHint");
+  if (!matchMedia("(pointer: coarse)").matches) return;
+  let closed = false;
+  const upd = () => { el.style.display = !closed && innerWidth < innerHeight ? "block" : "none"; };
+  el.addEventListener("pointerdown", e => { e.stopPropagation(); closed = true; upd(); });
+  setTimeout(() => { closed = true; upd(); }, 8000);
+  addEventListener("resize", upd); upd();
+})();
+</script>
+</body>
+</html>

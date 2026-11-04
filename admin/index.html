@@ -342,6 +342,7 @@ const GAMES = [
   { id: "klavye", title: "Klavye Koşusu: +1 Hız", icon: "⌨️", saveKey: "klavyeKosusu", bg: "linear-gradient(135deg,#2a1f3d,#ff9ec7)" },
   { id: "kasaba", title: "Kasaba Hayatı RP", icon: "🏘️", saveKey: "kasabaHayati", bg: "linear-gradient(135deg,#3a86ff,#8ce99a)" },
   { id: "limonata", title: "Limonata Standı", icon: "🍋", saveKey: "limonataStandi", bg: "linear-gradient(135deg,#ffe259,#ffa751)" },
+  { id: "arena", title: "Küp Arena", icon: "🔫", saveKey: "kupArena", bg: "linear-gradient(135deg,#1f2430,#e85d04)" },
 ];
 const BADGES = [
   { id: "welcome", icon: "👋", name: "Hoş geldin" }, { id: "firstGame", icon: "🎮", name: "İlk oyun" },
@@ -1122,6 +1123,13 @@ const GIFT_CATALOG = {
     { key: "trail:{id}", name: "İz", icon: "✨", kind: "once", own: "giftTrails.{id}", paramNames: { id: "İz" },
       params: { id: [["blue", "💙 Mavi Kıvılcım"], ["fire", "🔥 Ateş"], ["toxic", "💚 Zehir"], ["rainbow", "🌈 Gökkuşağı"], ["gold", "✨ Altın"]] } },
     { key: "cosmetic:hardhat", name: "Fabrika Kaskı (kostüm)", icon: "🪖", kind: "once", own: "giftHardhat" },
+  ],
+  arena: [
+    { key: "money", name: "Para", icon: "💰", kind: "amount", def: 1000, max: 1000000000 },
+    { key: "weapon:{id}", name: "Silah", icon: "🔫", kind: "once", own: "owned.{id}", paramNames: { id: "Silah" },
+      params: { id: [["m870", "💥 Remington 870 (pompalı)"], ["m700", "🎯 Remington 700 (keskin nişancı)"]] } },
+    { key: "pass:double", name: "2x Para (kalıcı)", icon: "💰", kind: "once", own: "passes.double" },
+    { key: "pass:gold", name: "Altın Silahlar (kalıcı)", icon: "✨", kind: "once", own: "passes.gold" },
   ],
 };
 const giftStore = () => { const g = load(GIFT_KEY, {}) || {}; return { pending: g.pending || [], done: g.done || [] }; };
