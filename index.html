@@ -34,6 +34,22 @@
   button { font: inherit; color: inherit; }
   a { color: var(--accent); }
 
+  /* Uygulama hissi: tarayıcı davranışlarını kapat */
+  html, body { overscroll-behavior: none; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none;
+    -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+  body { -webkit-user-select: none; user-select: none; }
+  input, textarea, select, [contenteditable] { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
+  img, canvas { -webkit-user-drag: none; }
+  button, a, [onclick], .game, .tile, label { touch-action: manipulation; }
+  button:focus:not(:focus-visible) { outline: none; }
+  @media (pointer: coarse) {
+    * { scrollbar-width: none; }
+    *::-webkit-scrollbar { display: none; }
+    button:not(:disabled), .game { transition: transform 0.08s, filter 0.08s; }
+    button:not(:disabled):active { transform: scale(0.95); filter: brightness(0.9); }
+    .game:active .thumb { transform: scale(0.96); filter: brightness(0.9); }
+  }
+
   /* Üst çubuk */
   #top { position: fixed; top: 0; left: 0; right: 0; height: 56px; display: flex; align-items: center; gap: 14px;
     padding: 0 16px; background: var(--surface); border-bottom: 1px solid var(--line); z-index: 5; }
@@ -58,7 +74,7 @@
     border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; z-index: 4; }
   #nav button { text-align: left; background: none; border: 0; padding: 10px 12px; border-radius: 10px; cursor: pointer; font-size: 16px; }
   #nav button.on { background: var(--surface2); }
-  #nav button:hover { background: var(--surface2); }
+  @media (hover: hover) { #nav button:hover { background: var(--surface2); } }
   main { margin: 56px 0 0 200px; padding: 22px 26px 60px; }
   .page { display: none; max-width: 1180px; }
   .page.on { display: block; }
@@ -84,7 +100,7 @@
   .game { background: none; border: 0; padding: 0; text-align: left; cursor: pointer; }
   .thumb { aspect-ratio: 1; border-radius: 14px; position: relative; overflow: hidden; display: grid; place-items: center; font-size: 74px;
     box-shadow: inset 0 0 0 1px var(--line); transition: transform 0.12s; }
-  .game:hover .thumb { transform: translateY(-3px); }
+  @media (hover: hover) { .game:hover .thumb { transform: translateY(-3px); } }
   .thumb .tag { position: absolute; left: 8px; top: 8px; background: rgba(0,0,0,0.55); font-size: 12px; padding: 3px 8px; border-radius: 8px; }
   .thumb .gift { position: absolute; left: 8px; bottom: 8px; background: #ffb703; color: #1b1b1b; font-size: 12px; font-weight: 700; padding: 3px 8px; border-radius: 8px; }
   .thumb .new { position: absolute; right: 8px; top: 8px; background: #ff3b5c; color: #fff; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 8px; letter-spacing: 0.04em; }
@@ -92,11 +108,17 @@
     border: 1px solid rgba(255,255,255,0.12); }
   .banner .bi { font-size: 22px; }
   .banner .bx { margin-left: auto; flex: none; width: 32px; height: 32px; border-radius: 8px; border: 0; background: rgba(255,255,255,0.08); cursor: pointer; font-size: 15px; opacity: 0.8; }
-  .banner .bx:hover { background: rgba(255,255,255,0.18); opacity: 1; }
+  @media (hover: hover) { .banner .bx:hover { background: rgba(255,255,255,0.18); opacity: 1; } }
   .banner.info { background: linear-gradient(90deg, rgba(0,162,255,0.22), rgba(0,162,255,0.08)); }
   .banner.success { background: linear-gradient(90deg, rgba(0,176,111,0.24), rgba(0,176,111,0.08)); }
   .banner.warn { background: linear-gradient(90deg, rgba(255,209,102,0.24), rgba(255,209,102,0.08)); }
   .banner.event { background: linear-gradient(90deg, rgba(167,112,255,0.3), rgba(255,94,170,0.14)); }
+  .setRow { display: flex; align-items: center; gap: 14px; justify-content: space-between; max-width: 560px; background: var(--surface);
+    border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; }
+  .switch { flex: none; width: 52px; height: 30px; border-radius: 15px; border: 0; background: var(--surface2); position: relative; cursor: pointer; padding: 0; }
+  .switch::after { content: ""; position: absolute; left: 3px; top: 3px; width: 24px; height: 24px; border-radius: 50%; background: #c9ccd3; transition: left 0.15s, background 0.15s; }
+  .switch.on { background: var(--play); }
+  .switch.on::after { left: 25px; background: #fff; }
   .banner.fresh { background: linear-gradient(90deg, rgba(255,59,92,0.28), rgba(255,122,69,0.1)); }
   .price { font-size: 12px; color: var(--gold); font-weight: 700; margin-left: 4px; }
   .thumb .soon { position: absolute; inset: 0; background: rgba(10,10,14,0.6); display: grid; place-items: center; font-size: 16px; font-weight: 700; }
@@ -177,7 +199,7 @@
   #lCta .btn { position: relative; padding: 16px 0; width: 250px; font-size: 18px; background: #335fff; }
   .accRow { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px; margin: 6px 0; border-radius: 12px; border: 1px solid var(--line);
     background: var(--surface2); cursor: pointer; text-align: left; }
-  .accRow:hover { border-color: var(--accent); }
+  @media (hover: hover) { .accRow:hover { border-color: var(--accent); } }
   .accRow .face { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; font-size: 22px; }
 
   @media (max-width: 760px) {
@@ -242,6 +264,11 @@
     <div class="badges" id="badges"></div>
     <h2>Oyun istatistikleri</h2>
     <div id="gameStats"></div>
+    <h2>Uygulama</h2>
+    <div class="setRow"><div><b>🔄 Otomatik güncelleme</b><div class="muted" id="updInfo" style="font-size:13px;font-weight:400;margin-top:2px"></div></div>
+      <button class="switch" id="swAuto" role="switch" aria-label="Otomatik güncelleme"></button></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:10px">
+      <button class="btn" id="btnCheckUpd">🔍 Güncellemeleri denetle</button><span class="muted" id="updState" style="font-size:13px"></span></div>
     <h2>Hesap</h2>
     <div id="accounts" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center"></div>
     <p class="muted" style="margin-top:28px">☁️ Hesabın bulutta saklanır: başka bir cihazda kullanıcı adın ve şifrenle giriş yapınca Robux'un, avatarın, rozetlerin ve oyunlardaki ilerlemen seninle gelir.</p>
@@ -313,6 +340,8 @@
 
 <script>
 "use strict";
+// Uygulama hissi: basılı tutunca tarayıcı menüsü açılmasın (metin kutuları hariç)
+addEventListener("contextmenu", e => { if (!e.target.closest("input, textarea, [contenteditable]")) e.preventDefault(); });
 const $ = id => document.getElementById(id);
 
 // ================================================================ Oyun kataloğu
@@ -347,7 +376,7 @@ const GAMES = [
     controls: "WASD yürü · Shift koş · E etkileşim · Q/R fiyat −/+ · U yükseltmeler · sürükle: kamera · Dokunmatik: joystick + butonlar" },
   { id: "arena", title: "Küp Arena", icon: "🔫", genre: "Atış", url: "kup-arena/web/index.html",
     bg: "linear-gradient(135deg,#1f2430,#e85d04)", saveKey: "kupArena",
-    desc: "Depoda 7 rakibe karşı herkes herkese! Glock, AK-47, pompalı ve dürbünlü tüfekle 3 dakikalık maçlar. Kafadan vur, seri yap, parayla yeni silah al. Vurulan küp parçalarına ayrılır!",
+    desc: "Depoda 7 rakibe karşı herkes herkese! 14 gerçek silah: Desert Eagle, MP5, AK-47, M4A1, pompalılar, Barrett M82, M249… 3 dakikalık maçlarda kafadan vur, seri yap, parayla yeni silah al. Vurulan küp parçalarına ayrılır!",
     controls: "Fare bak · sol tık ateş · sağ tık nişan · WASD yürü · Shift koş · Space zıpla · C çömel · R doldur · 1/2 silah · Dokunmatik: joystick + butonlar" },
 ];
 
@@ -656,6 +685,50 @@ function renderHome() {
   $("recent").innerHTML = recent.map(gameCard).join("");
 }
 
+// ================================================================ Güncelleme (uygulama açıkken yeni sürüm)
+// Ana sayfanın sunucudaki kopyası açılıştakiyle karşılaştırılır. Fark varsa: otomatik güncelleme açıksa oyun
+// oynanmıyorken sayfa yenilenir (oyun açıksa oyun kapanınca), kapalıysa "Yeni sürüm hazır" şeridi çıkar.
+// Ayar cihazda: localStorage.kupOtoGuncelle ("0" = kapalı, varsayılan açık). Oyunlar zaten her açılışta güncel iner.
+const AUTO_UPD_KEY = "kupOtoGuncelle";
+const upd = { base: null, ready: false, busy: false, last: 0 };
+function autoUpd() { try { return localStorage.getItem(AUTO_UPD_KEY) !== "0"; } catch (e) { return true; } }
+function setAutoUpd(on) { try { localStorage.setItem(AUTO_UPD_KEY, on ? "1" : "0"); } catch (e) {} }
+function verHash(t) { let h = 2166136261; for (let i = 0; i < t.length; i++) { h ^= t.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36); }
+async function checkUpdate(manual) {
+  if (upd.busy || !location.protocol.startsWith("http")) return;
+  upd.busy = true; if (manual) renderUpd("Denetleniyor…");
+  try {
+    const r = await fetch(new URL("./", location.href).href, { cache: "no-store" });
+    if (!r.ok) throw new Error(r.status);
+    const h = verHash(await r.text());
+    upd.last = Date.now();
+    if (!upd.base) upd.base = h;
+    else if (h !== upd.base && !upd.ready) { upd.ready = true; renderBanners(); }
+    if (upd.ready) maybeApplyUpdate();
+    renderUpd(manual ? (upd.ready ? "🆕 Yeni sürüm bulundu" : "✅ En güncel sürümü kullanıyorsun") : "");
+  } catch (e) { renderUpd(manual ? "⚠️ Denetlenemedi (internet yok mu?)" : ""); }
+  upd.busy = false;
+}
+// Oyun, satın alma ya da yazı yazma sırasında yenileme yapılmaz
+function updateSafe() { const a = document.activeElement; return !current && !pendingBuy && !(a && /^(INPUT|TEXTAREA)$/.test(a.tagName)); }
+function maybeApplyUpdate() { if (upd.ready && autoUpd() && updateSafe()) applyUpdate(); }
+async function applyUpdate() {
+  toast("🔄 Yeni sürüme güncelleniyor…");
+  try { const reg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration(); if (reg) await reg.update(); } catch (e) {}
+  setTimeout(() => location.reload(), 600);
+}
+function renderUpd(state) {
+  if (!$("swAuto")) return;
+  const on = autoUpd();
+  $("swAuto").classList.toggle("on", on); $("swAuto").setAttribute("aria-checked", on);
+  $("updInfo").textContent = on ? "Açık: yeni sürüm çıkınca uygulama kendini yeniler (oyun oynarken araya girmez, oyun kapanınca güncellenir)."
+    : "Kapalı: yeni sürüm çıkınca ana sayfada \"Güncelle\" şeridi çıkar, ne zaman güncelleyeceğine sen karar verirsin.";
+  if (state !== undefined) $("updState").textContent = state || (upd.ready ? "🆕 Yeni sürüm hazır" : upd.last ? "Son denetim: " + new Date(upd.last).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : "");
+}
+setTimeout(() => checkUpdate(false), 3000);
+setInterval(() => checkUpdate(false), 10 * 60 * 1000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden && Date.now() - upd.last > 60000) checkUpdate(false); });
+
 // Android uygulaması indirme şeridi: sadece Android tarayıcıda, uygulamanın içinde değilken, kapatılmamışsa
 function showApk() {
   if (!/Android/i.test(navigator.userAgent)) return false;
@@ -666,12 +739,15 @@ function renderBanners() {
   const d = CFG.duyuru, ic = { info: "📢", success: "✅", warn: "⚠️", event: "🎉", fresh: "🆕" };
   const esc = s => String(s).replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
   const gg = [...new Set(myGifts().map(x => x.game))].map(id => GAMES.find(g => g.id === id)).filter(Boolean);
-  $("banners").innerHTML = (gg.length ? `<div class="banner success"><span class="bi">🎁</span><span>Sana hediye var! ${gg.map(g => g.icon + " " + g.title).join(", ")} oyununu açınca eşyaların eklenecek.</span></div>` : "") +
+  $("banners").innerHTML = (upd.ready ? `<div class="banner fresh"><span class="bi">🆕</span><span>Yeni sürüm hazır!</span>
+      <button class="btn blue" id="btnUpdNow" style="margin-left:auto">🔄 Güncelle</button></div>` : "") + (gg.length ? `<div class="banner success"><span class="bi">🎁</span><span>Sana hediye var! ${gg.map(g => g.icon + " " + g.title).join(", ")} oyununu açınca eşyaların eklenecek.</span></div>` : "") +
     (eco().double ? `<div class="banner event"><span class="bi">💎</span>2x Robux etkinliği! Günlük ödül, oyun ödülü ve rozet ödülleri iki katı.</div>` : "") +
     (d && d.on && d.text && !annClosed(d) ? `<div class="banner ${ic[d.type] ? d.type : "info"}"><span class="bi">${ic[d.type] || "📢"}</span><span>${esc(d.text)}</span>
       <button class="bx" id="btnAnnClose" title="Kapat" aria-label="Duyuruyu kapat">✕</button></div>` : "") +
     (showApk() ? `<div class="banner info"><span class="bi">📱</span><span>Küp Evreni artık Android uygulaması! <a class="btn blue" href="indir/kup-evreni.apk" download style="text-decoration:none;display:inline-block;margin-left:6px">İndir (APK)</a></span>
       <button class="bx" id="btnApkClose" title="Kapat" aria-label="Kapat">✕</button></div>` : "");
+  const ux = $("btnUpdNow");
+  if (ux) ux.onclick = applyUpdate;
   const ax = $("btnApkClose");
   if (ax) ax.onclick = () => { try { localStorage.setItem("kupApkKapali", "1"); } catch (e) {} renderBanners(); };
   const x = $("btnAnnClose");
@@ -759,6 +835,7 @@ function renderProfile() {
     ["🎮", `${played}/${GAMES.filter(g => !g.soon).length}`, "Oynanan oyun"], ["📅", profile.joined, "Katılma"],
   ].map(([i, v, k]) => `<div class="stat"><b>${i} ${v}</b><span>${k}</span></div>`).join("");
   $("profName").value = profile.name;
+  renderUpd("");
   $("accounts").innerHTML = `<span class="btn blue" style="cursor:default">👤 ${escH(profile.name)}</span>` +
     `<button class="btn" id="btnLogout">🚪 Çıkış yap / hesap değiştir</button><button class="btn red" id="btnCloseAcc">🗑️ Hesabı kapat</button>`;
   $("badges").innerHTML = BADGES.map(b => `<div class="badge ${profile.badges[b.id] ? "" : "off"}"><div>${b.icon}</div><b>${b.name}</b><div class="muted" style="font-size:12px">${b.desc}</div></div>`).join("");
@@ -910,6 +987,7 @@ function exitGame() {
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   current = null;
   renderTop(); renderHome();
+  maybeApplyUpdate();
 }
 // ================================================================ Oyun içi hediyeler (admin panelinden, sunucudaki gifts tablosu)
 // Oyun açılıp kup:ready gönderince o oyunun bekleyen hediyeleri kup:gift ile gider; oyun uygulayınca kup:giftAck döner.
@@ -1009,6 +1087,8 @@ $("btnFull").onclick = () => {
   else document.documentElement.requestFullscreen && document.documentElement.requestFullscreen().catch(() => {});
 };
 const NAME_RE = /^[A-Za-z0-9ÇĞİÖŞÜçğıöşü _.-]{2,20}$/;
+$("swAuto").onclick = () => { setAutoUpd(!autoUpd()); renderUpd(); if (autoUpd()) maybeApplyUpdate(); };
+$("btnCheckUpd").onclick = () => checkUpdate(true);
 $("btnProfName").onclick = async () => {
   const n = $("profName").value.trim();
   if (!NAME_RE.test(n)) { toast("Kullanıcı adı 2-20 harf/rakam olmalı"); return; }
