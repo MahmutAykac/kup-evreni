@@ -186,7 +186,7 @@
   <h1>🔫 Küp Arena</h1>
   <div class="muted">Depoda 7 rakibe karşı herkes herkese! 3 dakikada en çok vuruşu yapan ya da ilk <b>20</b> vuruşa ulaşan kazanır.</div>
   <div class="stats" id="menuStats"></div>
-  <h2>Ana silahın</h2>
+  <h2>Silahların</h2>
   <div class="seg" id="primSel"></div>
   <h2>Zorluk</h2>
   <div class="seg" id="diffSel"></div>
@@ -273,22 +273,67 @@ const HALF = 32;               // harita: -32..32
 const PART_MULT = { head: 2.5, body: 1, legs: 0.75 };
 const BASE_FOV = 70;
 // Değerler oyun dengesi için; gerçek balistik değil. hip/aim: koni yarıçapı (radyan), rpm: dakikada atış, falloff: [başlangıç m, bitiş m, en düşük çarpan]
+// slot 1 = ana silah, slot 2 = tabanca. speed: yürüme hızı çarpanı, moveSpread: hareket ederken dağılma çarpanı (varsayılan 1,6).
+// snd: [gürültü süresi, gürültü gücü, gürültü frekansı, ton frekansı, ton süresi, ton gücü, ton tipi]; cyc: pompa/sürgü tıkları (sn)
 const WEAPONS = [
-  { id: "glock", name: "Glock 17", cat: "Tabanca", icon: "🔫", slot: 2, price: 0, dmg: 20, rpm: 380, auto: false, mag: 17, reserve: Infinity,
+  // Tabancalar (2. silah, sınırsız yedek şarjör)
+  { id: "glock", name: "Glock 17", cls: "pistol", icon: "🔫", slot: 2, price: 0, dmg: 20, rpm: 380, auto: false, mag: 17, reserve: Infinity,
     reload: 1.5, tac: 1.25, hip: 0.018, aim: 0.006, recoil: 0.022, recoilH: 0.01, bloom: 0.012, falloff: [15, 40, 0.6], zoom: 1.25, range: 60,
-    desc: "Her maçta yanında. Hızlı, isabetli, sınırsız yedek şarjör." },
-  { id: "ak", name: "AK-47", cat: "Piyade tüfeği", icon: "🔫", slot: 1, price: 0, dmg: 32, rpm: 600, auto: true, mag: 30, reserve: 120,
+    snd: [0.12, 0.4, 2600, 170, 0.08, 0.06, "square"], desc: "Başlangıç tabancası. Hızlı, isabetli, 17 mermi." },
+  { id: "m9", name: "Beretta M9", cls: "pistol", icon: "🔫", slot: 2, price: 250, dmg: 24, rpm: 340, auto: false, mag: 15, reserve: Infinity,
+    reload: 1.7, tac: 1.4, hip: 0.016, aim: 0.005, recoil: 0.025, recoilH: 0.01, bloom: 0.012, falloff: [18, 45, 0.6], zoom: 1.25, range: 65,
+    snd: [0.13, 0.42, 2400, 160, 0.09, 0.06, "square"], desc: "Glock'tan biraz daha güçlü ve isabetli, şarjörü 2 mermi az." },
+  { id: "deagle", name: "Desert Eagle", cls: "pistol", icon: "🔫", slot: 2, price: 900, dmg: 55, rpm: 150, auto: false, mag: 7, reserve: Infinity,
+    reload: 2.2, tac: 1.9, hip: 0.03, aim: 0.007, recoil: 0.075, recoilH: 0.025, bloom: 0.03, falloff: [20, 50, 0.65], zoom: 1.3, range: 80,
+    snd: [0.25, 0.6, 1500, 110, 0.16, 0.14, "sine"], desc: "Dev tabanca: kafaya tek atış. Geri tepmesi çok sert, 7 mermi." },
+  // Hafif makineli tüfekler (yakın mesafe, koşarken isabetli, hızlı yürütür)
+  { id: "uzi", name: "UZI", cls: "smg", icon: "💨", slot: 1, price: 450, dmg: 15, rpm: 950, auto: true, mag: 32, reserve: 160, speed: 1.08, moveSpread: 1.15,
+    reload: 1.8, tac: 1.5, hip: 0.03, aim: 0.014, recoil: 0.012, recoilH: 0.022, bloom: 0.006, falloff: [8, 30, 0.5], zoom: 1.2, range: 60,
+    snd: [0.09, 0.35, 3000, 200, 0.06, 0.05, "square"], desc: "En hızlı atan silah. Yakında mermi yağdırır, uzakta dağılır." },
+  { id: "mp5", name: "MP5", cls: "smg", icon: "💨", slot: 1, price: 500, dmg: 18, rpm: 800, auto: true, mag: 30, reserve: 150, speed: 1.08, moveSpread: 1.15,
+    reload: 2.0, tac: 1.7, hip: 0.024, aim: 0.009, recoil: 0.014, recoilH: 0.012, bloom: 0.005, falloff: [10, 35, 0.55], zoom: 1.3, range: 70,
+    snd: [0.1, 0.35, 2800, 180, 0.07, 0.05, "square"], desc: "Dengeli ve kontrolü kolay. Koşarken bile isabetli." },
+  { id: "p90", name: "P90", cls: "smg", icon: "💨", slot: 1, price: 800, dmg: 16, rpm: 900, auto: true, mag: 50, reserve: 200, speed: 1.08, moveSpread: 1.15,
+    reload: 2.6, tac: 2.2, hip: 0.026, aim: 0.01, recoil: 0.012, recoilH: 0.014, bloom: 0.005, falloff: [10, 35, 0.55], zoom: 1.3, range: 70,
+    snd: [0.09, 0.33, 3200, 210, 0.06, 0.05, "square"], desc: "50 mermilik dev şarjör: kalabalık çatışmada doldurmadan devam et." },
+  // Piyade tüfekleri (her mesafe)
+  { id: "ak", name: "AK-47", cls: "rifle", icon: "🔫", slot: 1, price: 0, dmg: 32, rpm: 600, auto: true, mag: 30, reserve: 120,
     reload: 2.4, tac: 2.0, hip: 0.028, aim: 0.007, recoil: 0.03, recoilH: 0.018, bloom: 0.009, falloff: [35, 80, 0.8], zoom: 1.45, range: 120,
-    desc: "Güçlü otomatik tüfek. Her mesafede iş görür ama geri tepmesi sert: kısa taramalar yap." },
-  { id: "m870", name: "Remington 870", cat: "Pompalı tüfek", icon: "💥", slot: 1, price: 600, dmg: 12, pellets: 7, rpm: 70, auto: false, mag: 6, reserve: 30,
+    snd: [0.17, 0.5, 1700, 115, 0.11, 0.07, "sawtooth"], desc: "Güçlü otomatik tüfek. Her mesafede iş görür ama geri tepmesi sert: kısa taramalar yap." },
+  { id: "m4", name: "M4A1", cls: "rifle", icon: "🔫", slot: 1, price: 1000, dmg: 26, rpm: 750, auto: true, mag: 30, reserve: 150,
+    reload: 2.2, tac: 1.8, hip: 0.025, aim: 0.005, recoil: 0.02, recoilH: 0.01, bloom: 0.007, falloff: [40, 90, 0.8], zoom: 1.55, range: 120,
+    snd: [0.15, 0.45, 2100, 130, 0.1, 0.06, "sawtooth"], desc: "AK'dan hızlı ve çok daha az tepen tüfek. Uzun taramaya uygun." },
+  { id: "scar", name: "SCAR-H", cls: "rifle", icon: "🔫", slot: 1, price: 1300, dmg: 38, rpm: 520, auto: true, mag: 20, reserve: 100,
+    reload: 2.5, tac: 2.1, hip: 0.03, aim: 0.006, recoil: 0.036, recoilH: 0.016, bloom: 0.01, falloff: [45, 100, 0.85], zoom: 1.6, range: 130,
+    snd: [0.2, 0.55, 1500, 100, 0.13, 0.09, "sawtooth"], desc: "Ağır kalibre: 3 gövde vuruşu yeter. Şarjör 20 mermi." },
+  // Pompalı tüfekler
+  { id: "m870", name: "Remington 870", cls: "shotgun", icon: "💥", slot: 1, price: 600, dmg: 12, pellets: 7, rpm: 70, auto: false, mag: 6, reserve: 30,
     shell: 0.5, hip: 0.075, aim: 0.06, recoil: 0.07, recoilH: 0.02, bloom: 0, falloff: [6, 22, 0.15], zoom: 1.2, range: 40,
-    desc: "7 saçma × 12 hasar. Yakında tek atışta vurur, uzakta etkisiz. Fişekleri tek tek doldurur." },
-  { id: "m700", name: "Remington 700", cat: "Keskin nişancı", icon: "🎯", slot: 1, price: 1200, dmg: 90, rpm: 48, auto: false, mag: 5, reserve: 20,
+    snd: [0.32, 0.7, 1000, 80, 0.22, 0.18, "sine"], cyc: [0.35, 0.5], desc: "7 saçma × 12 hasar. Yakında tek atışta vurur, uzakta etkisiz. Fişekleri tek tek doldurur." },
+  { id: "benelli", name: "Benelli M4", cls: "shotgun", icon: "💥", slot: 1, price: 900, dmg: 10, pellets: 7, rpm: 200, auto: false, mag: 7, reserve: 35,
+    shell: 0.45, hip: 0.075, aim: 0.06, recoil: 0.06, recoilH: 0.02, bloom: 0.01, falloff: [6, 22, 0.15], zoom: 1.2, range: 40,
+    snd: [0.3, 0.65, 1050, 85, 0.2, 0.16, "sine"], desc: "Yarı otomatik pompalı: pompalamadan art arda ateş eder. Saçma başı hasarı biraz düşük." },
+  // Keskin nişancı tüfekleri (dürbünlü)
+  { id: "m700", name: "Remington 700", cls: "sniper", icon: "🎯", slot: 1, price: 1200, dmg: 90, rpm: 48, auto: false, mag: 5, reserve: 20, speed: 0.95,
     reload: 3.0, tac: 2.6, hip: 0.09, aim: 0.0006, recoil: 0.09, recoilH: 0.01, bloom: 0, falloff: [200, 300, 1], zoom: 4, range: 200, scope: true,
-    desc: "Sürgülü, dürbünlü. Gövdeye 90, kafaya tek atış. Nişan almadan isabet çok düşük." },
+    snd: [0.5, 0.7, 1300, 70, 0.3, 0.18, "sine"], cyc: [0.45, 0.7], echo: true, desc: "Sürgülü, dürbünlü. Gövdeye 90, kafaya tek atış. Nişan almadan isabet çok düşük." },
+  { id: "barrett", name: "Barrett M82", cls: "sniper", icon: "🎯", slot: 1, price: 2200, dmg: 150, rpm: 70, auto: false, mag: 10, reserve: 30, speed: 0.88,
+    reload: 3.6, tac: 3.1, hip: 0.1, aim: 0.0005, recoil: 0.14, recoilH: 0.02, bloom: 0, falloff: [250, 300, 1], zoom: 5, range: 250, scope: true,
+    snd: [0.6, 0.85, 900, 55, 0.4, 0.25, "sine"], echo: true, desc: "En güçlü silah: nereye vurursan vur tek atış. Yarı otomatik, 10 mermi ama ağır: yavaş yürürsün." },
+  // Hafif makineli silah
+  { id: "m249", name: "M249", cls: "lmg", icon: "🔥", slot: 1, price: 1800, dmg: 24, rpm: 750, auto: true, mag: 100, reserve: 200, speed: 0.82, moveSpread: 2,
+    reload: 5.0, tac: 4.5, hip: 0.04, aim: 0.012, recoil: 0.016, recoilH: 0.02, bloom: 0.004, falloff: [35, 80, 0.8], zoom: 1.35, range: 110,
+    snd: [0.16, 0.5, 1600, 105, 0.11, 0.07, "sawtooth"], desc: "100 mermilik kutu şarjör, hiç durmadan ateş. Ağır: yavaş yürürsün, doldurması 5 saniye." },
 ];
 const WEAP = Object.fromEntries(WEAPONS.map(w => [w.id, w]));
 const PRIMARIES = WEAPONS.filter(w => w.slot === 1);
+const CLASSES = [["pistol", "Tabancalar", "2. silah yuvası, sınırsız yedek şarjör"], ["smg", "Hafif makineli tüfekler", "Yakın mesafe, koşarken isabetli, hızlı yürütür"],
+  ["rifle", "Piyade tüfekleri", "Her mesafede iş görür"], ["shotgun", "Pompalı tüfekler", "Yakında tek atış, uzakta etkisiz"],
+  ["sniper", "Keskin nişancı tüfekleri", "Dürbünlü, uzak mesafe"], ["lmg", "Hafif makineli silah", "Dev şarjör, ağır"]];
+// Botların ana silah seçimi (ağırlıklı)
+const BOT_PRIMS = [["ak", 18], ["m4", 14], ["scar", 8], ["mp5", 10], ["uzi", 8], ["p90", 8], ["m870", 10], ["benelli", 6], ["m700", 8], ["barrett", 4], ["m249", 6]];
+const BOT_SECS = [["glock", 5], ["m9", 3], ["deagle", 2]];
+function weighted(list) { let r = Math.random() * list.reduce((t, [, w]) => t + w, 0); for (const [id, w] of list) if ((r -= w) < 0) return id; return list[0][0]; }
 const DIFFS = {
   kolay: { name: "Kolay", react: 0.75, err: 0.085, turn: 3.2, head: 0.08, dmg: 0.6, reward: 0.75 },
   normal: { name: "Normal", react: 0.45, err: 0.055, turn: 5, head: 0.18, dmg: 0.8, reward: 1 },
@@ -313,7 +358,7 @@ const HATS = ["cap", "none", "headphones", "none", "cap"];
 // ================================================================ Kayıt
 const SAVE_KEY = "kupArena";
 function freshSave() {
-  return { money: 0, owned: { glock: true, ak: true }, primary: "ak", passes: {}, diff: "normal", sens: 1,
+  return { money: 0, owned: { glock: true, ak: true }, primary: "ak", secondary: "glock", passes: {}, diff: "normal", sens: 1,
     matches: 0, wins: 0, kills: 0, deaths: 0, headshots: 0, bestStreak: 0, bestKills: 0, helpSeen: false, muted: false, giftIds: [] };
 }
 let save = freshSave();
@@ -323,6 +368,7 @@ try {
     giftIds: Array.isArray(s.giftIds) ? s.giftIds : [] };
 } catch (e) {}
 if (!WEAP[save.primary] || WEAP[save.primary].slot !== 1 || !save.owned[save.primary]) save.primary = "ak";
+if (!WEAP[save.secondary] || WEAP[save.secondary].slot !== 2 || !save.owned[save.secondary]) save.secondary = "glock";
 if (!DIFFS[save.diff]) save.diff = "normal";
 save.sens = clamp(+save.sens || 1, 0.3, 2.5);
 let lastSave = 0;
@@ -424,10 +470,10 @@ function noise(dur, gain, freq, type = "lowpass", delay = 0) {
 }
 const SFX = {
   shot(id, v) {
-    if (id === "glock") { noise(0.12, 0.4 * v, 2600); tone(170, 0.08, "square", 0.06 * v, 60); }
-    else if (id === "ak") { noise(0.17, 0.5 * v, 1700); tone(115, 0.11, "sawtooth", 0.07 * v, 45); }
-    else if (id === "m870") { noise(0.32, 0.7 * v, 1000); tone(80, 0.22, "sine", 0.18 * v, 38); if (v > 0.6) { this.click(0.35); this.click(0.5); } }
-    else { noise(0.5, 0.7 * v, 1300); tone(70, 0.3, "sine", 0.18 * v, 32); noise(0.5, 0.15 * v, 700, "lowpass", 0.18); if (v > 0.6) { this.click(0.45); this.click(0.7); } }
+    const w = WEAP[id], [nd, ng, nf, tf, td, tg, tt] = w.snd;
+    noise(nd, ng * v, nf); tone(tf, td, tt, tg * v, tf * 0.4);
+    if (w.echo) noise(nd, 0.2 * ng * v, nf * 0.55, "lowpass", 0.18);
+    if (w.cyc && v > 0.6) for (const d of w.cyc) this.click(d);
   },
   click: (d = 0) => tone(1500, 0.03, "square", 0.04, undefined, d),
   empty: () => tone(2100, 0.03, "square", 0.05),
@@ -705,34 +751,46 @@ function buildAvatar(a) {
 }
 // Silah modelleri (metre, namlu +z yönünde). Altın görünüm metal parçaları boyar.
 const GUN_MATS = {};
+const GUN_COLS = { metal: 0x23262b, silver: 0x9aa1aa, wood: 0x8b4a1c, dark: 0x6d3f1e, tan: 0xc2a878, olive: 0x4b5320, poly: 0x3a3f47 };
 function gunMat(col, gold) {
-  const key = col + (gold ? "g" : "");
-  if (!GUN_MATS[key]) GUN_MATS[key] = gold && col === "metal" ? lambert(0xd4a017, { emissive: 0x3a2a00 }) : lambert(col === "metal" ? 0x23262b : col);
+  const metal = col === "metal" || col === "silver";
+  const key = col + (gold && metal ? "g" : "");
+  if (!GUN_MATS[key]) GUN_MATS[key] = gold && metal ? lambert(0xd4a017, { emissive: 0x3a2a00 }) : lambert(GUN_COLS[col] ?? col);
   return GUN_MATS[key];
 }
+// Her silah: [w, h, d, renk, x, y, z, (eğim x)] kutuları; "cyl" ile silindir (dürbün); tip = namlu ucu
+const GUN_MODELS = {
+  glock: { box: [[0.06, 0.08, 0.22, "metal", 0, 0.02, 0.06], [0.055, 0.12, 0.06, "metal", 0, -0.06, -0.02]], tip: 0.2 },
+  m9: { box: [[0.06, 0.08, 0.25, "metal", 0, 0.02, 0.07], [0.05, 0.03, 0.06, "silver", 0, 0.03, 0.2], [0.055, 0.12, 0.06, "dark", 0, -0.06, -0.02]], tip: 0.23 },
+  deagle: { box: [[0.07, 0.1, 0.3, "silver", 0, 0.03, 0.08], [0.065, 0.14, 0.07, "metal", 0, -0.07, -0.03]], tip: 0.25 },
+  uzi: { box: [[0.07, 0.11, 0.28, "metal", 0, 0, 0.08], [0.03, 0.03, 0.1, "metal", 0, 0.01, 0.27], [0.05, 0.2, 0.06, "metal", 0, -0.13, 0.06]], tip: 0.33 },
+  mp5: { box: [[0.07, 0.1, 0.34, "metal", 0, 0, 0.1], [0.06, 0.06, 0.16, "poly", 0, -0.02, 0.32], [0.04, 0.18, 0.07, "metal", 0, -0.12, 0.2, 0.3],
+    [0.04, 0.1, 0.05, "poly", 0, -0.08, 0.0], [0.04, 0.06, 0.2, "metal", 0, 0.0, -0.17]], tip: 0.43 },
+  p90: { box: [[0.08, 0.14, 0.42, "poly", 0, -0.01, 0.05], [0.06, 0.04, 0.3, 0x2d6a4f, 0, 0.08, 0.08], [0.03, 0.03, 0.08, "metal", 0, 0.01, 0.3]], tip: 0.34 },
+  ak: { box: [[0.07, 0.1, 0.38, "metal", 0, 0, 0.12], [0.03, 0.03, 0.34, "metal", 0, 0.02, 0.48], [0.06, 0.07, 0.22, "wood", 0, -0.01, 0.38],
+    [0.06, 0.1, 0.26, "wood", 0, -0.03, -0.18], [0.05, 0.2, 0.08, "metal", 0, -0.12, 0.18, 0.35], [0.04, 0.1, 0.05, "wood", 0, -0.08, 0.0]], tip: 0.66 },
+  m4: { box: [[0.07, 0.1, 0.36, "metal", 0, 0, 0.1], [0.07, 0.08, 0.26, "poly", 0, 0, 0.4], [0.03, 0.03, 0.2, "metal", 0, 0.01, 0.6],
+    [0.05, 0.2, 0.07, "metal", 0, -0.13, 0.16, 0.15], [0.05, 0.09, 0.24, "poly", 0, -0.02, -0.18], [0.03, 0.05, 0.22, "metal", 0, 0.07, 0.12]], tip: 0.7 },
+  scar: { box: [[0.08, 0.11, 0.42, "tan", 0, 0, 0.12], [0.03, 0.03, 0.24, "metal", 0, 0.02, 0.45], [0.05, 0.16, 0.08, "metal", 0, -0.11, 0.17],
+    [0.06, 0.1, 0.26, "tan", 0, -0.02, -0.2], [0.04, 0.1, 0.05, "metal", 0, -0.08, 0.0]], tip: 0.58 },
+  m870: { box: [[0.07, 0.1, 0.3, "metal", 0, 0, 0.1], [0.04, 0.04, 0.5, "metal", 0, 0.03, 0.48], [0.06, 0.06, 0.22, "dark", 0, -0.03, 0.38],
+    [0.06, 0.1, 0.3, "dark", 0, -0.03, -0.18]], tip: 0.74 },
+  benelli: { box: [[0.07, 0.1, 0.32, "metal", 0, 0, 0.1], [0.04, 0.04, 0.48, "metal", 0, 0.03, 0.48], [0.05, 0.05, 0.4, "metal", 0, -0.02, 0.42],
+    [0.06, 0.1, 0.3, "poly", 0, -0.03, -0.19], [0.04, 0.1, 0.05, "poly", 0, -0.08, 0.0]], tip: 0.73 },
+  m700: { box: [[0.07, 0.09, 0.9, 0x5c3a1e, 0, -0.03, 0.12], [0.03, 0.03, 0.5, "metal", 0, 0.03, 0.7], [0.06, 0.06, 0.3, "metal", 0, 0.02, 0.15]],
+    cyl: [[0.035, 0.32, 0.1, 0.16]], tip: 0.95 },
+  barrett: { box: [[0.09, 0.13, 0.6, "metal", 0, 0, 0.1], [0.04, 0.04, 0.6, "metal", 0, 0.02, 0.68], [0.07, 0.06, 0.1, "metal", 0, 0.02, 0.98],
+    [0.06, 0.18, 0.1, "metal", 0, -0.13, 0.16], [0.06, 0.12, 0.3, "poly", 0, -0.02, -0.33], [0.015, 0.2, 0.015, "metal", 0.05, -0.1, 0.55, -0.5],
+    [0.015, 0.2, 0.015, "metal", -0.05, -0.1, 0.55, -0.5]], cyl: [[0.045, 0.36, 0.14, 0.12]], tip: 1.04 },
+  m249: { box: [[0.09, 0.13, 0.46, "metal", 0, 0, 0.1], [0.04, 0.04, 0.46, "metal", 0, 0.01, 0.55], [0.1, 0.13, 0.14, "olive", 0.02, -0.13, 0.1],
+    [0.06, 0.11, 0.26, "poly", 0, -0.02, -0.25], [0.015, 0.2, 0.015, "metal", 0.05, -0.1, 0.62, -0.5], [0.015, 0.2, 0.015, "metal", -0.05, -0.1, 0.62, -0.5],
+    [0.04, 0.1, 0.05, "poly", 0, -0.09, -0.02]], tip: 0.78 },
+};
 function buildGun(id, gold) {
-  const g = new THREE.Group();
-  const b = (w, h, d, col, x, y, z) => mesh(new THREE.BoxGeometry(w, h, d), gunMat(col, gold), x, y, z, g);
-  const tip = new THREE.Object3D(); g.add(tip);
-  if (id === "glock") {
-    b(0.06, 0.08, 0.22, "metal", 0, 0.02, 0.06); b(0.055, 0.12, 0.06, "metal", 0, -0.06, -0.02);
-    tip.position.set(0, 0.03, 0.2);
-  } else if (id === "ak") {
-    b(0.07, 0.1, 0.38, "metal", 0, 0, 0.12); b(0.03, 0.03, 0.34, "metal", 0, 0.02, 0.48);
-    b(0.06, 0.07, 0.22, 0x8b4a1c, 0, -0.01, 0.38); b(0.06, 0.1, 0.26, 0x8b4a1c, 0, -0.03, -0.18);
-    const mag = b(0.05, 0.2, 0.08, "metal", 0, -0.12, 0.18); mag.rotation.x = 0.35;
-    b(0.04, 0.1, 0.05, 0x8b4a1c, 0, -0.08, 0.0);
-    tip.position.set(0, 0.02, 0.66);
-  } else if (id === "m870") {
-    b(0.07, 0.1, 0.3, "metal", 0, 0, 0.1); b(0.04, 0.04, 0.5, "metal", 0, 0.03, 0.48);
-    b(0.06, 0.06, 0.22, 0x6d3f1e, 0, -0.03, 0.38); b(0.06, 0.1, 0.3, 0x6d3f1e, 0, -0.03, -0.18);
-    tip.position.set(0, 0.03, 0.74);
-  } else {
-    b(0.07, 0.09, 0.9, 0x5c3a1e, 0, -0.03, 0.12); b(0.03, 0.03, 0.5, "metal", 0, 0.03, 0.7);
-    b(0.06, 0.06, 0.3, "metal", 0, 0.02, 0.15);
-    const sc = mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.32, 10), gunMat("metal", gold), 0, 0.1, 0.16, g); sc.rotation.x = Math.PI / 2;
-    tip.position.set(0, 0.03, 0.95);
-  }
+  const g = new THREE.Group(), m = GUN_MODELS[id] || GUN_MODELS.glock;
+  for (const [w, h, d, col, x, y, z, rx] of m.box) { const b = mesh(new THREE.BoxGeometry(w, h, d), gunMat(col, gold), x, y, z, g); if (rx) b.rotation.x = rx; }
+  for (const [r, len, y, z] of m.cyl || []) { const c = mesh(new THREE.CylinderGeometry(r, r, len, 10), gunMat("metal", gold), 0, y, z, g); c.rotation.x = Math.PI / 2; }
+  const tip = new THREE.Object3D(); tip.position.set(0, 0.03, m.tip); g.add(tip);
   return { group: g, tip };
 }
 
@@ -782,8 +840,8 @@ function drawTag(c) {
   fitText(g, name, 480, 54); g.strokeText(name, 256, 50); g.fillStyle = c.isPlayer ? "#ffd166" : "#ff8a8a"; g.fillText(name, 256, 50);
   c.tag.material.map.needsUpdate = true;
 }
-function giveLoadout(c, prim) {
-  c.weapons = [prim, "glock"];
+function giveLoadout(c, prim, sec = "glock") {
+  c.weapons = [prim, sec];
   c.ammo = {};
   for (const id of c.weapons) { const w = WEAP[id]; c.ammo[id] = { mag: w.mag, reserve: w.reserve }; }
   c.cur = 0; c.prev = 1; c.reloadT = 0; c.fireCd = 0.3;
@@ -801,7 +859,7 @@ function spawn(c) {
   c.x = best.x; c.z = best.z; c.y = 0; c.vy = 0;
   c.yaw = Math.atan2(-c.x, -c.z) + rand(-0.4, 0.4); c.pitch = 0; c.kick = 0;
   c.hp = MAX_HP; c.alive = true; c.protectT = PROTECT; c.crouch = false; c.bloom = 0; c.aim = 0; c.trigger = false;
-  giveLoadout(c, c.isPlayer ? save.primary : c.botPrim);
+  giveLoadout(c, c.isPlayer ? save.primary : c.botPrim, c.isPlayer ? save.secondary : c.botSec);
   c.group.visible = true;
   if (c.ai) Object.assign(c.ai, { target: null, seeT: 0, goal: null, stuckT: 0, lastSeen: null, huntT: 0 });
 }
@@ -812,7 +870,7 @@ const curAmmo = c => c.ammo[c.weapons[c.cur]];
 function spreadOf(c) {
   const w = curW(c);
   let s = lerp(w.hip, w.aim, c.aim);
-  const hv = c.moving ? (c.running ? 2.2 : 1.6) : 1;
+  const hv = c.moving ? (w.moveSpread || 1.6) * (c.running ? 1.4 : 1) : 1;
   if (w.scope && c.moving) s += 0.03 * c.aim;
   s *= hv;
   if (!c.onGround) s *= 2.5;
@@ -1005,14 +1063,13 @@ const flashGeo = new THREE.OctahedronGeometry(0.1, 0);
 // ================================================================ Botlar
 function makeBot(name) {
   const c = makeChar(name, false);
-  const r = Math.random();
-  c.botPrim = r < 0.5 ? "ak" : r < 0.78 ? "m870" : "m700";
+  c.botPrim = weighted(BOT_PRIMS); c.botSec = weighted(BOT_SECS);
   c.ai = { target: null, visible: false, seeT: 0, losT: rand(0, 0.2), goal: null, stuckT: 0, lastPos: { x: 0, z: 0 }, detour: 0, detourT: 0,
     strafe: 1, strafeT: 0, burstT: 0, pauseT: 0, lastSeen: null, huntT: 0, attacker: null, attackT: 0, aimPt: { x: 0, y: 0, z: 0 }, err: 0.05,
     jumpT: rand(3, 8), crouchT: 0, aimYaw: 0, aimPitch: 0 };
   return c;
 }
-const PREF_RANGE = { glock: 12, ak: 18, m870: 6, m700: 34 };
+const PREF_RANGE = { pistol: 12, smg: 10, rifle: 18, shotgun: 6, sniper: 34, lmg: 20 };
 function canSee(c, t) {
   const ex = c.x, ey = c.y + eyeH(c), ez = c.z;
   const tp = hitParts(t);
@@ -1072,10 +1129,10 @@ function updateBot(c, dt) {
     ai.err = D.err * (1 + d / 45) * Math.max(0.4, 1.3 - ai.seeT * 0.5) * (t.moving ? 1.25 : 1) * (t.crouch ? 1.1 : 1);
     if (w.scope) { c.aiming = true; ai.err *= 0.6; }
     // Hareket: tercih ettiği mesafede kal, yana kay
-    const pref = PREF_RANGE[w.id] || 15;
+    const pref = PREF_RANGE[w.cls] || 15;
     const fx_ = dx / (d || 1), fz_ = dz / (d || 1);
     let fwd = d > pref + 4 ? 1 : d < pref - 4 ? -0.7 : 0;
-    wantRun = w.id === "m870" && d > pref + 4;
+    wantRun = (w.cls === "shotgun" || w.cls === "smg") && d > pref + 4;
     ai.strafeT -= dt;
     if (ai.strafeT <= 0) { ai.strafeT = rand(0.7, 1.8); ai.strafe = pick([-1, 1, 1, -1, 0]); }
     const strafe = w.scope ? ai.strafe * 0.3 : ai.strafe;
@@ -1091,7 +1148,7 @@ function updateBot(c, dt) {
       } else if (c.fireCd <= 0 && Math.random() < dt * (w.scope ? 1.4 : 5)) c.trigger = true;
     }
     if (w.scope && d < 7 && c.cur === 0) switchWeapon(c, 1);
-    if (!w.scope && c.botPrim === "m700" && c.cur === 1 && d > 12) switchWeapon(c, 0);
+    if (!w.scope && WEAP[c.botPrim].scope && c.cur === 1 && d > 12) switchWeapon(c, 0);
   } else {
     ai.seeT = 0;
     const pa = c.ammo[c.weapons[0]];
@@ -1122,7 +1179,7 @@ function updateBot(c, dt) {
   }
   const L = Math.hypot(mx, mz);
   if (L > 1) { mx /= L; mz /= L; }
-  const sp = c.crouch ? CROUCH_SPEED : wantRun ? RUN : c.aiming ? AIM_SPEED : WALK;
+  const sp = (c.crouch ? CROUCH_SPEED : wantRun ? RUN : c.aiming ? AIM_SPEED : WALK) * (w.speed || 1);
   const bx = c.x, bz = c.z;
   moveChar(c, mx * sp, mz * sp, dt);
   c.running = wantRun;
@@ -1187,7 +1244,7 @@ function updatePlayer(dt) {
   c.crouch = keys.has("KeyC") || input.touchCrouch;
   c.aiming = input.aimHold || input.touchAim;
   run = run && f > 0.3 && !c.crouch && !c.aiming && !c.trigger;
-  const sp = c.crouch ? CROUCH_SPEED : c.aiming ? AIM_SPEED : run ? RUN : WALK;
+  const sp = (c.crouch ? CROUCH_SPEED : c.aiming ? AIM_SPEED : run ? RUN : WALK) * (curW(c).speed || 1);
   const fx = Math.sin(c.yaw), fz = Math.cos(c.yaw), rx = -Math.cos(c.yaw), rz = Math.sin(c.yaw);
   moveChar(c, (fx * f + rx * s) * sp, (fz * f + rz * s) * sp, dt);
   c.running = run && c.moving;
@@ -1245,8 +1302,8 @@ function startMatch() {
   chars.forEach((c, i) => {
     c.kills = c.deaths = c.streak = c.heads = 0; c.alive = false; c.group.visible = false;
     if (c.ai) {
-      c.name = names[i]; c.avatar = randomAvatar(); const r = Math.random();
-      c.botPrim = r < 0.5 ? "ak" : r < 0.78 ? "m870" : "m700";
+      c.name = names[i]; c.avatar = randomAvatar();
+      c.botPrim = weighted(BOT_PRIMS); c.botSec = weighted(BOT_SECS);
       rebuildChar(c); drawTag(c);
     }
   });
@@ -1472,37 +1529,39 @@ function openMenu() {
 function renderMenu() {
   $("menuStats").innerHTML = [["💰 Para", fmt(save.money)], ["🏆 Galibiyet", fmt(save.wins)], ["💀 Vuruş", fmt(save.kills)], ["🎯 Kafadan", fmt(save.headshots)],
     ["🔥 En iyi seri", save.bestStreak], ["🎮 Maç", fmt(save.matches)]].map(([k, v]) => `<div>${k}<b>${v}</b></div>`).join("");
-  $("primSel").innerHTML = PRIMARIES.map(w => save.owned[w.id]
-    ? `<button class="btn ${save.primary === w.id ? "sel" : ""}" data-prim="${w.id}">${w.icon} ${esc(w.name)}</button>`
-    : `<button class="btn" data-arm="1" title="Cephanelikten al">🔒 ${esc(w.name)} · 💰${fmt(w.price)}</button>`).join("");
-  $("primSel").querySelectorAll("[data-prim]").forEach(b => b.onclick = () => { save.primary = b.dataset.prim; SFX.click(); persist(true); renderMenu(); });
+  const nOwned = WEAPONS.filter(w => save.owned[w.id]).length;
+  $("primSel").innerHTML = [save.primary, save.secondary].map((id, i) =>
+    `<button class="btn sel" data-arm="1">${i + 1}. ${WEAP[id].icon} ${esc(WEAP[id].name)}</button>`).join("") +
+    `<button class="btn" data-arm="1">🔫 Cephanelik (${nOwned}/${WEAPONS.length})</button>`;
   $("primSel").querySelectorAll("[data-arm]").forEach(b => b.onclick = () => { SFX.click(); show("ovArmory"); });
   $("diffSel").innerHTML = Object.entries(DIFFS).map(([id, d]) =>
     `<button class="btn ${save.diff === id ? "sel" : ""}" data-diff="${id}">${d.name}<br><small style="font-weight:400">ödül ×${String(d.reward).replace(".", ",")}</small></button>`).join("");
   $("diffSel").querySelectorAll("[data-diff]").forEach(b => b.onclick = () => { save.diff = b.dataset.diff; SFX.click(); persist(true); renderMenu(); });
 }
 function statBars(w) {
-  const rows = [["Hasar", Math.min(1, w.dmg * (w.pellets || 1) / 90)], ["Atış hızı", Math.min(1, w.rpm / 650)], ["Şarjör", Math.min(1, w.mag / 30)],
-    ["Menzil", Math.min(1, w.falloff[0] / 60)], ["İsabet", Math.min(1, 0.006 / Math.max(w.aim, 0.006))]];
+  const rows = [["Hasar", Math.min(1, w.dmg * (w.pellets || 1) / 100)], ["Atış hızı", Math.min(1, w.rpm / 950)], ["Şarjör", Math.min(1, w.mag / 50)],
+    ["Menzil", Math.min(1, w.falloff[0] / 60)], ["İsabet", Math.min(1, 0.005 / Math.max(w.aim, 0.005))], ["Hareket", clamp(((w.speed || 1) - 0.76) / 0.32, 0.1, 1)]];
   return `<div class="bars">${rows.map(([k, v]) => `<span>${k}</span><div class="bar"><b style="width:${Math.round(v * 100)}%"></b></div>`).join("")}</div>`;
 }
+const slotKey = w => w.slot === 1 ? "primary" : "secondary";
 function renderArmory() {
-  $("armMoney").textContent = "💰 " + fmt(save.money);
-  $("armList").innerHTML = WEAPONS.map(w => {
-    let btn;
-    if (w.slot === 2) btn = `<button class="btn" disabled>Her zaman</button>`;
-    else if (save.owned[w.id]) btn = save.primary === w.id ? `<button class="btn sel" disabled>✔ Seçili</button>` : `<button class="btn blue" data-eq="${w.id}">Seç</button>`;
-    else btn = `<button class="btn go" data-buy="${w.id}" ${save.money < w.price ? "disabled" : ""}>💰 ${fmt(w.price)}</button>`;
-    return `<div class="wrow"><div class="ic">${w.icon}</div><div><b>${esc(w.name)}</b> <span class="muted">· ${esc(w.cat)} · ${w.mag} mermi</span>
-      <div class="muted">${esc(w.desc)}</div>${statBars(w)}</div>${btn}</div>`;
-  }).join("");
+  $("armMoney").textContent = `💰 ${fmt(save.money)} · Seçili: ${WEAP[save.primary].name} + ${WEAP[save.secondary].name}`;
+  $("armList").innerHTML = CLASSES.map(([cls, title, sub]) => `<h2>${esc(title)} <span class="muted" style="font-weight:400">· ${esc(sub)}</span></h2>` +
+    WEAPONS.filter(w => w.cls === cls).map(w => {
+      let btn;
+      if (save.owned[w.id]) btn = save[slotKey(w)] === w.id ? `<button class="btn sel" disabled>✔ Seçili</button>` : `<button class="btn blue" data-eq="${w.id}">Seç</button>`;
+      else btn = `<button class="btn go" data-buy="${w.id}" ${save.money < w.price ? "disabled" : ""}>💰 ${fmt(w.price)}</button>`;
+      const extra = [w.pellets ? `${w.pellets} saçma` : "", w.auto ? "otomatik" : "", w.scope ? `dürbün ×${w.zoom}` : ""].filter(Boolean).join(" · ");
+      return `<div class="wrow"><div class="ic">${w.icon}</div><div><b>${esc(w.name)}</b> <span class="muted">· ${w.mag} mermi${extra ? " · " + extra : ""}</span>
+        <div class="muted">${esc(w.desc)}</div>${statBars(w)}</div>${btn}</div>`;
+    }).join("")).join("");
   $("armList").querySelectorAll("[data-buy]").forEach(b => b.onclick = () => {
     const w = WEAP[b.dataset.buy];
     if (save.money < w.price || save.owned[w.id]) return;
-    save.money -= w.price; save.owned[w.id] = true; save.primary = w.id;
-    SFX.pickup(); notify(`🔫 ${w.name} alındı ve seçildi!`); persist(true); rerenderOpen();
+    save.money -= w.price; save.owned[w.id] = true; save[slotKey(w)] = w.id;
+    SFX.pickup(); notify(`${w.icon} ${w.name} alındı ve seçildi!`); persist(true); rerenderOpen();
   });
-  $("armList").querySelectorAll("[data-eq]").forEach(b => b.onclick = () => { save.primary = b.dataset.eq; SFX.click(); persist(true); rerenderOpen(); });
+  $("armList").querySelectorAll("[data-eq]").forEach(b => b.onclick = () => { const w = WEAP[b.dataset.eq]; save[slotKey(w)] = w.id; SFX.click(); persist(true); rerenderOpen(); });
 }
 function applyPass(id) { if (id === "gold" && player) { player.gunId = null; equipModel(player); } }
 function renderShop() {
