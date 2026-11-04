@@ -2,7 +2,7 @@
 // Sayfalar: önce internet (güncel sürüm gelsin), yoksa cihazdaki kopya.
 // Sürüm numaralı kütüphaneler (three.js, supabase-js): önce cihazdaki kopya (değişmezler).
 // Supabase istekleri (hesap, Robux) hiç saklanmaz: onlar her zaman sunucuya gider.
-const CACHE = "kup-evreni-v2";
+const CACHE = "kup-evreni-v3";
 const GAMES = ["pizza-kulesi-tycoon", "evcil-hayvan-gezegenler", "cilgin-fabrika", "tekne-kazasi", "asmr-klavye", "kasaba-hayati", "limonata-standi"];
 const PAGES = ["./", "./index.html", "./manifest.json", "./icon.svg", ...GAMES.map(g => `./${g}/web/index.html`)];
 const LIBS = [
@@ -34,6 +34,7 @@ self.addEventListener("fetch", e => {
   if (LIBS.includes(url.href)) { e.respondWith(cacheFirst(req)); return; }
   if (url.origin !== location.origin) return;           // Supabase ve diğerleri: dokunma
   if (url.pathname.includes("/admin")) return;           // admin paneli her zaman internetten
+  if (url.pathname.includes("/indir/") || url.pathname.includes("/.well-known/")) return; // APK indirme: saklama
   e.respondWith(networkFirst(req));
 });
 

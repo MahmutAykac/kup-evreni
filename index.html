@@ -607,9 +607,13 @@ function avatarStage(container, { spin = true, zoom = 1 } = {}) {
       renderer.render(scene, cam);
     },
   };
+  // Telefonda: yukarı/aşağı kaydırma sayfayı kaydırsın (pan-y), yana sürükleme avatarı döndürsün.
+  // Tarayıcı hareketi kaydırma sayınca pointercancel gelir: sürüklemeyi bırak, yoksa avatar parmağı takip etmeye devam eder.
+  renderer.domElement.style.touchAction = container.id === "avatarView" ? "none" : "pan-y";
   container.addEventListener("pointerdown", e => { drag = e.clientX; });
   addEventListener("pointermove", e => { if (drag !== null) { yaw -= (e.clientX - drag) * 0.01; drag = e.clientX; } });
   addEventListener("pointerup", () => { drag = null; });
+  addEventListener("pointercancel", () => { drag = null; });
   st.update();
   stages.push(st);
   return st;
@@ -648,6 +652,12 @@ function renderHome() {
   $("recent").innerHTML = recent.map(gameCard).join("");
 }
 
+// Android uygulaması indirme şeridi: sadece Android tarayıcıda, uygulamanın içinde değilken, kapatılmamışsa
+function showApk() {
+  if (!/Android/i.test(navigator.userAgent)) return false;
+  if (document.referrer.startsWith("android-app://") || matchMedia("(display-mode: standalone)").matches) return false;
+  try { return !localStorage.getItem("kupApkKapali"); } catch (e) { return true; }
+}
 function renderBanners() {
   const d = CFG.duyuru, ic = { info: "📢", success: "✅", warn: "⚠️", event: "🎉", fresh: "🆕" };
   const esc = s => String(s).replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
@@ -655,7 +665,11 @@ function renderBanners() {
   $("banners").innerHTML = (gg.length ? `<div class="banner success"><span class="bi">🎁</span><span>Sana hediye var! ${gg.map(g => g.icon + " " + g.title).join(", ")} oyununu açınca eşyaların eklenecek.</span></div>` : "") +
     (eco().double ? `<div class="banner event"><span class="bi">💎</span>2x Robux etkinliği! Günlük ödül, oyun ödülü ve rozet ödülleri iki katı.</div>` : "") +
     (d && d.on && d.text && !annClosed(d) ? `<div class="banner ${ic[d.type] ? d.type : "info"}"><span class="bi">${ic[d.type] || "📢"}</span><span>${esc(d.text)}</span>
-      <button class="bx" id="btnAnnClose" title="Kapat" aria-label="Duyuruyu kapat">✕</button></div>` : "");
+      <button class="bx" id="btnAnnClose" title="Kapat" aria-label="Duyuruyu kapat">✕</button></div>` : "") +
+    (showApk() ? `<div class="banner info"><span class="bi">📱</span><span>Küp Evreni artık Android uygulaması! <a class="btn blue" href="indir/kup-evreni.apk" download style="text-decoration:none;display:inline-block;margin-left:6px">İndir (APK)</a></span>
+      <button class="bx" id="btnApkClose" title="Kapat" aria-label="Kapat">✕</button></div>` : "");
+  const ax = $("btnApkClose");
+  if (ax) ax.onclick = () => { try { localStorage.setItem("kupApkKapali", "1"); } catch (e) {} renderBanners(); };
   const x = $("btnAnnClose");
   if (x) x.onclick = () => { try { localStorage.setItem(ANN_CLOSED_KEY, String(d.at || d.text)); } catch (e) {} renderBanners(); };
 }
