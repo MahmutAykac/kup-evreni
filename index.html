@@ -34,6 +34,22 @@
   button { font: inherit; color: inherit; }
   a { color: var(--accent); }
 
+  /* Uygulama hissi: tarayıcı davranışlarını kapat */
+  html, body { overscroll-behavior: none; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none;
+    -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+  body { -webkit-user-select: none; user-select: none; }
+  input, textarea, select, [contenteditable] { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
+  img, canvas { -webkit-user-drag: none; }
+  button, a, [onclick], .game, .tile, label { touch-action: manipulation; }
+  button:focus:not(:focus-visible) { outline: none; }
+  @media (pointer: coarse) {
+    * { scrollbar-width: none; }
+    *::-webkit-scrollbar { display: none; }
+    button:not(:disabled), .game { transition: transform 0.08s, filter 0.08s; }
+    button:not(:disabled):active { transform: scale(0.95); filter: brightness(0.9); }
+    .game:active .thumb { transform: scale(0.96); filter: brightness(0.9); }
+  }
+
   /* Üst çubuk */
   #top { position: fixed; top: 0; left: 0; right: 0; height: 56px; display: flex; align-items: center; gap: 14px;
     padding: 0 16px; background: var(--surface); border-bottom: 1px solid var(--line); z-index: 5; }
@@ -58,7 +74,7 @@
     border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; z-index: 4; }
   #nav button { text-align: left; background: none; border: 0; padding: 10px 12px; border-radius: 10px; cursor: pointer; font-size: 16px; }
   #nav button.on { background: var(--surface2); }
-  #nav button:hover { background: var(--surface2); }
+  @media (hover: hover) { #nav button:hover { background: var(--surface2); } }
   main { margin: 56px 0 0 200px; padding: 22px 26px 60px; }
   .page { display: none; max-width: 1180px; }
   .page.on { display: block; }
@@ -84,7 +100,7 @@
   .game { background: none; border: 0; padding: 0; text-align: left; cursor: pointer; }
   .thumb { aspect-ratio: 1; border-radius: 14px; position: relative; overflow: hidden; display: grid; place-items: center; font-size: 74px;
     box-shadow: inset 0 0 0 1px var(--line); transition: transform 0.12s; }
-  .game:hover .thumb { transform: translateY(-3px); }
+  @media (hover: hover) { .game:hover .thumb { transform: translateY(-3px); } }
   .thumb .tag { position: absolute; left: 8px; top: 8px; background: rgba(0,0,0,0.55); font-size: 12px; padding: 3px 8px; border-radius: 8px; }
   .thumb .gift { position: absolute; left: 8px; bottom: 8px; background: #ffb703; color: #1b1b1b; font-size: 12px; font-weight: 700; padding: 3px 8px; border-radius: 8px; }
   .thumb .new { position: absolute; right: 8px; top: 8px; background: #ff3b5c; color: #fff; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 8px; letter-spacing: 0.04em; }
@@ -92,7 +108,7 @@
     border: 1px solid rgba(255,255,255,0.12); }
   .banner .bi { font-size: 22px; }
   .banner .bx { margin-left: auto; flex: none; width: 32px; height: 32px; border-radius: 8px; border: 0; background: rgba(255,255,255,0.08); cursor: pointer; font-size: 15px; opacity: 0.8; }
-  .banner .bx:hover { background: rgba(255,255,255,0.18); opacity: 1; }
+  @media (hover: hover) { .banner .bx:hover { background: rgba(255,255,255,0.18); opacity: 1; } }
   .banner.info { background: linear-gradient(90deg, rgba(0,162,255,0.22), rgba(0,162,255,0.08)); }
   .banner.success { background: linear-gradient(90deg, rgba(0,176,111,0.24), rgba(0,176,111,0.08)); }
   .banner.warn { background: linear-gradient(90deg, rgba(255,209,102,0.24), rgba(255,209,102,0.08)); }
@@ -177,7 +193,7 @@
   #lCta .btn { position: relative; padding: 16px 0; width: 250px; font-size: 18px; background: #335fff; }
   .accRow { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px; margin: 6px 0; border-radius: 12px; border: 1px solid var(--line);
     background: var(--surface2); cursor: pointer; text-align: left; }
-  .accRow:hover { border-color: var(--accent); }
+  @media (hover: hover) { .accRow:hover { border-color: var(--accent); } }
   .accRow .face { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; font-size: 22px; }
 
   @media (max-width: 760px) {
@@ -313,6 +329,8 @@
 
 <script>
 "use strict";
+// Uygulama hissi: basılı tutunca tarayıcı menüsü açılmasın (metin kutuları hariç)
+addEventListener("contextmenu", e => { if (!e.target.closest("input, textarea, [contenteditable]")) e.preventDefault(); });
 const $ = id => document.getElementById(id);
 
 // ================================================================ Oyun kataloğu
