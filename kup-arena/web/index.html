@@ -7,7 +7,8 @@
 <!--
   Küp Arena: üçüncü şahıs atış oyunu, botlara karşı "Herkes Herkese" maçları.
   Küp Evreni platformunda çalışır (tek başına da açılır). Kayıt anahtarı: kupArena.
-  Maç: MATCH_TIME sn ya da KILL_LIMIT vuruş, 7 bot. Vurulan karakter küp parçalarına ayrılır (kan yok), RESPAWN sn sonra yeniden doğar.
+  Modlar: "Herkes Herkese" (MATCH_TIME sn ya da KILL_LIMIT vuruş, 7 bot) ve "Zombi Dalgaları" (ZTYPES, startWave; ölünce oyun biter).
+  Herkes Herkese: 7 bot. Vurulan karakter küp parçalarına ayrılır (kan yok), RESPAWN sn sonra yeniden doğar.
   Silahlar (WEAPONS): Glock 17 (her zaman yanında), AK-47, Remington 870, Remington 700. Bölgesel hasar: kafa ×2,5, gövde ×1, bacak ×0,75.
   Kontroller: fare bak · sol tık ateş · sağ tık nişan · WASD yürü · Shift koş · Space zıpla · C çömel · R doldur · 1/2/Q/tekerlek silah · Tab skor · Esc duraklat
   Dokunmatik: sol yarı joystick · sağ yarı sürükle-bak · ateş (basılıyken sürükleyerek de bakılır) · nişan · doldur · zıpla · çömel · silah değiştir.
@@ -185,8 +186,10 @@
 
 <div id="ovMenu" class="overlay show"><div class="card">
   <h1>🔫 Küp Arena</h1>
-  <div class="muted">Depoda 7 rakibe karşı herkes herkese! 3 dakikada en çok vuruşu yapan ya da ilk <b>20</b> vuruşa ulaşan kazanır.</div>
+  <div class="muted" id="modeDesc"></div>
   <div class="stats" id="menuStats"></div>
+  <h2>Mod</h2>
+  <div class="seg" id="modeSel"></div>
   <h2>Silahların</h2>
   <div class="seg" id="primSel"></div>
   <h2>Zorluk</h2>
@@ -206,6 +209,7 @@
     <li>🏃 Koşarken ve zıplarken isabet düşer, <b>çömelince ve nişan alınca</b> artar. Uzun tarama yaparsan namlu yukarı kayar: kısa atışlar yap.</li>
     <li>🧰 Haritada <b>❤️ ilk yardım</b> ve <b>📦 cephane</b> kutuları var. Ortadaki yüksek platformdan her yer görünür ama sen de görünürsün!</li>
     <li>🔫 Kazandığın parayla <b>Cephanelik</b>'ten yeni silah al.</li>
+    <li>🧟 <b>Zombi Dalgaları</b>: zombiler dalga dalga gelir, sana dokunursa canın gider. Her dalgada daha çok ve daha hızlılar; her 5. dalgada <b>Dev Zombi</b> çıkar. Dalga arasında can ve cephane dolar. Ölünce oyun biter: en uzak dalgaya ulaşmaya çalış!</li>
   </ol>
   <p class="muted">Klavye: fare ile bak · sol tık ateş · sağ tık nişan · WASD yürü · Shift koş · Space zıpla · C çömel · R doldur · 1 / 2 / Q / tekerlek silah değiştir · Tab skor · Esc duraklat.<br>
     Dokunmatik: sol yarı joystick · sağ yarı sürükle-bak · 🔥 ateş (basılıyken sürükleyerek de nişan alınır) · 🎯 nişan · R doldur · ⤒ zıpla · ⬇ çömel · 🔄 silah.</p>
@@ -341,6 +345,16 @@ const DIFFS = {
   zor: { name: "Zor", react: 0.28, err: 0.034, turn: 8, head: 0.3, dmg: 1, reward: 1.5 },
 };
 const REWARD = { kill: 25, head: 10, place: [150, 80, 40], play: 20 };
+// Zombi Dalgaları: zombi türleri (can, hız, vuruş hasarı, boy, ödül), dalga ayarları
+const ZTYPES = {
+  normal: { name: "Zombi", hp: 90, speed: 3.0, dmg: 10, size: 1, skin: "#7cb342", reward: 8 },
+  runner: { name: "Koşucu Zombi", hp: 55, speed: 6.2, dmg: 7, size: 0.9, skin: "#c5e1a5", reward: 10 },
+  tank: { name: "Dev Zombi", hp: 650, speed: 2.4, dmg: 28, size: 1.55, skin: "#558b2f", reward: 60 },
+};
+const ZW = { firstBreak: 4, breakTime: 8, maxAlive: 14, spawnEvery: 0.7, attackCd: 1.0, waveBonus: 20 };
+const ZHP = { kolay: 0.8, normal: 1, zor: 1.25 };
+const MODES = { ffa: { name: "🔫 Herkes Herkese", desc: "Depoda 7 rakibe karşı herkes herkese! 3 dakikada en çok vuruşu yapan ya da ilk <b>20</b> vuruşa ulaşan kazanır." },
+  zombie: { name: "🧟 Zombi Dalgaları", desc: "Zombiler dalga dalga geliyor! Her dalgada daha çok ve daha hızlılar, her 5. dalgada <b>Dev Zombi</b> var. Tek canın var: ne kadar dayanabilirsin?" } };
 const STREAKS = { 3: "🔥 3 Seri!", 5: "⚡ Durdurulamaz! (5)", 8: "👑 Efsane! (8)", 12: "🌟 Tanrısal! (12)" };
 // Robux (Küp Evreni platform parası) ile alınanlar
 const PASSES = [
@@ -360,7 +374,7 @@ const HATS = ["cap", "none", "headphones", "none", "cap"];
 const SAVE_KEY = "kupArena";
 function freshSave() {
   return { money: 0, owned: { glock: true, ak: true }, primary: "ak", secondary: "glock", passes: {}, diff: "normal", sens: 1,
-    matches: 0, wins: 0, kills: 0, deaths: 0, headshots: 0, bestStreak: 0, bestKills: 0, helpSeen: false, muted: false, giftIds: [] };
+    matches: 0, wins: 0, kills: 0, deaths: 0, headshots: 0, bestStreak: 0, bestKills: 0, mode: "ffa", bestWave: 0, zkills: 0, zgames: 0, helpSeen: false, muted: false, giftIds: [] };
 }
 let save = freshSave();
 try {
@@ -371,6 +385,7 @@ try {
 if (!WEAP[save.primary] || WEAP[save.primary].slot !== 1 || !save.owned[save.primary]) save.primary = "ak";
 if (!WEAP[save.secondary] || WEAP[save.secondary].slot !== 2 || !save.owned[save.secondary]) save.secondary = "glock";
 if (!DIFFS[save.diff]) save.diff = "normal";
+if (!MODES[save.mode]) save.mode = "ffa";
 save.sens = clamp(+save.sens || 1, 0.3, 2.5);
 let lastSave = 0;
 function persist(force) {
@@ -386,7 +401,7 @@ const playerName = () => (platform.profile && platform.profile.name) || "Sen";
 function reportStats() {
   if (!platform.inside) return;
   parent.postMessage({ type: "kup:stats", stats: { "🏆 Galibiyet": fmt(save.wins), "💀 Vuruş": fmt(save.kills), "🎯 Kafadan": fmt(save.headshots),
-    "🔥 En iyi seri": save.bestStreak, "🎮 Maç": fmt(save.matches), "💰 Para": fmt(save.money) } }, "*");
+    "🔥 En iyi seri": save.bestStreak, "🧟 En iyi dalga": save.bestWave, "💰 Para": fmt(save.money) } }, "*");
 }
 function requestPurchase(item, done) {
   if (!platform.inside) { notify("Robux ile almak için oyunu Küp Evreni'nden aç (ana klasördeki index.html)"); return; }
@@ -486,6 +501,8 @@ const SFX = {
   hurt: () => { tone(160, 0.12, "sawtooth", 0.08, 90); noise(0.08, 0.15, 800); },
   pop: v => { noise(0.25, 0.35 * v, 1500, "bandpass"); tone(300, 0.2, "triangle", 0.08 * v, 90); },
   pickup: () => [660, 880, 1100].forEach((f, i) => tone(f, 0.1, "triangle", 0.07, undefined, i * 0.06)),
+  groan: (v, size) => { tone(95 / size, 0.7, "sawtooth", 0.05 * v, 60 / size); noise(0.5, 0.06 * v, 400, "lowpass"); },
+  wave: () => { tone(110, 0.8, "sawtooth", 0.08, 70); tone(165, 0.8, "sawtooth", 0.05, 100, 0.1); },
   beep: (hi) => tone(hi ? 1320 : 880, 0.12, "triangle", 0.09),
   win: () => [523, 659, 784, 1046].forEach((f, i) => tone(f, 0.25, "triangle", 0.09, undefined, i * 0.12)),
   lose: () => [523, 440, 349].forEach((f, i) => tone(f, 0.25, "triangle", 0.08, undefined, i * 0.15)),
@@ -568,11 +585,11 @@ function raySphere(ox, oy, oz, dx, dy, dz, cx, cy, cz, r, maxT) {
 }
 // Karakter vuruş kutuları (çömelince alçalır)
 function hitParts(c) {
-  const k = c.crouch ? 0.72 : 1, x = c.x, y = c.y, z = c.z;
+  const s = c.size || 1, k = (c.crouch ? 0.72 : 1) * s, x = c.x, y = c.y, z = c.z;
   return {
-    head: [x, y + 1.66 * k, z, 0.25],
-    body: { x1: x - 0.4, x2: x + 0.4, y1: y + 0.72 * k, y2: y + 1.46 * k, z1: z - 0.3, z2: z + 0.3 },
-    legs: { x1: x - 0.36, x2: x + 0.36, y1: y, y2: y + 0.72 * k, z1: z - 0.26, z2: z + 0.26 },
+    head: [x, y + 1.66 * k, z, 0.25 * s],
+    body: { x1: x - 0.4 * s, x2: x + 0.4 * s, y1: y + 0.72 * k, y2: y + 1.46 * k, z1: z - 0.3 * s, z2: z + 0.3 * s },
+    legs: { x1: x - 0.36 * s, x2: x + 0.36 * s, y1: y, y2: y + 0.72 * k, z1: z - 0.26 * s, z2: z + 0.26 * s },
   };
 }
 // Atış ışını: en yakın engel ya da karakter
@@ -982,7 +999,8 @@ function damage(v, attacker, amount, part, wid, fromX, fromZ) {
   return "hit";
 }
 function kill(v, k, wid, head) {
-  v.alive = false; v.hp = 0; v.deaths++; v.streak = 0; v.respawnT = RESPAWN; v.killer = k;
+  const zmode = match.mode === "zombie";
+  v.alive = false; v.hp = 0; v.deaths++; v.streak = 0; v.respawnT = zmode ? Infinity : RESPAWN; v.killer = k;
   v.group.visible = false; v.trigger = false; v.aiming = false;
   debris(v);
   SFX.pop(shotVolume(v));
@@ -990,18 +1008,31 @@ function kill(v, k, wid, head) {
     k.kills++; k.streak++; if (head) k.heads++;
     if (k === player) {
       match.kills++; if (head) match.heads++;
-      const earn = Math.round((REWARD.kill + (head ? REWARD.head : 0)) * DIFFS[save.diff].reward * (save.passes.double ? 2 : 1));
-      match.earned += earn; save.money += earn;
-      save.kills++; if (head) save.headshots++;
+      const mul = DIFFS[save.diff].reward * (save.passes.double ? 2 : 1);
+      if (head) save.headshots++;
       save.bestStreak = Math.max(save.bestStreak, k.streak);
       SFX.kill();
-      bigMsg(STREAKS[k.streak] || (head ? "🎯 Kafadan!" : "💀 Vuruldu!"), `${v.name} · +💰${earn}`);
+      if (zmode) {
+        const T = ZTYPES[v.zombie];
+        const earn = Math.round(T.reward * (head ? 1.5 : 1) * mul);
+        match.earned += earn; save.money += earn; save.zkills++;
+        if (v.zombie === "tank") bigMsg("💀 Dev Zombi düştü!", `+💰${earn}`);
+        else if (STREAKS[k.streak]) bigMsg(STREAKS[k.streak], `+💰${earn}`);
+      } else {
+        const earn = Math.round((REWARD.kill + (head ? REWARD.head : 0)) * mul);
+        match.earned += earn; save.money += earn; save.kills++;
+        bigMsg(STREAKS[k.streak] || (head ? "🎯 Kafadan!" : "💀 Vuruldu!"), `${v.name} · +💰${earn}`);
+      }
       persist();
     }
   }
-  if (v === player) { save.deaths++; bigMsg("💥 Vuruldun!", k && k !== v ? `${k.isPlayer ? "" : k.name} · ${WEAP[wid].name}` : "", RESPAWN); }
-  killFeed(k, v, wid, head);
-  if (k && k.kills >= KILL_LIMIT) endMatch();
+  if (v === player) {
+    save.deaths++;
+    if (zmode) { bigMsg("🧟 Zombiler seni yakaladı!", `Dalga ${match.wave}`); match.overT = 2.5; }
+    else bigMsg("💥 Vuruldun!", k && k !== v ? `${k.isPlayer ? "" : k.name} · ${WEAP[wid].name}` : "", RESPAWN);
+  }
+  if (!zmode || v === player || v.zombie === "tank" || k === player) killFeed(k, v, wid, head);
+  if (!zmode && k && k.kills >= KILL_LIMIT) endMatch();
 }
 
 // ================================================================ Efektler (iz, kıvılcım, küp parçaları)
@@ -1257,9 +1288,10 @@ function updatePlayer(dt) {
 function updateChar(c, dt) {
   if (!c.alive) {
     c.respawnT -= dt;
-    if (c.respawnT <= 0 && match.on) spawn(c);
+    if (c.respawnT <= 0 && match.on && match.mode === "ffa") spawn(c);
     return;
   }
+  if (c.zombie) return; // zombilerin silahı yok, can toplamazlar
   c.protectT = Math.max(0, c.protectT - dt);
   c.fireCd = Math.max(0, c.fireCd - dt);
   c.flashT = Math.max(0, c.flashT - dt);
@@ -1291,13 +1323,15 @@ function updateChar(c, dt) {
 }
 
 // ================================================================ Maç
-const match = { on: false, time: MATCH_TIME, kills: 0, heads: 0, earned: 0, ended: false };
+const match = { on: false, mode: "ffa", time: MATCH_TIME, kills: 0, heads: 0, earned: 0, ended: false, wave: 0, toSpawn: [], spawnT: 0, breakT: 0, overT: 0 };
 function setupBots() {
   const names = [...BOT_NAMES].sort(() => Math.random() - 0.5);
   for (let i = 0; i < BOT_COUNT; i++) { const b = makeBot(names[i]); rebuildChar(b); drawTag(b); }
 }
 function startMatch() {
   initAudio();
+  clearZombies();
+  const zmode = save.mode === "zombie";
   // Botların isimlerini ve silahlarını karıştır
   const names = [...BOT_NAMES].sort(() => Math.random() - 0.5);
   chars.forEach((c, i) => {
@@ -1311,15 +1345,123 @@ function startMatch() {
   for (const f of fx) { scene.remove(f.m); if (f.pool) f.pool.push(f.m); }
   fx.length = 0;
   for (const p of pickups) { p.cd = 0; p.g.visible = true; }
-  Object.assign(match, { on: true, time: MATCH_TIME, kills: 0, heads: 0, earned: 0, ended: false });
-  for (const c of chars) spawn(c);
+  Object.assign(match, { on: true, mode: zmode ? "zombie" : "ffa", time: MATCH_TIME, kills: 0, heads: 0, earned: 0, ended: false,
+    wave: 0, toSpawn: [], spawnT: 0, breakT: ZW.firstBreak, overT: 0 });
+  if (zmode) { for (const c of chars) if (c.ai) { c.respawnT = Infinity; c.tag.visible = false; } spawn(player); }
+  else for (const c of chars) spawn(c);
   player.protectT = PROTECT;
   $("feed").innerHTML = "";
   document.body.classList.add("playing");
   hideAll();
-  bigMsg("🔫 Maç başladı!", `İlk ${KILL_LIMIT} vuruşa ulaşan kazanır`);
+  if (zmode) bigMsg("🧟 Zombiler geliyor!", `İlk dalga ${ZW.firstBreak} saniye sonra · haritadaki ❤️ ve 📦 kutularını kullan`);
+  else bigMsg("🔫 Maç başladı!", `İlk ${KILL_LIMIT} vuruşa ulaşan kazanır`);
   SFX.beep(true);
   lockPointer();
+}
+// ================================================================ Zombi Dalgaları
+let zid = 0;
+function zombieAvatar(T) {
+  return { skin: T.skin, shirt: pick(["#5d6d7e", "#7f6a4f", "#4f6d5d", "#6d4f6a", "#8d8d6a"]), pants: pick(["#3e3a33", "#2f3b40", "#463a46"]), hat: "none", face: "wow" };
+}
+function spawnZombie(type) {
+  const T = ZTYPES[type], c = makeChar(T.name, false);
+  c.zombie = type; c.size = T.size; c.avatar = zombieAvatar(T); c.weapons = []; c.id = ++zid;
+  rebuildChar(c);
+  c.parts.rig.visible = false;
+  const far = spawnPts.filter(p => Math.hypot(p.x - player.x, p.z - player.z) > 14);
+  const sp = far.length ? pick(far) : spawnPts.reduce((b, p) => Math.hypot(p.x - player.x, p.z - player.z) > Math.hypot(b.x - player.x, b.z - player.z) ? p : b);
+  const w = match.wave, hpMul = (1 + 0.1 * (w - 1)) * ZHP[save.diff];
+  Object.assign(c, { x: sp.x + rand(-1, 1), z: sp.z + rand(-1, 1), y: 0, vy: 0, yaw: Math.atan2(player.x - sp.x, player.z - sp.z), alive: true,
+    hp: Math.round(T.hp * hpMul), maxHp: Math.round(T.hp * hpMul), protectT: 0, atkCd: 0.5, atkT: 0, groanT: rand(1, 5),
+    speed: type === "normal" ? T.speed + Math.min(1.6, 0.09 * (w - 1)) : T.speed, stuckT: 0, detour: 0, detourT: 0 });
+  if (blockedAt(c.x, c.z, 0, HEIGHT)) { c.x = sp.x; c.z = sp.z; }
+  c.group.visible = true;
+}
+function clearZombies() {
+  for (let i = chars.length - 1; i >= 0; i--) if (chars[i].zombie) { scene.remove(chars[i].group); chars.splice(i, 1); }
+}
+function startWave(n) {
+  match.wave = n;
+  const count = 5 + n * 3, list = [];
+  const runnerP = n >= 3 ? Math.min(0.35, (n - 2) * 0.07) : 0;
+  const tanks = n % 5 === 0 ? Math.floor(n / 5) : n >= 7 && Math.random() < 0.4 ? 1 : 0;
+  for (let i = 0; i < count; i++) list.push(Math.random() < runnerP ? "runner" : "normal");
+  for (let i = 0; i < tanks; i++) list.splice(Math.floor(Math.random() * (list.length * 0.6)), 0, "tank");
+  match.toSpawn = list.reverse(); match.spawnT = 0;
+  bigMsg(`🧟 Dalga ${n}`, tanks ? `${list.length} zombi · ⚠️ ${tanks} Dev Zombi!` : `${list.length} zombi geliyor!`);
+  SFX.wave();
+}
+function waveCleared() {
+  const mul = DIFFS[save.diff].reward * (save.passes.double ? 2 : 1), bonus = Math.round(ZW.waveBonus * match.wave * mul);
+  match.earned += bonus; save.money += bonus;
+  save.bestWave = Math.max(save.bestWave, match.wave);
+  // Ödül: can + cephane
+  player.hp = Math.min(MAX_HP, player.hp + 40);
+  for (const id of player.weapons) { const a = player.ammo[id], w = WEAP[id]; if (a.reserve !== Infinity) a.reserve = Math.max(a.reserve, w.reserve); }
+  bigMsg(`✅ Dalga ${match.wave} temizlendi!`, `+💰${bonus} · ❤️ +40 · 📦 cephane doldu · sonraki dalga ${ZW.breakTime} sn`);
+  SFX.pickup();
+  match.breakT = ZW.breakTime;
+  persist(true);
+}
+function updateWaves(dt) {
+  if (match.overT > 0) { match.overT -= dt; if (match.overT <= 0) endMatch(); return; }
+  if (!player.alive) return;
+  let alive = 0;
+  for (const c of chars) if (c.zombie && c.alive) alive++;
+  if (match.breakT > 0) { match.breakT -= dt; if (match.breakT <= 0) startWave(match.wave + 1); return; }
+  if (match.toSpawn.length && alive < ZW.maxAlive) {
+    match.spawnT -= dt;
+    if (match.spawnT <= 0) { match.spawnT = ZW.spawnEvery * (match.wave > 8 ? 0.7 : 1); spawnZombie(match.toSpawn.pop()); }
+  }
+  if (!match.toSpawn.length && alive === 0) waveCleared();
+  // Ölen zombileri sahneden kaldır
+  for (let i = chars.length - 1; i >= 0; i--) if (chars[i].zombie && !chars[i].alive) { scene.remove(chars[i].group); chars.splice(i, 1); }
+}
+function updateZombie(c, dt) {
+  const T = ZTYPES[c.zombie], t = player;
+  c.atkCd -= dt; c.atkT = Math.max(0, c.atkT - dt); c.groanT -= dt; c.fireCd = 0;
+  let mx = 0, mz = 0;
+  const dx = t.x - c.x, dz = t.z - c.z, d = Math.hypot(dx, dz) || 1;
+  if (t.alive) {
+    mx = dx / d; mz = dz / d;
+    c.yaw += clamp(angDiff(c.yaw, Math.atan2(dx, dz)), -6 * dt, 6 * dt);
+    const reach = 1.0 + 0.45 * c.size;
+    if (d < reach && Math.abs(t.y - c.y) < 1.7) {
+      mx = mz = 0;
+      if (c.atkCd <= 0) {
+        c.atkCd = ZW.attackCd; c.atkT = 0.3;
+        const dmg = T.dmg * (1 + 0.04 * (match.wave - 1)) * DIFFS[save.diff].dmg;
+        damage(t, c, dmg, "body", null, c.x, c.z);
+      }
+    }
+  }
+  if (c.groanT <= 0) { c.groanT = rand(3, 8); const v = clamp(1 - d / 30, 0, 1); if (v > 0.05) SFX.groan(v, c.size); }
+  if (c.detourT > 0) { c.detourT -= dt; const a = Math.atan2(mx, mz) + c.detour, L = Math.hypot(mx, mz); mx = Math.sin(a) * L; mz = Math.cos(a) * L; }
+  const sp = c.speed, bx = c.x, bz = c.z, want = Math.hypot(mx, mz);
+  moveChar(c, mx * sp, mz * sp, dt);
+  if (want > 0.2 && Math.hypot(c.x - bx, c.z - bz) < sp * dt * 0.3) {
+    c.stuckT += dt;
+    if (c.detourT <= 0) { c.detour = pick([-1, 1]) * rand(0.8, 1.6); c.detourT = rand(0.4, 0.9); }
+    if (c.stuckT > 1 && c.onGround) { c.vy = JUMP_V; c.stuckT = 0; }
+  } else c.stuckT = Math.max(0, c.stuckT - dt);
+}
+function endZombie() {
+  const mul = DIFFS[save.diff].reward * (save.passes.double ? 2 : 1), playBonus = Math.round(REWARD.play * mul);
+  const reached = match.wave, record = reached > save.bestWave;
+  save.bestWave = Math.max(save.bestWave, reached);
+  save.money += playBonus; match.earned += playBonus; save.zgames++;
+  persist(true);
+  unlockPointer();
+  document.body.classList.remove("playing");
+  $("scope").style.display = "none";
+  $("endTitle").textContent = record ? `🏆 Yeni rekor! Dalga ${reached}` : `🧟 Dalga ${reached}'e ulaştın`;
+  $("endTable").innerHTML = [["🧟 Ulaşılan dalga", reached], ["💀 Öldürülen zombi", match.kills], ["🎯 Kafadan", match.heads], ["🏆 En iyi dalga", save.bestWave]]
+    .map(([k, v]) => `<tr><td>${k}</td><td class="n"><b>${v}</b></td></tr>`).join("");
+  $("earn").innerHTML = `<tr><td>💀 Zombiler ve dalga bonusları</td><td>💰 ${fmt(match.earned - playBonus)}</td></tr><tr><td>🎮 Katılım</td><td>💰 ${fmt(playBonus)}</td></tr>` +
+    `<tr><td><b>Toplam</b>${save.passes.double ? " (2x Para)" : ""} · Zorluk: ${DIFFS[save.diff].name}</td><td>💰 ${fmt(match.earned)}</td></tr>` +
+    `<tr><td class="muted">Toplam paran</td><td>💰 ${fmt(save.money)}</td></tr>`;
+  (record ? SFX.win : SFX.lose)();
+  show("ovEnd");
 }
 function ranking() { return [...chars].sort((a, b) => b.kills - a.kills || a.deaths - b.deaths || (a.isPlayer ? -1 : 1)); }
 function endMatch() {
@@ -1327,6 +1469,7 @@ function endMatch() {
   match.ended = true; match.on = false;
   for (const c of chars) { c.trigger = false; }
   mouseDown = false; touchFire.on = false;
+  if (match.mode === "zombie") { endZombie(); return; }
   const rank = ranking(), place = rank.indexOf(player) + 1;
   const mul = DIFFS[save.diff].reward * (save.passes.double ? 2 : 1);
   const placeBonus = Math.round((REWARD.place[place - 1] || 0) * mul), playBonus = Math.round(REWARD.play * mul);
@@ -1350,6 +1493,7 @@ function endMatch() {
 }
 function quitMatch() {
   match.on = false;
+  if (match.mode === "zombie") save.bestWave = Math.max(save.bestWave, match.wave);
   for (const c of chars) c.trigger = false;
   document.body.classList.remove("playing");
   $("scope").style.display = "none";
@@ -1381,12 +1525,18 @@ function killFeed(k, v, wid, head) {
   const el = document.createElement("div");
   const nm = c => esc(c.isPlayer ? playerName() : c.name);
   el.className = "kf" + (k === player || v === player ? " me" : "");
-  el.innerHTML = k && k !== v ? `${nm(k)}<span class="w">${WEAP[wid].icon} ${esc(WEAP[wid].name)}${head ? " 🎯" : ""}</span>${nm(v)}` : `💥 ${nm(v)}`;
+  const wl = WEAP[wid] ? `${WEAP[wid].icon} ${esc(WEAP[wid].name)}` : "🧟";
+  el.innerHTML = k && k !== v ? `${nm(k)}<span class="w">${wl}${head ? " 🎯" : ""}</span>${nm(v)}` : `💥 ${nm(v)}`;
   $("feed").prepend(el);
   while ($("feed").children.length > 5) $("feed").lastChild.remove();
   setTimeout(() => el.remove(), 5000);
 }
 function renderBoard() {
+  if (match.mode === "zombie") {
+    $("board").innerHTML = "<table>" + [["🧟 Dalga", match.wave], ["💀 Öldürülen", match.kills], ["🎯 Kafadan", match.heads], ["💰 Kazanç", fmt(match.earned)], ["🏆 Rekor", save.bestWave]]
+      .map(([k, v]) => `<tr><td>${k}</td><td class="n">${v}</td></tr>`).join("") + "</table>";
+    return;
+  }
   const rank = ranking();
   $("board").innerHTML = "<table><tr><th>#</th><th>Oyuncu</th><th>💀</th><th>☠️</th></tr>" +
     rank.map((c, i) => `<tr class="${c.isPlayer ? "me" : ""}"><td>${i + 1}</td><td>${esc(c.isPlayer ? playerName() : c.name)}${c.alive ? "" : " 💥"}</td><td class="n">${c.kills}</td><td class="n">${c.deaths}</td></tr>`).join("") + "</table>";
@@ -1403,11 +1553,19 @@ function updateHud(dt) {
   $("ammo").classList.toggle("low", a.mag <= Math.ceil(w.mag * 0.25));
   setText($("wName"), `${w.icon} ${w.name}`);
   $("reloadBar").style.width = c.reloadT > 0 ? (100 * (1 - c.reloadT / c.reloadTotal)) + "%" : "0";
-  const t = Math.max(0, Math.ceil(match.time));
-  setText($("timeTxt"), `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`);
-  $("timeTxt").classList.toggle("late", t <= 20);
-  const lead = ranking()[0];
-  setText($("leadTxt"), `Sen: ${c.kills} · Lider: ${lead.isPlayer ? "sensin" : lead.name} (${lead.kills}/${KILL_LIMIT})`);
+  if (match.mode === "zombie") {
+    let left = match.toSpawn.length;
+    for (const z of chars) if (z.zombie && z.alive) left++;
+    setText($("timeTxt"), match.wave ? `🧟 Dalga ${match.wave}` : "🧟 Hazırlan");
+    $("timeTxt").classList.toggle("late", left > 0 && match.breakT <= 0);
+    setText($("leadTxt"), match.breakT > 0 ? `Sonraki dalga: ${Math.ceil(match.breakT)} sn · 💀 ${match.kills}` : `Kalan zombi: ${left} · 💀 ${match.kills}`);
+  } else {
+    const t = Math.max(0, Math.ceil(match.time));
+    setText($("timeTxt"), `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`);
+    $("timeTxt").classList.toggle("late", t <= 20);
+    const lead = ranking()[0];
+    setText($("leadTxt"), `Sen: ${c.kills} · Lider: ${lead.isPlayer ? "sensin" : lead.name} (${lead.kills}/${KILL_LIMIT})`);
+  }
   // Nişangah: dağılmaya göre açılır
   const s = c.alive ? spreadOf(c) : 0;
   const px = 4 + s * (innerHeight / 2) / Math.tan(camera.fov * Math.PI / 360);
@@ -1422,7 +1580,7 @@ function updateHud(dt) {
   $("hurtDir").style.transform = `rotate(${hurtAng}rad)`;
   if (bigTimer > 0) {
     bigTimer -= dt;
-    if (!c.alive && c.killer) {
+    if (!c.alive && c.killer && match.mode === "ffa") {
       const el = $("big");
       el.classList.remove("pop");
       el.innerHTML = `💥 Vuruldun!<small>${esc(c.killer.isPlayer ? "" : c.killer.name)} · ${Math.max(1, Math.ceil(c.respawnT))} sn sonra yeniden doğuyorsun</small>`;
@@ -1476,7 +1634,16 @@ function syncChars() {
     if (c.alive && c !== player) c.group.visible = c.protectT > 0 ? Math.floor(now * 10) % 2 === 0 : true;
     c.group.position.set(c.x, c.y, c.z);
     c.group.rotation.y = c.yaw;
-    c.group.scale.y = c.crouch ? 0.72 : 1;
+    const sz = c.size || 1;
+    c.group.scale.set(sz, sz * (c.crouch ? 0.72 : 1), sz);
+    if (c.zombie) {
+      const sw = c.moving && c.onGround ? Math.sin(c.walk * 0.8) * 0.5 : 0;
+      c.parts.legs[0].rotation.x = sw; c.parts.legs[1].rotation.x = -sw;
+      const swing = c.atkT > 0 ? -0.9 * Math.sin((0.3 - c.atkT) / 0.3 * Math.PI) : 0;
+      c.parts.arms[0].rotation.x = -1.45 + Math.sin(now * 3 + c.id) * 0.12 + swing;
+      c.parts.arms[1].rotation.x = -1.45 + Math.sin(now * 3 + c.id + 1) * 0.12 + swing;
+      continue;
+    }
     const sw = c.moving && c.onGround ? Math.sin(c.walk) * 0.7 : 0;
     c.parts.legs[0].rotation.x = sw; c.parts.legs[1].rotation.x = -sw;
     const p = c.pitch + c.kick;
@@ -1523,13 +1690,18 @@ document.querySelectorAll("[data-close]").forEach(b => b.addEventListener("click
 }));
 function openMenu() {
   match.ended = false;
+  clearZombies();
   for (const c of chars) { c.alive = false; if (c.group) c.group.visible = false; if (c.tag) c.tag.visible = false; }
   for (const f of flashes.values()) if (f.parent) scene.remove(f);
   hideAll(); show("ovMenu");
 }
 function renderMenu() {
+  $("modeDesc").innerHTML = MODES[save.mode].desc;
+  $("modeSel").innerHTML = Object.entries(MODES).map(([id, m]) => `<button class="btn ${save.mode === id ? "sel" : ""}" data-mode="${id}">${m.name}</button>`).join("");
+  $("modeSel").querySelectorAll("[data-mode]").forEach(b => b.onclick = () => { save.mode = b.dataset.mode; SFX.click(); persist(true); renderMenu(); });
+  $("bStart").textContent = save.mode === "zombie" ? "▶ Zombilere karşı başla" : "▶ Maça başla";
   $("menuStats").innerHTML = [["💰 Para", fmt(save.money)], ["🏆 Galibiyet", fmt(save.wins)], ["💀 Vuruş", fmt(save.kills)], ["🎯 Kafadan", fmt(save.headshots)],
-    ["🔥 En iyi seri", save.bestStreak], ["🎮 Maç", fmt(save.matches)]].map(([k, v]) => `<div>${k}<b>${v}</b></div>`).join("");
+    ["🔥 En iyi seri", save.bestStreak], ["🧟 En iyi dalga", save.bestWave]].map(([k, v]) => `<div>${k}<b>${v}</b></div>`).join("");
   const nOwned = WEAPONS.filter(w => save.owned[w.id]).length;
   $("primSel").innerHTML = [save.primary, save.secondary].map((id, i) =>
     `<button class="btn sel" data-arm="1">${i + 1}. ${WEAP[id].icon} ${esc(WEAP[id].name)}</button>`).join("") +
@@ -1715,14 +1887,18 @@ function update(dt) {
   const paused = anyOverlay();
   if (match.on && !paused) {
     now += dt;
-    match.time -= dt;
-    if (match.time <= 10 && Math.ceil(match.time) !== Math.ceil(match.time + dt)) SFX.beep(match.time <= 1);
+    if (match.mode === "ffa") {
+      match.time -= dt;
+      if (match.time <= 10 && Math.ceil(match.time) !== Math.ceil(match.time + dt)) SFX.beep(match.time <= 1);
+    }
     updatePlayer(dt);
     for (const c of chars) if (c.ai && c.alive) updateBot(c, dt);
+    if (match.mode === "zombie") for (const c of chars) if (c.zombie && c.alive) updateZombie(c, dt);
     for (const c of chars) updateChar(c, dt);
     for (const p of pickups) if (p.cd > 0) { p.cd -= dt; if (p.cd <= 0) p.g.visible = true; }
     updateFx(dt);
-    if (match.time <= 0) endMatch();
+    if (match.mode === "zombie") updateWaves(dt);
+    else if (match.time <= 0) endMatch();
   }
   if (match.on || match.ended) updateHud(dt);
   persist();
