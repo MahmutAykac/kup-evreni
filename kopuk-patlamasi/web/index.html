@@ -1,0 +1,978 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Daha Fazla Köpük!</title>
+<!--
+  Daha Fazla Köpük!: köpük pompala, köpük büyüsün, binaları patlatsın (tıklama / büyüme simülatörü).
+  Küp Evreni platformunda çalışır (tek başına da açılır). Kayıt anahtarı: kopukPatlamasi.
+  Döngü: pompala (tıkla / Space / 🫧 düğmesi) → köpük (save.foam) ve para (save.coins) → yükseltme → köpük büyür (yarıçap = 0,5 × ∛köpük)
+  → bulunduğu yapıyı (STAGES) patlatır → bir sonraki daha büyük yapı. Yeniden köpürme (REBIRTH_STAGE sonrası): her şey sıfırlanır, kalıcı ×çarpan.
+  Kontroller: tıkla / Space: pompala · WASD yürü · sürükle: kamera · U yükseltmeler · Dokunmatik: joystick + 🫧 düğmesi (basılı tut).
+  Test kancası: window.step(sn) oyun mantığını elle ilerletir.
+-->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+  :root { --panel: rgba(30, 40, 66, 0.78); --line: rgba(255,255,255,0.2); --text: #fff; --foam: #8fe3ff; --gold: #ffd23f; --ok: #6ee7a0; --card: #f3f8ff; --ink: #1d2a44; }
+  * { box-sizing: border-box; }
+  html, body { -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; overscroll-behavior: none; }
+  html, body { margin: 0; height: 100%; background: #9fd8ff; color: var(--text); font-family: "Trebuchet MS", system-ui, sans-serif;
+    overflow: hidden; -webkit-user-select: none; user-select: none; touch-action: none; }
+  button { font: inherit; color: inherit; }
+  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  .pill { background: var(--panel); border-radius: 14px; padding: 8px 12px; }
+  #top { position: fixed; left: 14px; top: 12px; min-width: 200px; }
+  #coins { font-size: 22px; font-weight: 700; color: var(--gold); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #foam { font-size: 15px; margin-top: 2px; white-space: nowrap; color: var(--foam); font-weight: 700; }
+  #rate { font-size: 12px; color: #d6e3f5; margin-top: 2px; white-space: nowrap; }
+  #stage { position: fixed; left: 50%; top: 12px; transform: translateX(-50%); text-align: center; min-width: 230px; max-width: 46vw; }
+  #stageName { font-size: 17px; font-weight: 700; white-space: nowrap; }
+  #prog { height: 10px; border-radius: 5px; background: rgba(255,255,255,0.2); overflow: hidden; margin-top: 5px; }
+  #progFill { height: 100%; width: 0; background: linear-gradient(90deg, #8fe3ff, #ffffff); }
+  #progTxt { font-size: 12px; margin-top: 3px; color: #e3eefc; white-space: nowrap; }
+  #menu { position: fixed; right: 14px; top: 12px; display: flex; gap: 6px; }
+  #menu button { border: 2px solid var(--line); background: var(--panel); border-radius: 14px; padding: 8px 12px; cursor: pointer; font-size: 15px; white-space: nowrap; }
+  #pump { position: fixed; right: 22px; bottom: 22px; width: 120px; height: 120px; border-radius: 50%; border: 4px solid #fff; cursor: pointer;
+    background: radial-gradient(circle at 35% 30%, #ffffff, #8fe3ff 45%, #3aa6e8); color: #10345a; font-size: 18px; font-weight: 700;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.25); touch-action: none; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.1; }
+  #pump span { font-size: 38px; }
+  #pump.on { transform: scale(0.93); filter: brightness(1.08); }
+  #toasts { position: fixed; top: 96px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 6px; align-items: center;
+    pointer-events: none; z-index: 20; width: max-content; max-width: calc(100vw - 32px); }
+  .toast { background: rgba(243,248,255,0.96); color: var(--ink); padding: 6px 14px; border-radius: 10px; font-size: 15px; animation: tfade 3s forwards; text-align: center; }
+  @keyframes tfade { 0%, 82% { opacity: 1; } 100% { opacity: 0; transform: translateY(-8px); } }
+  .pop { position: fixed; pointer-events: none; font-weight: 700; font-size: 18px; color: #fff; text-shadow: 0 2px 3px rgba(0,0,0,0.5); animation: rise 0.9s forwards; z-index: 4; white-space: nowrap; }
+  @keyframes rise { to { opacity: 0; transform: translateY(-60px); } }
+  #big { position: fixed; left: 50%; top: 30%; transform: translate(-50%, -50%); text-align: center; pointer-events: none; font-size: 40px; font-weight: 700;
+    text-shadow: 0 3px 6px rgba(0,0,0,0.6); white-space: nowrap; opacity: 0; }
+  #big small { display: block; font-size: 18px; font-weight: 400; margin-top: 4px; }
+  #big.show { animation: bigin 3s forwards; }
+  @keyframes bigin { 0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0; } 10% { transform: translate(-50%, -50%) scale(1.15); opacity: 1; }
+    18%, 80% { transform: translate(-50%, -50%) scale(1); opacity: 1; } 100% { opacity: 0; } }
+  #stick { position: fixed; width: 110px; height: 110px; margin: -55px 0 0 -55px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.45);
+    background: rgba(0,0,0,0.18); display: none; pointer-events: none; }
+  #stick div { position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px; border-radius: 50%; background: rgba(255,255,255,0.75); }
+  .overlay { position: fixed; inset: 0; display: none; align-items: flex-start; justify-content: center; background: rgba(10,20,40,0.55);
+    padding: 16px; overflow-y: auto; touch-action: pan-y; z-index: 10; }
+  .overlay.show { display: flex; }
+  .card { background: var(--card); color: var(--ink); border-radius: 18px; padding: 18px 22px; width: 100%; max-width: 540px; margin: auto 0; line-height: 1.45;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
+  .card h1 { margin: 0 0 6px; font-size: 25px; color: #1f7ac2; }
+  .card h2 { margin: 14px 0 4px; font-size: 16px; color: #4b5d7a; }
+  .card ol { padding-left: 22px; margin: 8px 0; }
+  .card li { margin: 4px 0; }
+  .muted { color: #5b6b85; font-size: 14px; }
+  .btn { border: 0; border-radius: 12px; padding: 10px 14px; cursor: pointer; font-weight: 700; background: #e1e9f5; color: #2b3a55; }
+  .btn.go { background: #2b9de8; color: #fff; }
+  .btn.gold { background: var(--gold); color: #4a3a00; }
+  .btn.pink { background: #ff5fa2; color: #fff; }
+  .btn:disabled { opacity: 0.45; cursor: default; }
+  .rowb { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  .rowb .btn { flex: 1; }
+  .up { display: grid; grid-template-columns: 42px 1fr auto; gap: 10px; align-items: center; padding: 9px 0; border-bottom: 1px solid #dfe8f5; }
+  .up .ic { font-size: 28px; text-align: center; }
+  .up .btn { min-width: 104px; font-size: 14px; }
+  .up .lv { font-size: 12px; color: #2b9de8; font-weight: 700; }
+  .soapdot { display: inline-block; width: 14px; height: 14px; border-radius: 50%; vertical-align: -2px; margin-right: 4px; border: 1px solid rgba(0,0,0,0.15); }
+  #noWebgl { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 16px; text-align: center; font-size: 18px; color: #222; }
+  @media (max-width: 760px), (max-height: 480px) {
+    #top { min-width: 150px; padding: 6px 10px; }
+    #coins { font-size: 17px; }
+    #foam { font-size: 13px; }
+    #rate { font-size: 11px; }
+    #stage { min-width: 170px; padding: 6px 10px; }
+    #stageName { font-size: 14px; }
+    #progTxt { font-size: 11px; }
+    #menu button { padding: 6px 9px; font-size: 14px; }
+    #menu span { display: none; }
+    #pump { width: 96px; height: 96px; right: 16px; bottom: 16px; font-size: 15px; }
+    #pump span { font-size: 30px; }
+    #big { font-size: 28px; }
+    #big small { font-size: 14px; }
+    .card { padding: 14px 16px; }
+  }
+  @media (max-width: 560px) { #stage { top: 104px; left: 14px; transform: none; max-width: calc(100vw - 28px); } #toasts { top: 176px; } }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="top" class="pill"><div id="coins">💰 0</div><div id="foam">🫧 0</div><div id="rate"></div></div>
+<div id="stage" class="pill"><div id="stageName"></div><div id="prog"><div id="progFill"></div></div><div id="progTxt"></div></div>
+<div id="menu">
+  <button id="bUp">🛠️ <span>Yükseltmeler</span></button>
+  <button id="bReb">🔁 <span>Yeniden Köpür</span></button>
+  <button id="bShop">R$ <span>Mağaza</span></button>
+  <button id="bHelp" title="Nasıl oynanır">❓</button>
+  <button id="bMute" title="Ses aç / kapat">🔊</button>
+</div>
+<div id="toasts"></div>
+<div id="big"></div>
+<button id="pump"><span>🫧</span>POMPALA</button>
+<div id="stick"><div></div></div>
+
+<div id="ovHelp" class="overlay show"><div class="card">
+  <h1>🫧 Daha Fazla Köpük!</h1>
+  <p style="margin:4px 0">Banyodaki küvetten köpük pompala. Köpük büyüdükçe odayı doldurur, sonra duvarları patlatır! Ev, apartman, mahalle, şehir… köpüğün nereye kadar büyüyebilir?</p>
+  <ol>
+    <li>🫧 <b>Pompala</b>: ekrana tıkla, Space'e bas ya da sağ alttaki düğmeye <b>basılı tut</b>. Her pompa köpük ve 💰 para getirir.</li>
+    <li>🛠️ <b>Yükseltmeler</b>: daha güçlü pompa, kendi kendine çalışan köpük makinesi, senin yerine pompalayan lastik ördekler ve köpüğü katlayan renkli sabunlar.</li>
+    <li>💥 Köpük bulunduğu yapıyı doldurunca <b>patlatır</b> ve büyük ödül kazanırsın. Sıradaki yapı daha büyük!</li>
+    <li>✨ Etrafta beliren <b>altın baloncukların</b> içinden yürü: bol para!</li>
+    <li>🔁 Şehri patlattıktan sonra <b>Yeniden Köpür</b>: her şey sıfırlanır ama kalıcı köpük çarpanı kazanırsın.</li>
+  </ol>
+  <p class="muted">Klavye: tıkla / Space pompala · WASD yürü · fareyle sürükle: kamera · tekerlek: yakınlaş · U yükseltmeler.<br>Dokunmatik: 🫧 düğmesine basılı tut · sol yarı joystick · sağ yarı sürükle.</p>
+  <div class="rowb"><button class="btn go" data-close>Köpürtelim!</button></div>
+</div></div>
+<div id="ovUp" class="overlay"><div class="card">
+  <h1>🛠️ Yükseltmeler</h1>
+  <div class="muted" id="upMoney"></div>
+  <div id="upList"></div>
+  <h2>🧼 Sabunlar <span class="muted" style="font-weight:400">· köpüğü katlar, rengini değiştirir</span></h2>
+  <div id="soapList"></div>
+  <div class="rowb"><button class="btn" data-close>Kapat</button></div>
+</div></div>
+<div id="ovReb" class="overlay"><div class="card">
+  <h1>🔁 Yeniden Köpür</h1>
+  <div id="rebInfo"></div>
+  <div class="rowb"><button class="btn pink" id="btnReb">🔁 Yeniden köpür</button><button class="btn" data-close>Vazgeç</button></div>
+</div></div>
+<div id="ovShop" class="overlay"><div class="card">
+  <h1>R$ Robux Mağazası</h1>
+  <div style="font-weight:700;color:#b07800" id="shopJeton"></div>
+  <div id="passList"></div>
+  <div class="muted" id="shopNote" style="margin-top:8px"></div>
+  <div class="rowb"><button class="btn" data-close>Kapat</button></div>
+</div></div>
+<div id="noWebgl">3D için WebGL gerekli; bu tarayıcıda açılamadı. Chrome / Edge ile açmayı dene.</div>
+
+<script>
+"use strict";
+// ================================================================ Yardımcılar
+const $ = id => document.getElementById(id);
+const rand = (a, b) => a + Math.random() * (b - a);
+const pick = l => l[Math.floor(Math.random() * l.length)];
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+// Büyük sayılar: 12.345 · 1,2 Mn · 3,4 Mr · 5,6 Tn
+function big(n) {
+  n = Math.floor(n);
+  if (n < 100000) return n.toLocaleString("tr-TR");
+  for (const [v, u] of [[1e18, "Kn"], [1e15, "Ka"], [1e12, "Tn"], [1e9, "Mr"], [1e6, "Mn"], [1e3, "Bin"]])
+    if (n >= v) return (n / v).toLocaleString("tr-TR", { maximumFractionDigits: n / v < 10 ? 2 : n / v < 100 ? 1 : 0 }) + " " + u;
+  return String(n);
+}
+function setText(el, t) { if (el._t !== t) { el._t = t; el.textContent = t; } }
+function notify(msg) {
+  const el = document.createElement("div");
+  el.className = "toast"; el.textContent = msg;
+  $("toasts").appendChild(el);
+  setTimeout(() => el.remove(), 3000);
+  while ($("toasts").children.length > 3) $("toasts").firstChild.remove();
+}
+let popN = 0;
+function popText(txt, x, y, color = "#fff") {
+  if (popN > 14) return;
+  const el = document.createElement("div");
+  el.className = "pop"; el.textContent = txt; el.style.left = x + "px"; el.style.top = y + "px"; el.style.color = color;
+  document.body.appendChild(el); popN++;
+  setTimeout(() => { el.remove(); popN--; }, 900);
+}
+function bigMsg(t, sub = "") {
+  const el = $("big");
+  el.innerHTML = esc(t) + (sub ? `<small>${esc(sub)}</small>` : "");
+  el.classList.remove("show"); void el.offsetWidth; el.classList.add("show");
+}
+
+// ================================================================ Config
+const R_PER_FOAM = 0.5;               // yarıçap = 0,5 × ∛köpük
+const foamForR = R => Math.pow(R / R_PER_FOAM, 3);
+// Yapılar: köpük yarıçapı R'ye ulaşınca yapı patlar
+const STAGES = [
+  { id: "banyo", name: "🛁 Banyo", R: 2.5, reward: 60 },
+  { id: "ev", name: "🏠 Ev", R: 5, reward: 600 },
+  { id: "apartman", name: "🏢 Apartman", R: 10, reward: 5000 },
+  { id: "mahalle", name: "🏘️ Mahalle", R: 22, reward: 60000 },
+  { id: "sehir", name: "🌆 Şehir", R: 45, reward: 600000 },
+  { id: "stadyum", name: "🏟️ Stadyum", R: 90, reward: 6e6 },
+  { id: "dag", name: "⛰️ Dağlar", R: 180, reward: 6e7 },
+  { id: "bulut", name: "☁️ Bulutlar", R: 400, reward: 8e8 },
+];
+const REBIRTH_STAGE = 5;              // Şehir patlayınca (stage >= 5) yeniden köpürülebilir
+// Uzay: son yapıdan sonra her hedef iki kat büyük
+function stageInfo(i) {
+  if (i < STAGES.length) return STAGES[i];
+  const k = i - STAGES.length + 1, R = STAGES[STAGES.length - 1].R * Math.pow(2, k);
+  return { id: "uzay", name: `🌌 Uzay ${k}`, R, reward: 8e8 * Math.pow(8, k) };
+}
+// Seviyeli yükseltmeler (fiyat = base × grow^seviye)
+const UPS = [
+  { id: "pump", name: "Pompa Gücü", icon: "💪", base: 10, grow: 1.45, desc: l => `Her pompa ${big(pumpPower(l))} köpük` },
+  { id: "machine", name: "Köpük Makinesi", icon: "⚙️", base: 40, grow: 1.5, desc: l => `Saniyede ${big(machineRate(l))} köpük, sen pompalamasan da` },
+  { id: "duck", name: "Lastik Ördek", icon: "🦆", base: 150, grow: 1.7, max: 25, desc: l => `${l} ördek saniyede ${l} kez senin yerine pompalar` },
+  { id: "magnet", name: "Baloncuk Mıknatısı", icon: "🧲", base: 250, grow: 2.2, max: 6, desc: l => `Altın baloncuklar ${(2.2 + l * 1.6).toFixed(1)} m'den toplanır, %${l * 25} daha değerli` },
+];
+const UP = Object.fromEntries(UPS.map(u => [u.id, u]));
+const pumpPower = l => (1 + l) * Math.pow(1.3, Math.floor(l / 5));
+const machineRate = l => l * 2 * Math.pow(1.3, Math.floor(l / 5));
+// Sabunlar: köpüğü katlar ve rengini değiştirir
+const SOAPS = [
+  { id: "normal", name: "Sade Sabun", mult: 1, price: 0, color: 0xf4fbff },
+  { id: "lavanta", name: "Lavanta", mult: 2, price: 500, color: 0xd8c4ff },
+  { id: "cilek", name: "Çilek", mult: 4, price: 6000, color: 0xffb8d2 },
+  { id: "nane", name: "Nane", mult: 8, price: 60000, color: 0xb8f5d6 },
+  { id: "gokkusagi", name: "Gökkuşağı", mult: 16, price: 700000, color: "rainbow" },
+  { id: "altin", name: "Altın", mult: 40, price: 9e6, color: 0xffe066 },
+  { id: "galaksi", name: "Galaksi", mult: 100, price: 1.5e8, color: "galaxy" },
+];
+const SOAP = Object.fromEntries(SOAPS.map(s => [s.id, s]));
+// Robux (Küp Evreni platform parası) ile alınanlar
+const PASSES = [
+  { id: "double", name: "2x Köpük", icon: "🫧", jeton: 150, desc: "Ürettiğin bütün köpük ve para 2 katı. Kalıcı." },
+  { id: "autopump", name: "Süper Pompa", icon: "🤖", jeton: 100, desc: "Saniyede 5 kez kendi kendine pompalar. Kalıcı." },
+  { id: "cashpack", name: "Para Yağmuru", icon: "⚡", jeton: 50, consumable: true, desc: "Anında 5 dakikalık üretimin kadar para (en az 💰 1.000). İstediğin kadar alabilirsin." },
+];
+const SKINS = ["#ffdbac", "#f1c27d", "#e0ac69", "#c68642", "#8d5524"];
+const FACES = ["smile", "grin", "wow", "cool"];
+
+// ================================================================ Kayıt
+const SAVE_KEY = "kopukPatlamasi";
+function freshSave() {
+  return { coins: 0, foam: 0, stage: 0, rebirths: 0, lv: {}, soap: "normal", soaps: { normal: true }, passes: {},
+    totalFoam: 0, bestStage: 0, pumps: 0, helpSeen: false, muted: false, giftIds: [] };
+}
+let save = freshSave();
+try {
+  const s = JSON.parse(localStorage.getItem(SAVE_KEY) || "null");
+  if (s && typeof s === "object") save = { ...save, ...s, lv: { ...(s.lv || {}) }, soaps: { normal: true, ...(s.soaps || {}) }, passes: { ...(s.passes || {}) },
+    giftIds: Array.isArray(s.giftIds) ? s.giftIds : [] };
+} catch (e) {}
+if (!SOAP[save.soap] || !save.soaps[save.soap]) save.soap = "normal";
+for (const k of ["coins", "foam", "stage", "rebirths", "totalFoam", "bestStage", "pumps"]) save[k] = Math.max(0, +save[k] || 0);
+let lastSave = 0;
+function persist(force) {
+  if (!force && performance.now() - lastSave < 4000) return;
+  lastSave = performance.now();
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) {}
+  reportStats();
+}
+
+// ================================================================ Türetilmiş değerler
+const lv = id => (save.lv && save.lv[id]) || 0;
+const upCost = u => Math.round(u.base * Math.pow(u.grow, lv(u.id)));
+const rebirthMult = () => 1 + save.rebirths;
+const foamMult = () => SOAP[save.soap].mult * rebirthMult() * (save.passes.double ? 2 : 1);
+const clickFoam = () => pumpPower(lv("pump")) * foamMult();
+const autoClicks = () => lv("duck") + (save.passes.autopump ? 5 : 0);
+const perSecond = () => machineRate(lv("machine")) * foamMult() + autoClicks() * clickFoam();
+const foamR = () => Math.max(0.35, R_PER_FOAM * Math.cbrt(save.foam));
+const rebirthNext = () => save.rebirths + 2;
+
+// ================================================================ Küp Evreni köprüsü
+const platform = { inside: window.parent !== window, profile: null, reqs: {} };
+const playerName = () => (platform.profile && platform.profile.name) || "";
+function reportStats() {
+  if (!platform.inside) return;
+  parent.postMessage({ type: "kup:stats", stats: { "🫧 Köpük": big(save.foam), "💥 Patlatılan en büyük yapı": save.bestStage ? stageInfo(save.bestStage - 1).name : "—",
+    "🔁 Yeniden köpürme": save.rebirths, "💰 Para": big(save.coins), "🫧 Toplam köpük": big(save.totalFoam), "👆 Pompa": big(save.pumps) } }, "*");
+}
+function requestPurchase(item, done) {
+  if (!platform.inside) { notify("Robux ile almak için oyunu Küp Evreni'nden aç (ana klasördeki index.html)"); return; }
+  const reqId = Math.random().toString(36).slice(2);
+  platform.reqs[reqId] = done;
+  parent.postMessage({ type: "kup:purchase", reqId, id: item.id, name: item.name, price: item.jeton, icon: item.icon }, "*");
+}
+addEventListener("message", e => {
+  if (!platform.inside || e.source !== parent) return;
+  const m = e.data || {};
+  if (m.type === "kup:profile") { platform.profile = m; rebuildAvatar(); rerenderOpen(); }
+  else if (m.type === "kup:purchaseResult") {
+    if (platform.profile) platform.profile.jeton = m.jeton;
+    const done = platform.reqs[m.reqId]; delete platform.reqs[m.reqId];
+    if (done) done(!!m.ok);
+    rerenderOpen();
+  }
+  else if (m.type === "kup:gift") receiveGifts(m.gifts);
+});
+if (platform.inside) parent.postMessage({ type: "kup:ready" }, "*");
+
+// ================================================================ Küp Evreni hediyeleri (admin panelinden)
+function applyGiftItem(key, n) {
+  if (key === "money") { save.coins = Math.min(1e30, save.coins + Math.min(n, 1e15)); return true; }
+  const [kind, id] = key.split(":");
+  if (kind === "lv") { if (!UP[id]) return false; const u = UP[id]; save.lv[id] = Math.min(u.max || 1e9, lv(id) + Math.max(1, n | 0)); syncDucks(); return true; }
+  if (kind === "soap") { if (!SOAP[id] || save.soaps[id]) return false; save.soaps[id] = true; return true; }
+  if (kind === "pass") {
+    const p = PASSES.find(x => x.id === id && !x.consumable);
+    if (!p || save.passes[id]) return false;
+    save.passes[id] = true; return true;
+  }
+  return false;
+}
+function receiveGifts(gifts) {
+  save.giftIds = save.giftIds || [];
+  let any = false;
+  const acks = [];
+  for (const g of Array.isArray(gifts) ? gifts : []) {
+    if (!g || !g.gid) continue;
+    const skipped = [];
+    if (!save.giftIds.includes(g.gid)) {
+      for (const it of g.items || []) {
+        const n = Math.max(1, Math.floor(Number(it.n) || 1));
+        if (applyGiftItem(String(it.key), n)) any = true; else skipped.push(String(it.key));
+      }
+      save.giftIds = [g.gid, ...save.giftIds].slice(0, 200);
+    }
+    acks.push({ type: "kup:giftAck", gid: g.gid, skipped });
+  }
+  persist(true);
+  if (platform.inside) for (const a of acks) parent.postMessage(a, "*");
+  if (any) { SFX.cash(); notify("🎁 Hediye alındı!"); rerenderOpen(); }
+}
+
+// ================================================================ Ses (WebAudio ile sentezlenir)
+const A = { ctx: null };
+function initAudio() {
+  if (A.ctx) { if (A.ctx.state === "suspended") A.ctx.resume(); return; }
+  try { A.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return; }
+  A.master = A.ctx.createGain(); A.master.gain.value = save.muted ? 0 : 0.5; A.master.connect(A.ctx.destination);
+  A.noise = A.ctx.createBuffer(1, A.ctx.sampleRate, A.ctx.sampleRate);
+  const d = A.noise.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+}
+const audioOn = () => A.ctx && A.ctx.state === "running";
+function tone(freq, dur, type = "sine", gain = 0.1, freqEnd, delay = 0) {
+  if (!audioOn()) return;
+  const t0 = A.ctx.currentTime + delay, o = A.ctx.createOscillator(), g = A.ctx.createGain();
+  o.type = type; o.frequency.setValueAtTime(freq, t0);
+  if (freqEnd) o.frequency.exponentialRampToValueAtTime(freqEnd, t0 + dur);
+  g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(gain, t0 + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  o.connect(g).connect(A.master); o.start(t0); o.stop(t0 + dur + 0.05);
+}
+function noise(dur, gain, freq, type = "lowpass", delay = 0) {
+  if (!audioOn()) return;
+  const t0 = A.ctx.currentTime + delay, s = A.ctx.createBufferSource(), f = A.ctx.createBiquadFilter(), g = A.ctx.createGain();
+  s.buffer = A.noise; f.type = type; f.frequency.value = freq;
+  g.gain.setValueAtTime(gain, t0); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  s.connect(f).connect(g).connect(A.master); s.start(t0, Math.random() * 0.5); s.stop(t0 + dur + 0.05);
+}
+let lastBloop = 0;
+const SFX = {
+  bloop: () => { const t = performance.now(); if (t - lastBloop < 60) return; lastBloop = t; const f = rand(260, 420); tone(f, 0.12, "sine", 0.09, f * 2.2); },
+  gold: () => [880, 1175, 1568].forEach((f, i) => tone(f, 0.14, "triangle", 0.08, undefined, i * 0.06)),
+  cash: () => { [1318, 1760].forEach((f, i) => tone(f, 0.12, "square", 0.04, undefined, i * 0.07)); },
+  boom: () => { noise(1.4, 0.7, 500); tone(70, 1.0, "sine", 0.3, 30); noise(0.8, 0.35, 2500, "bandpass", 0.1); [523, 659, 784, 1046].forEach((f, i) => tone(f, 0.3, "triangle", 0.07, undefined, 0.4 + i * 0.1)); },
+  click: () => tone(620, 0.05, "square", 0.03),
+  bad: () => tone(200, 0.2, "sawtooth", 0.05, 140),
+};
+
+// ================================================================ 3D sahne
+const canvas = $("game");
+let renderer;
+try { renderer = new THREE.WebGLRenderer({ canvas, antialias: true }); }
+catch (e) { $("noWebgl").style.display = "flex"; throw e; }
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const scene = new THREE.Scene();
+const SKY = new THREE.Color(0x9fd8ff), SPACE = new THREE.Color(0x0b0a24);
+scene.background = SKY.clone();
+scene.fog = new THREE.Fog(0x9fd8ff, 60, 300);
+const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 40000);
+const hemi = new THREE.HemisphereLight(0xffffff, 0x6c9b4e, 0.75); scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xfff4dd, 0.8);
+sun.castShadow = true; sun.shadow.mapSize.set(1024, 1024);
+scene.add(sun); scene.add(sun.target);
+const lambert = (color, extra = {}) => new THREE.MeshLambertMaterial({ color, ...extra });
+function mesh(geo, mat, x = 0, y = 0, z = 0, parent = scene, shadow = true) {
+  const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = shadow; m.receiveShadow = true; parent.add(m); return m;
+}
+function canvasTex(w, h, draw, rx = 1, ry = 1) {
+  const c = document.createElement("canvas"); c.width = w; c.height = h; draw(c.getContext("2d"), w, h);
+  const t = new THREE.CanvasTexture(c); t.anisotropy = 4;
+  if (rx !== 1 || ry !== 1) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(rx, ry); }
+  return t;
+}
+// Zemin (çok geniş) ve yıldızlar
+const grassTex = canvasTex(256, 256, (g, w, h) => {
+  g.fillStyle = "#7cc45a"; g.fillRect(0, 0, w, h);
+  for (let i = 0; i < 900; i++) { g.fillStyle = Math.random() < 0.5 ? "#71b950" : "#88d065"; g.fillRect(Math.random() * w, Math.random() * h, 3, 6); }
+}, 800, 800);
+const ground = mesh(new THREE.PlaneGeometry(8000, 8000), new THREE.MeshLambertMaterial({ map: grassTex }), 0, 0, 0, scene, false);
+ground.rotation.x = -Math.PI / 2;
+const stars = (() => {
+  const g = new THREE.BufferGeometry(), n = 1500, p = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) { const a = Math.random() * Math.PI * 2, b = Math.acos(rand(-0.2, 1)), r = 15000; p[i * 3] = Math.cos(a) * Math.sin(b) * r; p[i * 3 + 1] = Math.cos(b) * r; p[i * 3 + 2] = Math.sin(a) * Math.sin(b) * r; }
+  g.setAttribute("position", new THREE.BufferAttribute(p, 3));
+  const s = new THREE.Points(g, new THREE.PointsMaterial({ color: 0xffffff, size: 40, sizeAttenuation: true, transparent: true, opacity: 0, fog: false }));
+  scene.add(s); return s;
+})();
+
+// ================================================================ Köpük
+const foamGroup = new THREE.Group(); scene.add(foamGroup);
+const foamMat = new THREE.MeshLambertMaterial({ color: 0xf4fbff, emissive: 0x223344 });
+const foamBalls = [];
+(() => {
+  const sphere = new THREE.SphereGeometry(1, 18, 14);
+  mesh(sphere, foamMat, 0, 0, 0, foamGroup).scale.setScalar(0.92);
+  for (let i = 0; i < 46; i++) {
+    const u = rand(-1, 1), a = rand(0, Math.PI * 2), r = Math.sqrt(1 - u * u);
+    const dir = new THREE.Vector3(Math.cos(a) * r, Math.abs(u) * 0.95 + 0.05, Math.sin(a) * r).normalize();
+    const m = mesh(sphere, foamMat, 0, 0, 0, foamGroup);
+    const s = rand(0.28, 0.5);
+    m.scale.setScalar(s); m.position.copy(dir.clone().multiplyScalar(0.82));
+    foamBalls.push({ m, dir, s, ph: rand(0, 7) });
+  }
+})();
+let foamPulse = 0, shownR = 0.35;
+function soapColor(t) {
+  const c = SOAP[save.soap].color;
+  if (c === "rainbow") return new THREE.Color().setHSL((t * 0.08) % 1, 0.75, 0.82);
+  if (c === "galaxy") return new THREE.Color().setHSL(0.72 + Math.sin(t * 0.5) * 0.08, 0.7, 0.55);
+  return new THREE.Color(c);
+}
+// Yükselen baloncuklar
+const bubbleGeo = new THREE.SphereGeometry(1, 10, 8);
+const bubbleMat = new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.55 });
+const bubbles = [];
+function puffBubbles(n) {
+  const R = shownR;
+  for (let i = 0; i < n && bubbles.length < 60; i++) {
+    const a = rand(0, Math.PI * 2), u = rand(0.1, 1);
+    const m = mesh(bubbleGeo, bubbleMat, Math.cos(a) * R * Math.sqrt(1 - u * u), R * u + R * 0.1, Math.sin(a) * R * Math.sqrt(1 - u * u), scene, false);
+    const s = rand(0.06, 0.16) * Math.max(1, R * 0.4); m.scale.setScalar(s);
+    bubbles.push({ m, vy: rand(1, 2.5) * Math.max(1, R * 0.15), life: rand(1, 2) });
+  }
+}
+
+// ================================================================ Yapılar (patlayan binalar)
+let building = null;           // { group, parts: [mesh], R }
+const debris = [];
+function buildingFor(i) {
+  const st = stageInfo(i), R = st.R, g = new THREE.Group(); scene.add(g);
+  const parts = [];
+  const box = (w, h, d, mat, x, y, z, ry = 0) => { const m = mesh(new THREE.BoxGeometry(w, h, d), mat, x, y, z, g); m.rotation.y = ry; parts.push(m); return m; };
+  const ring = (n, fn) => { for (let k = 0; k < n; k++) { const a = k / n * Math.PI * 2 + 0.2; fn(Math.cos(a) * (R + 0.4), Math.sin(a) * (R + 0.4), a, k); } };
+  const wallTex = (bg, line, win) => canvasTex(128, 128, (c, w, h) => {
+    c.fillStyle = bg; c.fillRect(0, 0, w, h);
+    if (line) { c.strokeStyle = line; c.lineWidth = 3; for (let x = 0; x <= w; x += 32) { c.beginPath(); c.moveTo(x, 0); c.lineTo(x, h); c.stroke(); } for (let y = 0; y <= h; y += 32) { c.beginPath(); c.moveTo(0, y); c.lineTo(w, y); c.stroke(); } }
+    if (win) { c.fillStyle = win; for (let x = 16; x < w; x += 48) for (let y = 16; y < h; y += 48) c.fillRect(x, y, 22, 26); }
+  });
+  if (st.id === "banyo" || st.id === "ev" || st.id === "apartman") {
+    const H = st.id === "banyo" ? 3 : st.id === "ev" ? 6 : 18, S = R + 0.3, T = Math.max(0.25, R * 0.06);
+    const tex = st.id === "banyo" ? wallTex("#d9f2ff", "#b6dcef") : st.id === "ev" ? wallTex("#fff1e0", null, "#9fd3ff") : wallTex("#c9ced8", null, "#6fb5e8");
+    const mat = new THREE.MeshLambertMaterial({ map: tex });
+    // Ön duvar yok: kamera içeriyi görsün (yarım ev görünümü); onun yerine alçak duvar
+    box(2 * S, H, T, mat, 0, H / 2, -S);
+    box(T, H, 2 * S, mat, -S, H / 2, 0);
+    box(T, H, 2 * S, mat, S, H / 2, 0);
+    box(2 * S, H * 0.25, T, mat, 0, H * 0.125, S);
+    mesh(new THREE.BoxGeometry(2 * S, 0.06, 2 * S), lambert(st.id === "banyo" ? 0xe8f4fb : st.id === "ev" ? 0xc79a6b : 0x9aa3ad), 0, 0.03, 0, g, false);
+    if (st.id === "banyo") {
+      // küvet, lavabo, ayna
+      box(2.4, 0.7, 1.3, lambert(0xffffff), 0, 0.35, -0.2); box(0.6, 0.9, 0.5, lambert(0xffffff), -1.9, 0.45, -2.3); box(1, 0.8, 0.06, lambert(0xbfe8ff), -1.9, 1.7, -2.6);
+    } else if (st.id === "ev") {
+      // Çatı yok (kamera içeriyi görsün): üstte çatı kenarı şeridi + kapı
+      box(2 * S + 0.6, 0.5, T + 0.4, lambert(0xc0392b), 0, H + 0.25, -S); box(T + 0.4, 0.5, 2 * S + 0.6, lambert(0xc0392b), -S, H + 0.25, 0); box(T + 0.4, 0.5, 2 * S + 0.6, lambert(0xc0392b), S, H + 0.25, 0);
+      box(1.4, 2.4, 0.1, lambert(0x8b5a2b), S * 0.5, 1.2, -S + T);
+    } else {
+      for (const y of [H * 0.33, H * 0.66]) { box(2 * S + 0.4, 0.4, T + 0.3, lambert(0x6b7380), 0, y, -S); box(T + 0.3, 0.4, 2 * S + 0.4, lambert(0x6b7380), -S, y, 0); box(T + 0.3, 0.4, 2 * S + 0.4, lambert(0x6b7380), S, y, 0); }
+    }
+  } else if (st.id === "mahalle") {
+    const roofCols = [0xe76f51, 0x2a9d8f, 0x6d597a, 0xe9c46a, 0x457b9d, 0xbc6c25], wallCols = [0xfff1e6, 0xf8edeb, 0xe9f5db, 0xfefae0, 0xedf6f9];
+    ring(16, (x, z, a, k) => {
+      const w = rand(6, 8), h = rand(5, 7);
+      const b = box(w, h, w, lambert(wallCols[k % 5]), x, h / 2, z, -a);
+      const roof = mesh(new THREE.ConeGeometry(w * 0.78, 3, 4), lambert(roofCols[k % 6]), x, h + 1.5, z, g); roof.rotation.y = Math.PI / 4 - a; parts.push(roof);
+      void b;
+    });
+  } else if (st.id === "sehir") {
+    const tex = wallTex("#5c6b80", null, "#ffe59a"); tex.repeat.set(2, 6); tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    const mat = new THREE.MeshLambertMaterial({ map: tex });
+    ring(22, (x, z, a) => { const w = rand(9, 13), h = rand(35, 75); box(w, h, w, mat, x, h / 2, z, -a); });
+  } else if (st.id === "stadyum") {
+    const cols = [0xe63946, 0xf1faee, 0x1d3557];
+    ring(40, (x, z, a, k) => { const b = box(15, 30, 10, lambert(cols[k % 3]), x, 15, z, -a + Math.PI / 2); b.rotation.z = 0; });
+  } else if (st.id === "dag") {
+    ring(18, (x, z, a, k) => { const h = rand(120, 200); const m = mesh(new THREE.ConeGeometry(rand(45, 65), h, 7), lambert(k % 2 ? 0x6d7a5a : 0x7c8a66), x, h / 2, z, g); parts.push(m);
+      const cap = mesh(new THREE.ConeGeometry(18, 40, 7), lambert(0xffffff), x, h - 18, z, g); parts.push(cap); });
+  } else if (st.id === "bulut") {
+    ring(26, (x, z) => { for (let q = 0; q < 3; q++) { const m = mesh(new THREE.IcosahedronGeometry(rand(40, 70), 1), lambert(0xffffff, { transparent: true, opacity: 0.95 }), x + rand(-30, 30), R * 0.55 + rand(-30, 30), z + rand(-30, 30), g); parts.push(m); } });
+  } else {
+    // Uzay: gezegen halkası
+    ring(10, (x, z, a, k) => { const m = mesh(new THREE.SphereGeometry(R * 0.08, 16, 12), lambert([0xff9f6b, 0x6bc5ff, 0xc39bff, 0xffe06b][k % 4]), x, R * 0.5, z, g); parts.push(m); });
+  }
+  // Kameranın önüne geçen parça saydamlaşabilsin: her parça kendi malzemesini alır
+  for (const m of parts) { m.material = m.material.clone(); m.material.transparent = true; m.userData.fade = 1; }
+  return { group: g, parts, R };
+}
+function explodeBuilding() {
+  if (!building) return;
+  const R = building.R;
+  for (const m of building.parts) {
+    const wp = new THREE.Vector3(); m.getWorldPosition(wp);
+    const dir = new THREE.Vector3(wp.x, 0, wp.z).normalize();
+    if (!isFinite(dir.x)) dir.set(1, 0, 0);
+    building.group.remove(m); scene.add(m); m.position.copy(wp);
+    const sp = (6 + R * 0.6) * rand(0.7, 1.3);
+    debris.push({ m, vx: dir.x * sp, vy: sp * rand(0.6, 1.2), vz: dir.z * sp, rx: rand(-3, 3), rz: rand(-3, 3), life: 3.5, g: 9 + R * 0.4 });
+    // küçük parçalar
+    for (let k = 0; k < 4; k++) {
+      const c = mesh(new THREE.BoxGeometry(1, 1, 1), m.material, wp.x, wp.y, wp.z, scene, false);
+      c.scale.setScalar(rand(0.3, 0.8) * Math.max(1, R * 0.08));
+      debris.push({ m: c, vx: dir.x * sp * rand(0.5, 1.6) + rand(-3, 3), vy: sp * rand(0.4, 1.6), vz: dir.z * sp * rand(0.5, 1.6) + rand(-3, 3), rx: rand(-6, 6), rz: rand(-6, 6), life: rand(2, 3.5), g: 9 + R * 0.4 });
+    }
+  }
+  scene.remove(building.group);
+  building = null;
+}
+function updateDebris(dt) {
+  for (let i = debris.length - 1; i >= 0; i--) {
+    const d = debris[i];
+    d.life -= dt; d.vy -= d.g * dt;
+    d.m.position.x += d.vx * dt; d.m.position.y += d.vy * dt; d.m.position.z += d.vz * dt;
+    d.m.rotation.x += d.rx * dt; d.m.rotation.z += d.rz * dt;
+    if (d.m.position.y < 0) { d.m.position.y = 0; d.vy *= -0.3; d.vx *= 0.6; d.vz *= 0.6; }
+    if (d.life < 0.6) d.m.scale.multiplyScalar(Math.pow(0.02, dt / 0.6));
+    if (d.life <= 0) { scene.remove(d.m); debris.splice(i, 1); }
+  }
+}
+function setupStage() {
+  if (building) { scene.remove(building.group); building = null; }
+  building = buildingFor(save.stage);
+  const R = building.R, s = Math.max(20, R * 3);
+  Object.assign(sun.shadow.camera, { left: -s, right: s, top: s, bottom: -s, near: 1, far: s * 5 });
+  sun.shadow.camera.updateProjectionMatrix();
+  sun.position.set(s * 0.6, s * 1.6, s * 0.4);
+}
+
+// ================================================================ Avatar (platformdan)
+function drawFace(kind) {
+  const c = document.createElement("canvas"); c.width = c.height = 128;
+  const x = c.getContext("2d");
+  x.fillStyle = "#1b1b1b"; x.strokeStyle = "#1b1b1b"; x.lineWidth = 7; x.lineCap = "round";
+  if (kind === "cool") { x.fillRect(22, 40, 36, 18); x.fillRect(70, 40, 36, 18); x.fillRect(56, 44, 16, 5); }
+  else { x.beginPath(); x.ellipse(44, 50, 7, kind === "wow" ? 12 : 10, 0, 0, 7); x.ellipse(84, 50, 7, kind === "wow" ? 12 : 10, 0, 0, 7); x.fill(); }
+  x.beginPath();
+  if (kind === "wow") { x.ellipse(64, 92, 10, 13, 0, 0, 7); x.fill(); }
+  else if (kind === "grin") { x.moveTo(36, 82); x.quadraticCurveTo(64, 116, 92, 82); x.closePath(); x.fill(); }
+  else { x.arc(64, 74, 26, 0.25 * Math.PI, 0.75 * Math.PI); x.stroke(); }
+  return c;
+}
+const faceTex = {};
+function buildAvatar(a) {
+  const g = new THREE.Group(), inner = new THREE.Group();
+  g.add(inner); inner.scale.setScalar(0.36);
+  const part = (w, h, d, c, x, y, z) => mesh(new THREE.BoxGeometry(w, h, d), lambert(c), x, y, z, inner);
+  const legs = [part(0.9, 2, 1, a.pants, -0.5, 1, 0), part(0.9, 2, 1, a.pants, 0.5, 1, 0)];
+  legs.forEach(l => { l.geometry.translate(0, -1, 0); l.position.y = 2; });
+  part(2, 2, 1, a.shirt, 0, 3, 0);
+  const arms = [part(0.9, 2, 1, a.skin, -1.45, 3, 0), part(0.9, 2, 1, a.skin, 1.45, 3, 0)];
+  arms.forEach(l => { l.geometry.translate(0, -0.8, 0); l.position.y = 3.8; });
+  mesh(new THREE.CylinderGeometry(0.62, 0.62, 1.2, 16), lambert(a.skin), 0, 4.6, 0, inner);
+  const face = FACES.includes(a.face) ? a.face : "smile";
+  if (!faceTex[face]) faceTex[face] = new THREE.CanvasTexture(drawFace(face));
+  mesh(new THREE.PlaneGeometry(0.9, 0.9), new THREE.MeshBasicMaterial({ map: faceTex[face], transparent: true }), 0, 4.6, 0.63, inner, false);
+  const hc = a.hatColor || "#e63946";
+  if (a.hat === "cap") { mesh(new THREE.CylinderGeometry(0.66, 0.66, 0.35, 16), lambert(hc), 0, 5.3, 0, inner); part(1.1, 0.08, 0.6, hc, 0, 5.15, 0.75); }
+  else if (a.hat === "crown") {
+    mesh(new THREE.CylinderGeometry(0.6, 0.55, 0.4, 8, 1, true), lambert(a.crownColor || "#ffd166", { side: THREE.DoubleSide }), 0, 5.4, 0, inner);
+    for (let i = 0; i < 6; i++) { const an = i / 6 * Math.PI * 2; mesh(new THREE.ConeGeometry(0.1, 0.3, 4), lambert(a.crownColor || "#ffd166"), Math.cos(an) * 0.55, 5.7, Math.sin(an) * 0.55, inner); }
+  } else if (a.hat === "headphones") {
+    mesh(new THREE.TorusGeometry(0.7, 0.07, 8, 20, Math.PI), lambert(hc), 0, 4.75, 0, inner);
+    part(0.25, 0.5, 0.5, hc, -0.7, 4.6, 0); part(0.25, 0.5, 0.5, hc, 0.7, 4.6, 0);
+  } else if (a.hat === "helmet") mesh(new THREE.SphereGeometry(0.95, 20, 14), lambert("#cfe8ff", { transparent: true, opacity: 0.35, depthWrite: false }), 0, 4.65, 0, inner, false);
+  return { group: g, legs, arms };
+}
+const DEFAULT_AVATAR = { skin: "#e0ac69", shirt: "#3aa6e8", pants: "#2b2d42", hat: "cap", hatColor: "#ff5fa2", face: "grin" };
+const pl = { x: 2, z: 3.2, face: Math.PI, moving: false, walk: 0, pumpT: 0, group: null, parts: null };
+function rebuildAvatar() {
+  if (pl.group) scene.remove(pl.group);
+  const b = buildAvatar((platform.profile && platform.profile.avatar) || DEFAULT_AVATAR);
+  pl.group = b.group; pl.parts = b; scene.add(pl.group);
+}
+// Lastik ördekler (köpüğün üstünde yüzer)
+const ducks = [];
+const duckMat = lambert(0xffd23f), beakMat = lambert(0xff8c1a);
+function syncDucks() {
+  const want = Math.min(12, lv("duck"));
+  while (ducks.length < want) {
+    const g = new THREE.Group();
+    mesh(new THREE.SphereGeometry(0.35, 12, 10), duckMat, 0, 0.3, 0, g).scale.set(1, 0.8, 1.2);
+    mesh(new THREE.SphereGeometry(0.22, 12, 10), duckMat, 0, 0.65, 0.25, g);
+    mesh(new THREE.ConeGeometry(0.08, 0.2, 8), beakMat, 0, 0.62, 0.48, g).rotation.x = Math.PI / 2;
+    scene.add(g); ducks.push({ g, a: rand(0, Math.PI * 2), b: rand(0.3, 1.1), sp: rand(0.2, 0.5) });
+  }
+  while (ducks.length > want) scene.remove(ducks.pop().g);
+}
+
+// ================================================================ Altın baloncuklar
+const goldMat = new THREE.MeshLambertMaterial({ color: 0xffd23f, emissive: 0x6b4c00, transparent: true, opacity: 0.9 });
+const golds = [];
+let goldT = 3;
+const goldRadius = () => 2.2 + lv("magnet") * 1.6;
+const goldValue = () => Math.max(15, perSecond() * 12 + clickFoam() * 15) * (1 + 0.25 * lv("magnet"));
+function spawnGold() {
+  if (golds.length >= 4) return;
+  const R = foamR(), a = rand(0, Math.PI * 2), d = R + rand(2.5, 6 + R * 0.5);
+  const s = Math.max(0.45, R * 0.06);
+  const m = mesh(bubbleGeo, goldMat, Math.cos(a) * d, s + 0.4, Math.sin(a) * d, scene, false); m.scale.setScalar(s);
+  golds.push({ m, life: 14, s, ph: rand(0, 7) });
+}
+
+// ================================================================ Pompala
+function pump(n = 1, manual = true) {
+  const f = clickFoam() * n;
+  addFoam(f);
+  if (manual) {
+    save.pumps += n; pl.pumpT = 0.18; foamPulse = Math.min(1, foamPulse + 0.35);
+    SFX.bloop(); puffBubbles(2);
+  }
+  return f;
+}
+function addFoam(f) {
+  save.foam += f; save.totalFoam += f; save.coins += f;
+  // Yapı doldu mu?
+  while (foamR() >= stageInfo(save.stage).R) stageCleared();
+}
+function stageCleared() {
+  const st = stageInfo(save.stage), reward = st.reward * rebirthMult() * (save.passes.double ? 2 : 1);
+  save.coins += reward;
+  explodeBuilding();
+  save.stage++;
+  save.bestStage = Math.max(save.bestStage, save.stage);
+  SFX.boom();
+  shake = 1;
+  bigMsg(`💥 ${st.name} PATLADI!`, `+💰${big(reward)} · sıradaki: ${stageInfo(save.stage).name}`);
+  setupStage();
+  if (save.stage === REBIRTH_STAGE && save.rebirths === 0) setTimeout(() => notify("🔁 Artık Yeniden Köpürebilirsin: kalıcı köpük çarpanı!"), 3200);
+  persist(true);
+}
+
+// ================================================================ Yükseltmeler, sabunlar, yeniden köpürme
+const overlays = ["ovHelp", "ovUp", "ovReb", "ovShop"];
+const anyOverlay = () => overlays.some(id => $(id).classList.contains("show"));
+function show(id) { $(id).classList.add("show"); renderOpen(id); }
+function hide(id) { $(id).classList.remove("show"); }
+function renderOpen(id) { if (id === "ovUp") renderUp(); else if (id === "ovReb") renderReb(); else if (id === "ovShop") renderShop(); }
+function rerenderOpen() { for (const id of overlays) if ($(id).classList.contains("show")) renderOpen(id); }
+document.querySelectorAll("[data-close]").forEach(b => b.addEventListener("click", () => {
+  const ov = b.closest(".overlay"); hide(ov.id); SFX.click();
+  if (ov.id === "ovHelp" && !save.helpSeen) { save.helpSeen = true; persist(true); }
+}));
+function renderUp() {
+  $("upMoney").textContent = `💰 ${big(save.coins)} · her pompa 🫧 ${big(clickFoam())} · saniyede 🫧 ${big(perSecond())}`;
+  $("upList").innerHTML = UPS.map(u => {
+    const l = lv(u.id), max = u.max && l >= u.max, c = upCost(u);
+    return `<div class="up"><div class="ic">${u.icon}</div><div><b>${esc(u.name)}</b> <span class="lv">Sv. ${l}${u.max ? "/" + u.max : ""}</span>
+      <div class="muted">${esc(u.desc(l))}${max ? "" : ` → <b>${esc(u.desc(l + 1))}</b>`}</div></div>
+      ${max ? `<button class="btn" disabled>En üst</button>` : `<button class="btn go" data-up="${u.id}" ${save.coins < c ? "disabled" : ""}>💰 ${big(c)}</button>`}</div>`;
+  }).join("");
+  $("soapList").innerHTML = SOAPS.map(s => {
+    const own = save.soaps[s.id], sel = save.soap === s.id;
+    const dot = s.color === "rainbow" ? "background:linear-gradient(90deg,#ff7a7a,#ffd36b,#7af0a0,#7ac8ff,#c69bff)" : s.color === "galaxy" ? "background:radial-gradient(#c69bff,#2b1a5a)" : `background:#${new THREE.Color(s.color).getHexString()}`;
+    return `<div class="up"><div class="ic"><span class="soapdot" style="${dot};width:26px;height:26px"></span></div><div><b>${esc(s.name)}</b> <span class="lv">×${s.mult}</span>
+      <div class="muted">Köpük ${s.mult} katı</div></div>
+      ${sel ? `<button class="btn" disabled>✔ Kullanılıyor</button>` : own ? `<button class="btn go" data-soap="${s.id}">Kullan</button>`
+        : `<button class="btn gold" data-buysoap="${s.id}" ${save.coins < s.price ? "disabled" : ""}>💰 ${big(s.price)}</button>`}</div>`;
+  }).join("");
+  $("upList").querySelectorAll("[data-up]").forEach(b => b.onclick = () => buyUp(b.dataset.up));
+  $("soapList").querySelectorAll("[data-soap]").forEach(b => b.onclick = () => { save.soap = b.dataset.soap; SFX.click(); persist(true); renderUp(); });
+  $("soapList").querySelectorAll("[data-buysoap]").forEach(b => b.onclick = () => {
+    const s = SOAP[b.dataset.buysoap];
+    if (save.coins < s.price || save.soaps[s.id]) return;
+    save.coins -= s.price; save.soaps[s.id] = true; save.soap = s.id;
+    SFX.cash(); notify(`🧼 ${s.name} sabunu: köpük ×${s.mult}!`); persist(true); renderUp();
+  });
+}
+function buyUp(id) {
+  const u = UP[id], c = upCost(u);
+  if (save.coins < c || (u.max && lv(id) >= u.max)) return;
+  save.coins -= c; save.lv[id] = lv(id) + 1;
+  if (id === "duck") syncDucks();
+  SFX.cash(); persist(); renderUp();
+}
+function renderReb() {
+  const ok = save.stage >= REBIRTH_STAGE;
+  $("rebInfo").innerHTML = `<p>Şu anki çarpanın: <b>×${rebirthMult()}</b> · yeniden köpürünce: <b>×${rebirthNext()}</b> (bütün köpük ve yapı ödülleri).</p>
+    <p class="muted">Sıfırlananlar: köpük, para, yapılar, yükseltmeler. <b>Kalanlar</b>: sabunlar, Robux ürünleri, çarpan.</p>
+    ${ok ? `<p>✅ Hazırsın! ${esc(stageInfo(REBIRTH_STAGE - 1).name)} patladı.</p>` : `<p>🔒 Önce <b>${esc(stageInfo(REBIRTH_STAGE - 1).name)}</b>'i patlatman gerek. Şu an: ${esc(stageInfo(save.stage).name)}.</p>`}`;
+  $("btnReb").disabled = !ok;
+}
+$("btnReb").onclick = () => {
+  if (save.stage < REBIRTH_STAGE) return;
+  save.rebirths++;
+  Object.assign(save, { coins: 0, foam: 0, stage: 0, lv: {} });
+  syncDucks(); setupStage(); shownR = foamR();
+  for (const g of golds) scene.remove(g.m); golds.length = 0;
+  pl.x = 2; pl.z = 3.2;
+  hide("ovReb");
+  SFX.boom(); bigMsg(`🔁 Yeniden köpürdün!`, `Kalıcı çarpan ×${rebirthMult()}`);
+  persist(true);
+};
+function renderShop() {
+  const j = platform.profile ? platform.profile.jeton : null;
+  $("shopJeton").textContent = j == null ? "" : `Robux bakiyen: R$ ${j.toLocaleString("tr-TR")}`;
+  $("passList").innerHTML = PASSES.map(p => {
+    const own = !p.consumable && save.passes[p.id];
+    return `<div class="up"><div class="ic">${p.icon}</div><div><b>${esc(p.name)}</b><div class="muted">${esc(p.desc)}</div></div>
+      ${own ? `<button class="btn" disabled>✔ Sende</button>` : `<button class="btn go" data-pass="${p.id}">R$ ${p.jeton}</button>`}</div>`;
+  }).join("");
+  $("passList").querySelectorAll("[data-pass]").forEach(b => b.onclick = () => {
+    const p = PASSES.find(x => x.id === b.dataset.pass);
+    requestPurchase(p, ok => {
+      if (!ok) return;
+      if (p.consumable) { const add = Math.max(1000, perSecond() * 300); save.coins += add; notify(`⚡ +💰${big(add)}`); }
+      else { save.passes[p.id] = true; notify(`${p.icon} ${p.name} senin!`); }
+      SFX.cash(); persist(true); rerenderOpen();
+    });
+  });
+  $("shopNote").textContent = platform.inside ? "Satın alımı Küp Evreni onaylar; Robux bakiyenden düşer." : "Robux ile almak için oyunu Küp Evreni'nden aç.";
+}
+
+// ================================================================ Girdi
+const keys = new Set();
+const stick = { id: null, ox: 0, oy: 0, x: 0, y: 0 };
+const ptrs = new Map();
+const cam = { yaw: 0.6, pitch: 0.42, zoom: 1 };
+let holdPump = false, holdT = 0, spaceHeld = false;
+addEventListener("keydown", e => {
+  if (e.repeat) return;
+  keys.add(e.code);
+  if (e.code === "Space" || e.code.startsWith("Arrow")) e.preventDefault();
+  if (anyOverlay()) return;
+  initAudio();
+  if (e.code === "Space") { spaceHeld = true; doPumpAt(innerWidth / 2, innerHeight / 2); }
+  if (e.code === "KeyU") { SFX.click(); show("ovUp"); }
+});
+addEventListener("keyup", e => { keys.delete(e.code); if (e.code === "Space") spaceHeld = false; });
+addEventListener("blur", () => { keys.clear(); holdPump = false; spaceHeld = false; });
+function doPumpAt(x, y) {
+  const f = pump(1, true);
+  popText(`+🫧${big(f)}`, x + rand(-30, 30), y + rand(-20, 10));
+}
+canvas.addEventListener("pointerdown", e => {
+  initAudio();
+  if (anyOverlay()) return;
+  if (e.pointerType !== "mouse" && e.clientX < innerWidth * 0.42 && stick.id === null) {
+    stick.id = e.pointerId; stick.ox = e.clientX; stick.oy = e.clientY;
+    const el = $("stick"); el.style.left = e.clientX + "px"; el.style.top = e.clientY + "px"; el.style.display = "block";
+    return;
+  }
+  ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, moved: false });
+});
+addEventListener("pointermove", e => {
+  if (e.pointerId === stick.id) {
+    let dx = e.clientX - stick.ox, dy = e.clientY - stick.oy;
+    const L = Math.hypot(dx, dy), max = 50;
+    if (L > max) { dx *= max / L; dy *= max / L; }
+    stick.x = dx / max; stick.y = dy / max;
+    $("stick").firstChild.style.transform = `translate(${dx}px, ${dy}px)`;
+    return;
+  }
+  const p = ptrs.get(e.pointerId);
+  if (!p) return;
+  if (Math.hypot(e.clientX - p.sx, e.clientY - p.sy) > 8) p.moved = true;
+  if (p.moved) { cam.yaw -= (e.clientX - p.x) * 0.006; cam.pitch = clamp(cam.pitch + (e.clientY - p.y) * 0.004, 0.08, 1.2); }
+  p.x = e.clientX; p.y = e.clientY;
+});
+function endPtr(e) {
+  if (e.pointerId === stick.id) { stick.id = null; stick.x = stick.y = 0; $("stick").style.display = "none"; $("stick").firstChild.style.transform = ""; return; }
+  const p = ptrs.get(e.pointerId);
+  ptrs.delete(e.pointerId);
+  // Kısa dokunuş / tıklama = pompala
+  if (p && !p.moved && e.type === "pointerup" && !anyOverlay()) doPumpAt(e.clientX, e.clientY);
+}
+addEventListener("pointerup", endPtr);
+addEventListener("pointercancel", endPtr);
+addEventListener("wheel", e => { cam.zoom = clamp(cam.zoom * (e.deltaY > 0 ? 1.1 : 0.9), 0.5, 2.2); }, { passive: true });
+addEventListener("contextmenu", e => e.preventDefault());
+// Pompala düğmesi: basılı tutunca saniyede 7 kez
+$("pump").addEventListener("pointerdown", e => { e.preventDefault(); e.stopPropagation(); initAudio(); holdPump = true; holdT = 0; $("pump").classList.add("on"); const r = $("pump").getBoundingClientRect(); doPumpAt(r.left, r.top); });
+for (const ev of ["pointerup", "pointerleave", "pointercancel"]) $("pump").addEventListener(ev, () => { holdPump = false; $("pump").classList.remove("on"); });
+$("bUp").onclick = () => { SFX.click(); show("ovUp"); };
+$("bReb").onclick = () => { SFX.click(); show("ovReb"); };
+$("bShop").onclick = () => { SFX.click(); show("ovShop"); };
+$("bHelp").onclick = () => { SFX.click(); show("ovHelp"); };
+$("bMute").onclick = () => {
+  initAudio(); save.muted = !save.muted;
+  if (A.master) A.master.gain.value = save.muted ? 0 : 0.5;
+  $("bMute").textContent = save.muted ? "🔇" : "🔊"; persist(true);
+};
+document.addEventListener("visibilitychange", () => { if (document.hidden) persist(true); });
+
+// Dik telefonda yatay görüş daralmasın
+function fitFov(base) {
+  const a = innerWidth / innerHeight;
+  if (a >= 1) return base;
+  return Math.min(100, 2 * Math.atan(Math.tan(base * Math.PI / 360) / a) * 180 / Math.PI);
+}
+function resize() {
+  renderer.setPixelRatio(Math.min(1.5, devicePixelRatio || 1));
+  renderer.setSize(innerWidth, innerHeight, false);
+  camera.aspect = innerWidth / innerHeight; camera.fov = fitFov(55); camera.updateProjectionMatrix();
+}
+addEventListener("resize", resize);
+
+// ================================================================ Döngü
+let now = 0, last = performance.now(), autoAcc = 0, shake = 0, hudT = 0;
+function update(dt) {
+  now += dt;
+  if (!anyOverlay()) {
+    // Otomatik üretim: makine + ördekler + süper pompa
+    const machine = machineRate(lv("machine")) * foamMult() * dt;
+    if (machine > 0) addFoam(machine);
+    const ac = autoClicks();
+    if (ac > 0) { autoAcc += ac * dt; const n = Math.floor(autoAcc); if (n > 0) { autoAcc -= n; addFoam(clickFoam() * n); puffBubbles(1); } }
+    // Basılı tutunca pompa
+    if (holdPump || spaceHeld) { holdT += dt; while (holdT >= 1 / 7) { holdT -= 1 / 7; const r = $("pump").getBoundingClientRect(); doPumpAt(holdPump ? r.left : innerWidth / 2, holdPump ? r.top : innerHeight / 2); } }
+    updatePlayer(dt);
+    // Altın baloncuklar
+    goldT -= dt;
+    if (goldT <= 0) { goldT = rand(5, 9); spawnGold(); }
+    for (let i = golds.length - 1; i >= 0; i--) {
+      const g = golds[i];
+      g.life -= dt;
+      g.m.position.y = g.s + 0.4 + Math.sin(now * 2 + g.ph) * g.s * 0.3;
+      if (Math.hypot(g.m.position.x - pl.x, g.m.position.z - pl.z) < goldRadius() + g.s) {
+        const v = goldValue(); save.coins += v; SFX.gold(); notify(`✨ Altın baloncuk! +💰${big(v)}`);
+        scene.remove(g.m); golds.splice(i, 1); continue;
+      }
+      if (g.life <= 0) { scene.remove(g.m); golds.splice(i, 1); }
+    }
+  }
+  // Baloncuklar ve parçalar
+  for (let i = bubbles.length - 1; i >= 0; i--) {
+    const b = bubbles[i]; b.life -= dt; b.m.position.y += b.vy * dt;
+    if (b.life <= 0) { scene.remove(b.m); bubbles.splice(i, 1); }
+  }
+  updateDebris(dt);
+  persist();
+}
+function updatePlayer(dt) {
+  let f = 0, s = 0;
+  if (keys.has("KeyW") || keys.has("ArrowUp")) f += 1;
+  if (keys.has("KeyS") || keys.has("ArrowDown")) f -= 1;
+  if (keys.has("KeyD") || keys.has("ArrowRight")) s += 1;
+  if (keys.has("KeyA") || keys.has("ArrowLeft")) s -= 1;
+  if (stick.id !== null) { f = -stick.y; s = stick.x; }
+  const L = Math.hypot(f, s); if (L > 1) { f /= L; s /= L; }
+  const R = shownR, sp = 5 + R * 0.25;
+  // Kamera yönüne göre: ileri = kameranın baktığı yön
+  const fx = -Math.sin(cam.yaw), fz = -Math.cos(cam.yaw), rx = Math.cos(cam.yaw), rz = -Math.sin(cam.yaw);
+  const vx = (fx * f + rx * s) * sp, vz = (fz * f + rz * s) * sp;
+  pl.x += vx * dt; pl.z += vz * dt;
+  pl.moving = Math.hypot(vx, vz) > 0.3;
+  if (pl.moving) { pl.face = Math.atan2(vx, vz); pl.walk += dt * 9; }
+  // Köpük oyuncuyu dışarı iter; çok uzağa gitmesin
+  const d = Math.hypot(pl.x, pl.z) || 0.001, minD = R + 0.5, maxD = Math.max(9, R * 2.2 + 6);
+  if (d < minD) { pl.x *= minD / d; pl.z *= minD / d; }
+  if (d > maxD) { pl.x *= maxD / d; pl.z *= maxD / d; }
+  pl.pumpT = Math.max(0, pl.pumpT - dt);
+}
+function syncScene(dt) {
+  // Köpük boyutu yumuşakça büyür
+  const R = foamR();
+  shownR = lerp(shownR, R, Math.min(1, dt * 4));
+  foamPulse = Math.max(0, foamPulse - dt * 3);
+  const s = shownR * (1 + foamPulse * 0.06);
+  foamGroup.scale.set(s, s * 0.92, s);
+  foamGroup.position.y = shownR * 0.05;
+  for (const b of foamBalls) { const w = 1 + Math.sin(now * 2 + b.ph) * 0.05; b.m.scale.setScalar(b.s * w); }
+  foamMat.color.copy(soapColor(now));
+  foamMat.emissive.copy(foamMat.color).multiplyScalar(0.18);
+  // Ördekler köpüğün üstünde
+  ducks.forEach((dk, i) => { dk.a += dk.sp * dt; const u = dk.b; const ds = Math.max(1, shownR * 0.12);
+    dk.g.scale.setScalar(ds); dk.g.position.set(Math.cos(dk.a) * Math.cos(u) * s, Math.sin(u) * s * 0.92 + shownR * 0.05, Math.sin(dk.a) * Math.cos(u) * s);
+    dk.g.rotation.y = -dk.a; void i; });
+  for (const g of golds) g.m.rotation.y += dt;
+  // Oyuncu
+  if (pl.group) {
+    pl.group.position.set(pl.x, 0, pl.z);
+    pl.group.rotation.y = pl.moving ? pl.face : Math.atan2(-pl.x, -pl.z);
+    const sw = pl.moving ? Math.sin(pl.walk) * 0.7 : 0;
+    pl.parts.legs[0].rotation.x = sw; pl.parts.legs[1].rotation.x = -sw;
+    const pumpArm = pl.pumpT > 0 ? -1.4 + Math.sin(pl.pumpT * 30) * 0.4 : -sw;
+    pl.parts.arms[0].rotation.x = pumpArm; pl.parts.arms[1].rotation.x = pl.pumpT > 0 ? pumpArm : sw;
+  }
+  // Uzaya çıkınca gökyüzü kararır
+  const spaceK = clamp((save.stage - STAGES.length + 1) / 1, 0, 1);
+  scene.background.copy(SKY).lerp(SPACE, spaceK);
+  scene.fog.color.copy(scene.background);
+  stars.material.opacity = spaceK;
+  // Kamera: köpüğü ve oyuncuyu görecek kadar uzakta
+  const dist = (7 + shownR * 2.6) * cam.zoom;
+  shake = Math.max(0, shake - dt * 1.5);
+  const tx = pl.x * 0.35, ty = shownR * 0.6 + 0.8, tz = pl.z * 0.35;
+  const cx = tx + Math.sin(cam.yaw) * Math.cos(cam.pitch) * dist, cy = ty + Math.sin(cam.pitch) * dist, cz = tz + Math.cos(cam.yaw) * Math.cos(cam.pitch) * dist;
+  const sh = shake * shake * (0.4 + shownR * 0.05);
+  camera.position.set(cx + rand(-sh, sh), Math.max(1.2, cy + rand(-sh, sh)), cz + rand(-sh, sh));
+  camera.lookAt(tx, ty, tz);
+  scene.fog.near = dist * 1.6; scene.fog.far = dist * 7 + 200;
+  camera.far = Math.max(2000, dist * 40); camera.updateProjectionMatrix();
+  sun.target.position.set(0, 0, 0);
+  // Kamera ile köpük arasında kalan yapı parçaları yarı saydam olur
+  if (building) {
+    const cyaw = Math.atan2(camera.position.x, camera.position.z), cd = Math.hypot(camera.position.x, camera.position.z);
+    for (const m of building.parts) {
+      const px = m.position.x, pz = m.position.z, pd = Math.hypot(px, pz);
+      const front = pd > 0.5 && pd < cd && Math.abs(Math.atan2(Math.sin(Math.atan2(px, pz) - cyaw), Math.cos(Math.atan2(px, pz) - cyaw))) < 0.75;
+      const want = front ? 0.18 : 1;
+      m.userData.fade += (want - m.userData.fade) * Math.min(1, dt * 6);
+      m.material.opacity = m.userData.fade;
+      m.material.depthWrite = m.userData.fade > 0.9;
+      m.castShadow = m.userData.fade > 0.5;
+    }
+  }
+}
+function updateHud(dt) {
+  hudT -= dt;
+  if (hudT > 0) return;
+  hudT = 0.1;
+  setText($("coins"), "💰 " + big(save.coins));
+  setText($("foam"), "🫧 " + big(save.foam) + " köpük");
+  setText($("rate"), `👆 ${big(clickFoam())} / pompa · ⚙️ ${big(perSecond())} / sn${save.rebirths ? ` · 🔁 ×${rebirthMult()}` : ""}`);
+  const st = stageInfo(save.stage), prev = save.stage > 0 ? stageInfo(save.stage - 1).R : 0;
+  const need = foamForR(st.R), have = save.foam, prevF = foamForR(prev);
+  const p = clamp((have - prevF) / Math.max(1, need - prevF), 0, 1);
+  setText($("stageName"), `${st.name}`);
+  $("progFill").style.width = (p * 100).toFixed(1) + "%";
+  setText($("progTxt"), `Patlamasına %${Math.floor(p * 100)} · 🫧 ${big(Math.max(0, need - have))} kaldı`);
+  $("bReb").style.display = save.stage >= REBIRTH_STAGE || save.rebirths > 0 ? "" : "none";
+}
+function frame(t) {
+  const dt = Math.min(0.1, (t - last) / 1000);
+  last = t;
+  update(dt);
+  syncScene(dt);
+  updateHud(dt);
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+window.step = sec => { for (let t = 0; t < sec; t += 1 / 30) { update(1 / 30); syncScene(1 / 30); } hudT = 0; updateHud(0); renderer.render(scene, camera); };
+
+// ================================================================ Başlat
+rebuildAvatar();
+setupStage();
+syncDucks();
+shownR = foamR();
+if (save.helpSeen) hide("ovHelp");
+$("bMute").textContent = save.muted ? "🔇" : "🔊";
+resize();
+setInterval(() => persist(true), 10000);
+requestAnimationFrame(frame);
+</script>
+<div id="rotateHint" style="display:none;position:fixed;left:50%;top:30%;transform:translate(-50%,-50%);z-index:99;max-width:80vw;padding:12px 16px;border-radius:14px;background:rgba(0,0,0,0.78);color:#fff;font:600 15px system-ui,sans-serif;text-align:center;pointer-events:auto">📱↻ Daha geniş görmek için telefonu yan çevir<br><small style="opacity:.7">(kapatmak için dokun)</small></div>
+<script>
+// Dik tutulan telefonda bir kez "yan çevir" ipucu
+(() => {
+  const el = document.getElementById("rotateHint");
+  if (!matchMedia("(pointer: coarse)").matches) return;
+  let closed = false;
+  const upd = () => { el.style.display = !closed && innerWidth < innerHeight ? "block" : "none"; };
+  el.addEventListener("pointerdown", e => { e.stopPropagation(); closed = true; upd(); });
+  setTimeout(() => { closed = true; upd(); }, 8000);
+  addEventListener("resize", upd); upd();
+})();
+</script>
+</body>
+</html>

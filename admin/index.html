@@ -343,6 +343,7 @@ const GAMES = [
   { id: "kasaba", title: "Kasaba Hayatı RP", icon: "🏘️", saveKey: "kasabaHayati", bg: "linear-gradient(135deg,#3a86ff,#8ce99a)" },
   { id: "limonata", title: "Limonata Standı", icon: "🍋", saveKey: "limonataStandi", bg: "linear-gradient(135deg,#ffe259,#ffa751)" },
   { id: "arena", title: "Küp Arena", icon: "🔫", saveKey: "kupArena", bg: "linear-gradient(135deg,#1f2430,#e85d04)" },
+  { id: "kopuk", title: "Daha Fazla Köpük!", icon: "🫧", saveKey: "kopukPatlamasi", bg: "linear-gradient(135deg,#3aa6e8,#d8f3ff)" },
 ];
 const BADGES = [
   { id: "welcome", icon: "👋", name: "Hoş geldin" }, { id: "firstGame", icon: "🎮", name: "İlk oyun" },
@@ -1132,6 +1133,15 @@ const GIFT_CATALOG = {
         ["m700", "🎯 Remington 700 (keskin nişancı)"], ["barrett", "🎯 Barrett M82 (keskin nişancı)"], ["m249", "🔥 M249"]] } },
     { key: "pass:double", name: "2x Para (kalıcı)", icon: "💰", kind: "once", own: "passes.double" },
     { key: "pass:gold", name: "Altın Silahlar (kalıcı)", icon: "✨", kind: "once", own: "passes.gold" },
+  ],
+  kopuk: [
+    { key: "money", name: "Para", icon: "💰", kind: "amount", def: 10000, max: 1000000000000000 },
+    { key: "lv:{id}", name: "Yükseltme (seviye)", icon: "🛠️", kind: "count", def: 1, max: 100, own: "lv.{id}", paramNames: { id: "Yükseltme" },
+      params: { id: [["pump", "💪 Pompa Gücü"], ["machine", "⚙️ Köpük Makinesi"], ["duck", "🦆 Lastik Ördek (en çok 25)"], ["magnet", "🧲 Baloncuk Mıknatısı (en çok 6)"]] } },
+    { key: "soap:{id}", name: "Sabun", icon: "🧼", kind: "once", own: "soaps.{id}", paramNames: { id: "Sabun" },
+      params: { id: [["lavanta", "💜 Lavanta ×2"], ["cilek", "🍓 Çilek ×4"], ["nane", "🌿 Nane ×8"], ["gokkusagi", "🌈 Gökkuşağı ×16"], ["altin", "✨ Altın ×40"], ["galaksi", "🌌 Galaksi ×100"]] } },
+    { key: "pass:double", name: "2x Köpük (kalıcı)", icon: "🫧", kind: "once", own: "passes.double" },
+    { key: "pass:autopump", name: "Süper Pompa (kalıcı)", icon: "🤖", kind: "once", own: "passes.autopump" },
   ],
 };
 const giftStore = () => { const g = load(GIFT_KEY, {}) || {}; return { pending: g.pending || [], done: g.done || [] }; };
