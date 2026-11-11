@@ -1,0 +1,1442 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Küp Yarışı</title>
+<!--
+  Küp Yarışı: 3. şahıs araba yarışı. 5 bota karşı 3 tur (LAPS), 3 pist (TRACKS), 5 araba (CARS), 4 yükseltme (UPGRADES).
+  Küp Evreni platformunda çalışır (tek başına da açılır). Kayıt anahtarı: kupYarisi.
+  Pist = kapalı eğri (kontrol noktaları → 2 m aralıklı örnekler). Yol yarı genişliği HW, bariyer WALL_OFF. Çim yavaşlatır, bariyer sektirir.
+  Fizik (stepCar): ileri hız + yana kayma; drift yana tutunmayı azaltır, dönüşü artırır ve nitro doldurur.
+  Kontroller: W/↑ gaz · S/↓ fren-geri · A/D ya da ←/→ direksiyon · Space drift · Shift / N nitro · R piste dön · P / Esc duraklat · M ses
+  Dokunmatik: ◀ ▶ direksiyon · 🚀 nitro · 💨 drift · ▼ fren (gaz otomatik; duraklat menüsünden kapatılır, o zaman ▲ çıkar).
+  Test kancaları: window.step(sn) oyun mantığını elle ilerletir · window.autoPilot = true oyuncunun arabasını da yapay zekâ sürer.
+-->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+  :root { --panel: rgba(18, 22, 34, 0.78); --line: rgba(255,255,255,0.2); --text: #fff; --accent: #ffd166; --ok: #6ee7a0; --bad: #ff5d5d; --card: #f4f6fb; --ink: #1f2430; }
+  * { box-sizing: border-box; }
+  html, body { -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; overscroll-behavior: none; }
+  html, body { margin: 0; height: 100%; background: #8fd3ff; color: var(--text); font-family: "Trebuchet MS", system-ui, sans-serif;
+    overflow: hidden; -webkit-user-select: none; user-select: none; touch-action: none; }
+  button { font: inherit; color: inherit; }
+  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  .pill { background: var(--panel); border-radius: 14px; padding: 8px 12px; }
+  #hud { display: none; }
+  body.playing #hud { display: block; }
+  #status { position: fixed; left: 14px; top: 12px; min-width: 176px; }
+  #posRow { display: flex; align-items: baseline; gap: 12px; font-weight: 700; white-space: nowrap; }
+  #posTxt { font-size: 30px; line-height: 1; color: var(--accent); }
+  #posTxt small { font-size: 15px; color: #cfd6e4; font-weight: 400; }
+  #lapTxt { font-size: 16px; }
+  #timeRow { font-size: 13px; color: #dfe5f0; margin-top: 5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #mini { position: fixed; left: 14px; top: 84px; width: 124px; height: 124px; border-radius: 14px; background: var(--panel); }
+  #menuBtns { position: fixed; right: 14px; top: 12px; display: flex; gap: 6px; }
+  #menuBtns button { border: 2px solid var(--line); background: var(--panel); border-radius: 14px; padding: 8px 12px; cursor: pointer; font-size: 15px; }
+  #speedo { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); text-align: center; min-width: 160px; }
+  #kmh { font-size: 34px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
+  #kmh small { font-size: 13px; font-weight: 400; color: #cfd6e4; margin-left: 4px; }
+  #nitroBar { height: 9px; border-radius: 5px; background: rgba(255,255,255,0.18); overflow: hidden; margin-top: 7px; }
+  #nitroFill { height: 100%; width: 0; background: linear-gradient(90deg, #38bdf8, #a78bfa); }
+  #nitroFill.use { background: linear-gradient(90deg, #ffd166, #ff7a45); }
+  #nitroLbl { font-size: 11px; color: #cfd6e4; margin-top: 3px; }
+  #wrong { position: fixed; left: 50%; top: 40%; transform: translate(-50%, -50%); background: rgba(220,40,40,0.88); padding: 8px 18px; border-radius: 12px;
+    font-weight: 700; font-size: 20px; display: none; white-space: nowrap; }
+  #limit { position: fixed; left: 50%; top: 12px; transform: translateX(-50%); display: none; font-weight: 700; white-space: nowrap; color: var(--accent); }
+  #big { position: fixed; left: 50%; top: 28%; transform: translate(-50%, -50%); text-align: center; pointer-events: none; font-size: 44px; font-weight: 700;
+    text-shadow: 0 3px 6px rgba(0,0,0,0.7); white-space: nowrap; opacity: 0; }
+  #big small { display: block; font-size: 18px; font-weight: 400; margin-top: 4px; }
+  .pop { animation: popin 1.5s forwards; }
+  @keyframes popin { 0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0; } 12% { transform: translate(-50%, -50%) scale(1.12); opacity: 1; }
+    20%, 75% { transform: translate(-50%, -50%) scale(1); opacity: 1; } 100% { opacity: 0; } }
+  #toasts { position: fixed; top: 58px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 6px; align-items: center;
+    pointer-events: none; z-index: 20; width: max-content; max-width: calc(100vw - 32px); }
+  .toast { background: rgba(244,246,251,0.96); color: var(--ink); padding: 6px 14px; border-radius: 10px; font-size: 15px; animation: tfade 3s forwards; text-align: center; }
+  @keyframes tfade { 0%, 82% { opacity: 1; } 100% { opacity: 0; transform: translateY(-8px); } }
+  /* Dokunmatik */
+  #touch { display: none; }
+  body.touch.playing #touch { display: block; }
+  .tb { position: fixed; border-radius: 22px; border: 2px solid rgba(255,255,255,0.5); background: rgba(20,24,34,0.45); display: flex;
+    align-items: center; justify-content: center; font-size: 26px; font-weight: 700; touch-action: none; }
+  .tb.on { background: rgba(255,209,102,0.55); }
+  #tLeft { left: 18px; bottom: 22px; width: 88px; height: 88px; }
+  #tRight { left: 118px; bottom: 22px; width: 88px; height: 88px; }
+  #tNitro { right: 20px; bottom: 22px; width: 88px; height: 88px; border-radius: 50%; background: rgba(120,90,255,0.45); }
+  #tDrift { right: 120px; bottom: 26px; width: 66px; height: 66px; border-radius: 50%; }
+  #tBrake { right: 26px; bottom: 122px; width: 60px; height: 60px; border-radius: 50%; }
+  #tGas { right: 100px; bottom: 104px; width: 60px; height: 60px; border-radius: 50%; display: none; background: rgba(0,176,111,0.45); }
+  body.manualGas #tGas { display: flex; }
+  /* Menüler */
+  .overlay { position: fixed; inset: 0; display: none; align-items: flex-start; justify-content: center; background: rgba(8,10,16,0.55);
+    padding: 16px; overflow-y: auto; touch-action: pan-y; z-index: 10; }
+  .overlay.show { display: flex; }
+  .card { background: var(--card); color: var(--ink); border-radius: 18px; padding: 18px 22px; width: 100%; max-width: 580px; margin: auto 0; line-height: 1.45;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.35); }
+  .card h1 { margin: 0 0 6px; font-size: 26px; color: #c1121f; }
+  .card h2 { margin: 14px 0 6px; font-size: 16px; color: #4b5563; }
+  .card ol, .card ul { padding-left: 22px; margin: 8px 0; }
+  .card li { margin: 3px 0; }
+  .muted { color: #5b6270; font-size: 14px; }
+  .btn { border: 0; border-radius: 12px; padding: 10px 14px; cursor: pointer; font-weight: 700; background: #e2e6ef; color: #2b3140; }
+  .btn.go { background: #e63946; color: #fff; }
+  .btn.blue { background: #3a86ff; color: #fff; }
+  .btn.sel { background: #1f2430; color: #fff; }
+  .btn:disabled { opacity: 0.5; cursor: default; }
+  .rowb { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  .rowb .btn { flex: 1; }
+  .seg { display: flex; gap: 6px; flex-wrap: wrap; }
+  .seg .btn { flex: 1; padding: 8px 10px; font-size: 14px; }
+  .seg .btn small { font-weight: 400; display: block; font-size: 12px; opacity: 0.85; }
+  .money { font-weight: 700; color: #b45309; }
+  .wrow { display: grid; grid-template-columns: 44px 1fr auto; gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid #e2e6ef; }
+  .wrow .ic { font-size: 30px; text-align: center; cursor: pointer; }
+  .wrow .btn { font-size: 14px; min-width: 96px; }
+  .bars { display: grid; grid-template-columns: 74px 1fr; gap: 2px 8px; font-size: 12px; color: #5b6270; margin-top: 4px; }
+  .bar { height: 7px; border-radius: 4px; background: #e2e6ef; margin-top: 5px; overflow: hidden; }
+  .bar b { display: block; height: 100%; background: #e63946; }
+  .pips i { display: inline-block; width: 16px; height: 7px; border-radius: 3px; background: #d5dae5; margin-right: 3px; }
+  .pips i.on { background: #e63946; }
+  .swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+  .swp { width: 38px; height: 38px; border-radius: 10px; border: 3px solid transparent; cursor: pointer; display: grid; place-items: center; font-size: 17px; padding: 0; }
+  .swp.on { border-color: #1f2430; }
+  #pvCanvas { width: 100%; height: 150px; display: block; border-radius: 14px; background: radial-gradient(circle at 50% 35%, #dfe6f3, #aab5c9); }
+  #endTable { width: 100%; border-collapse: collapse; font-size: 15px; margin: 6px 0; }
+  #endTable td, #endTable th { padding: 4px 6px; border-bottom: 1px solid #e2e6ef; text-align: left; }
+  #endTable th { font-weight: 400; color: #5b6270; font-size: 13px; }
+  #endTable .n { text-align: right; font-variant-numeric: tabular-nums; }
+  #endTable tr.me td { color: #c1121f; font-weight: 700; }
+  #earn td { padding: 2px 0; } #earn td:last-child { text-align: right; font-weight: 700; padding-left: 16px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 6px; margin: 8px 0; }
+  .stats div { background: #e9edf5; border-radius: 10px; padding: 6px 8px; font-size: 13px; color: #5b6270; }
+  .stats b { display: block; font-size: 17px; color: var(--ink); }
+  #noWebgl { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 16px; text-align: center; font-size: 18px; color: #222; }
+  @media (max-width: 760px), (max-height: 480px) {
+    #status { min-width: 150px; padding: 6px 10px; }
+    #posTxt { font-size: 24px; }
+    #lapTxt { font-size: 14px; }
+    #timeRow { font-size: 11px; }
+    #mini { top: 70px; width: 88px; height: 88px; }
+    #menuBtns button { padding: 6px 9px; font-size: 14px; }
+    #speedo { min-width: 124px; padding: 6px 10px; bottom: 8px; }
+    #kmh { font-size: 26px; }
+    #big { font-size: 32px; }
+    #big small { font-size: 14px; }
+    .card { padding: 14px 16px; }
+    .card h1 { font-size: 21px; }
+    #pvCanvas { height: 110px; }
+  }
+  /* Yatay telefonda ana menü tek ekrana sığsın */
+  @media (max-height: 480px) {
+    #ovMenu .tall { display: none; }
+    #ovMenu .card h2 { margin: 8px 0 4px; }
+    #ovMenu .rowb { margin-top: 8px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud">
+  <div id="status" class="pill">
+    <div id="posRow"><span id="posTxt">1<small>/6</small></span><span id="lapTxt">Tur 1/3</span></div>
+    <div id="timeRow">⏱️ <span id="timeTxt">0:00,00</span> · en iyi <span id="bestTxt">—</span></div>
+  </div>
+  <canvas id="mini" width="248" height="248"></canvas>
+  <div id="limit" class="pill"></div>
+  <div id="menuBtns"><button id="bReset" title="Piste dön (R)">🔄</button><button id="bPause" title="Duraklat (Esc)"><b>❚❚</b></button></div>
+  <div id="speedo" class="pill">
+    <div id="kmh">0<small>km/sa</small></div>
+    <div id="nitroBar"><div id="nitroFill"></div></div>
+    <div id="nitroLbl">🚀 Nitro</div>
+  </div>
+  <div id="wrong">⚠️ TERS YÖN</div>
+  <div id="touch">
+    <div class="tb" id="tLeft">◀</div>
+    <div class="tb" id="tRight">▶</div>
+    <div class="tb" id="tNitro">🚀</div>
+    <div class="tb" id="tDrift">💨</div>
+    <div class="tb" id="tBrake">▼</div>
+    <div class="tb" id="tGas">▲</div>
+  </div>
+</div>
+<div id="big"></div>
+<div id="toasts"></div>
+
+<div id="ovMenu" class="overlay show"><div class="card">
+  <h1>🏎️ Küp Yarışı</h1>
+  <div class="muted tall">5 rakibe karşı <b>3 tur</b>! Virajlarda drift at, nitroyu doldur, düzlükte bas. İlk 3'e girersen sıradaki pist açılır.</div>
+  <div class="stats tall" id="menuStats"></div>
+  <h2>Pist</h2>
+  <div class="seg" id="trackSel"></div>
+  <h2>Zorluk</h2>
+  <div class="seg" id="diffSel"></div>
+  <div class="rowb">
+    <button class="btn go" id="bStart" style="font-size:18px;flex-basis:100%">▶ Yarışa başla</button>
+    <button class="btn" id="bGarage">🚗 Garaj</button>
+    <button class="btn" id="bShop">R$ Mağaza</button>
+    <button class="btn" id="bHelp">❓ Nasıl oynanır</button>
+  </div>
+</div></div>
+<div id="ovHelp" class="overlay"><div class="card">
+  <h1>❓ Nasıl oynanır</h1>
+  <ol>
+    <li>🏁 Pisti <b>3 tur</b> dön, 5 rakibini geç. Bitirdiğin sıraya göre <b>💰 para</b> kazanırsın; ilk 3'e girince sıradaki pist açılır.</li>
+    <li>💨 <b>Drift</b>: virajda drift tuşuna basılı tut. Araba yana kayar, daha keskin döner ve <b>nitro</b> dolar.</li>
+    <li>🚀 <b>Nitro</b>: çubuk dolunca düzlükte kullan, hızın katlanır. Yoldaki <b>sarı oklar</b> da kısa süre hızlandırır.</li>
+    <li>🌱 Yoldan çıkma: çimde araba yavaşlar, bariyere çarpınca hız kaybedersin. Takılırsan 🔄 ile piste dön.</li>
+    <li>🚗 Kazandığın parayla <b>Garaj</b>'dan daha hızlı araba al, motoru, turboyu, lastikleri ve nitroyu yükselt.</li>
+  </ol>
+  <p class="muted">Klavye: W / ↑ gaz · S / ↓ fren ve geri · A D ya da ← → direksiyon · Space drift · Shift ya da N nitro · R piste dön · P / Esc duraklat · M ses.<br>
+    Dokunmatik: ◀ ▶ direksiyon · 🚀 nitro · 💨 drift · ▼ fren. Gaz kendiliğinden basılır (duraklat menüsünden kapatabilirsin).</p>
+  <div class="rowb"><button class="btn go" data-close>Tamam</button></div>
+</div></div>
+<div id="ovGarage" class="overlay"><div class="card">
+  <h1>🚗 Garaj</h1>
+  <div class="money" id="garMoney"></div>
+  <canvas id="pvCanvas"></canvas>
+  <h2>Boya</h2>
+  <div class="swatches" id="paintSel"></div>
+  <h2>Arabalar</h2>
+  <div id="carList"></div>
+  <h2>Yükseltmeler <span class="muted" style="font-weight:400">· bütün arabalarında geçerli</span></h2>
+  <div id="upList"></div>
+  <div class="rowb"><button class="btn" data-close>Kapat</button></div>
+</div></div>
+<div id="ovShop" class="overlay"><div class="card">
+  <h1>R$ Robux Mağazası</h1>
+  <div class="money" id="shopJeton"></div>
+  <div id="passList"></div>
+  <div class="muted" id="shopNote" style="margin-top:8px"></div>
+  <div class="rowb"><button class="btn" data-close>Kapat</button></div>
+</div></div>
+<div id="ovPause" class="overlay"><div class="card">
+  <h1>⏸ Duraklatıldı</h1>
+  <div class="rowb">
+    <button class="btn go" id="bResume" style="flex-basis:100%">▶ Devam et</button>
+    <button class="btn" id="bAuto"></button>
+    <button class="btn" id="bMute"></button>
+    <button class="btn" id="bRestart">🔁 Baştan başla</button>
+    <button class="btn" id="bQuit">🚪 Yarıştan çık</button>
+  </div>
+</div></div>
+<div id="ovEnd" class="overlay"><div class="card">
+  <h1 id="endTitle">🏁 Yarış bitti</h1>
+  <table id="endTable"></table>
+  <h2>Kazancın</h2>
+  <table id="earn"></table>
+  <div class="rowb">
+    <button class="btn go" id="bAgain">▶ Tekrar yarış</button>
+    <button class="btn" id="bHome">🏠 Menü</button>
+  </div>
+</div></div>
+<div id="noWebgl">3D için WebGL gerekli; bu tarayıcıda açılamadı. Chrome / Edge ile açmayı dene.</div>
+
+<script>
+"use strict";
+// ================================================================ Yardımcılar
+const $ = id => document.getElementById(id);
+const rand = (a, b) => a + Math.random() * (b - a);
+const pick = l => l[Math.floor(Math.random() * l.length)];
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+const fmt = n => Math.round(n).toLocaleString("tr-TR");
+function angDiff(a, b) { let d = (b - a) % (Math.PI * 2); if (d > Math.PI) d -= Math.PI * 2; if (d < -Math.PI) d += Math.PI * 2; return d; }
+function setText(el, t) { if (el._t !== t) { el._t = t; el.textContent = t; } }
+function notify(msg) {
+  const el = document.createElement("div");
+  el.className = "toast"; el.textContent = msg;
+  $("toasts").appendChild(el);
+  setTimeout(() => el.remove(), 3000);
+  while ($("toasts").children.length > 3) $("toasts").firstChild.remove();
+}
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmtT = s => { if (!(s > 0) || !isFinite(s)) return "—"; const m = Math.floor(s / 60), r = s - m * 60; return `${m}:${r < 10 ? "0" : ""}${r.toFixed(2).replace(".", ",")}`; };
+function seeded(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+// ================================================================ Config
+const LAPS = 3, GRID = 6;
+const HW = 7;                  // yol yarı genişliği (m)
+const WALL_OFF = HW + 3.2;     // bariyerin pist ortasından uzaklığı
+const CAR_R = 1.3;             // çarpışma yarıçapı
+const BRAKE = 24, TURN = 2.3, NITRO_TIME = 2.6, KMH = 5.2, BASE_FOV = 62;
+const PLACE_PAY = [300, 200, 130, 80, 50, 30];
+const FINISH_LIMIT = 35;       // ilk rakip bitirdikten sonra oyuncuya kalan süre (sn)
+
+// top: son hız (m/sn) · acc: hızlanma · hand: dönüş çarpanı · shape: model ölçüleri (wr teker yarıçapı, tr yarım iz genişliği)
+const CARS = [
+  { id: "mini", name: "Küp Mini", icon: "🚗", price: 0, top: 34, acc: 13, hand: 1, desc: "İlk araban. Küçük ama çevik.",
+    shape: { len: 3.5, w: 1.75, h: 0.6, wr: 0.4, tr: 0.92, spoiler: 0 } },
+  { id: "ruzgar", name: "Rüzgâr", icon: "🚙", price: 900, top: 38, acc: 15, hand: 1.04, desc: "Hafif gövde, küçük kanat: her yerde biraz daha iyi.",
+    shape: { len: 4, w: 1.8, h: 0.5, wr: 0.42, tr: 0.94, spoiler: 1, stripe: true } },
+  { id: "kaplan", name: "Kaplan", icon: "🛻", price: 2500, top: 42, acc: 17, hand: 1.07, desc: "İri tekerli güç canavarı. Düzlükte uçar.",
+    shape: { len: 4.2, w: 2, h: 0.7, wr: 0.52, tr: 1.06, spoiler: 0, bar: true } },
+  { id: "simsek", name: "Şimşek GT", icon: "🏎️", price: 6000, top: 46, acc: 19.5, hand: 1.1, desc: "Alçak, geniş kanatlı yarış arabası.",
+    shape: { len: 4.4, w: 1.9, h: 0.45, wr: 0.44, tr: 0.99, spoiler: 2, stripe: true } },
+  { id: "formul", name: "Formül K", icon: "🏁", price: 12000, top: 51, acc: 22, hand: 1.15, desc: "Açık tekerli pist canavarı. En hızlısı.",
+    shape: { len: 4.7, w: 1.15, h: 0.42, wr: 0.48, tr: 1.02, spoiler: 2, wing: true } },
+];
+const CAR = Object.fromEntries(CARS.map(c => [c.id, c]));
+const UPGRADES = [
+  { id: "motor", name: "Motor", icon: "⚙️", desc: "Her seviye son hız +%2,5", max: 5, base: 300, grow: 1.8 },
+  { id: "turbo", name: "Turbo", icon: "🌀", desc: "Her seviye hızlanma +%5", max: 5, base: 250, grow: 1.8 },
+  { id: "lastik", name: "Yarış Lastiği", icon: "🛞", desc: "Her seviye dönüş +%3", max: 5, base: 250, grow: 1.8 },
+  { id: "nitro", name: "Nitro Tüpü", icon: "🚀", desc: "Her seviye nitro süresi +%15", max: 5, base: 200, grow: 1.8 },
+];
+const UPG = Object.fromEntries(UPGRADES.map(u => [u.id, u]));
+const upPrice = (u, lv) => Math.round(u.base * Math.pow(u.grow, lv) / 10) * 10;
+const PAINTS = ["#e63946", "#ff7a45", "#ffd166", "#06d6a0", "#118ab2", "#3a0ca3", "#f72585", "#f2f3f5", "#2b2d42"];
+const PASSES = [
+  { id: "double", name: "2x Para", icon: "💰", jeton: 150, desc: "Yarış kazançların kalıcı olarak iki katına çıkar." },
+  { id: "gold", name: "Altın Boya", icon: "✨", jeton: 100, desc: "Garajda altın boya açılır: araban pırıl pırıl parlar." },
+  { id: "cash1000", name: "+💰1.000", icon: "⚡", jeton: 50, consumable: true, desc: "Anında 1.000 para. Tekrar alınabilir." },
+];
+// f: rakiplerin son hız çarpanı · corner: viraj cesareti · reward: para çarpanı
+const DIFFS = {
+  kolay: { name: "Kolay", f: 0.88, corner: 0.68, reward: 0.75 },
+  normal: { name: "Normal", f: 0.945, corner: 0.75, reward: 1 },
+  zor: { name: "Zor", f: 1, corner: 0.82, reward: 1.5 },
+};
+// pts: kapalı eğrinin kontrol noktaları [x, z] (ilk nokta = başlangıç çizgisi) · pads: hızlandırıcıların pistteki yeri (0-1)
+const TRACKS = [
+  { id: "vadi", name: "Yeşil Vadi", icon: "🌳", pay: 1, botTop: 34, botAcc: 13, botCars: ["mini", "ruzgar"], pads: [0.3, 0.72], seed: 11,
+    theme: { kind: "vadi", sky: 0x8fd3ff, ground: 0x5aa850, verge: 0x6fbf5c, fog: [160, 620], hemi: 0.85, sun: 0.8, sunCol: 0xfff1d6, wall: ["#e63946", "#f2f3f5"] },
+    pts: [[-20, -70], [60, -70], [95, -45], [100, 0], [80, 40], [40, 50], [10, 30], [-20, 45], [-60, 70], [-100, 50], [-105, 0], [-95, -45], [-60, -70]] },
+  { id: "col", name: "Çöl Kanyonu", icon: "🏜️", pay: 1.5, botTop: 39.5, botAcc: 15.5, botCars: ["ruzgar", "kaplan"], pads: [0.22, 0.55, 0.86], seed: 23,
+    theme: { kind: "col", sky: 0xf7c98b, ground: 0xd9a55c, verge: 0xe2b56e, fog: [160, 600], hemi: 0.85, sun: 0.85, sunCol: 0xffe2b0, wall: ["#8d4a2b", "#f1d9a6"] },
+    pts: [[-30, -90], [50, -90], [110, -85], [140, -50], [125, -10], [80, 0], [60, 30], [85, 60], [125, 75], [130, 115], [95, 140], [40, 130], [10, 95],
+      [-25, 70], [-70, 85], [-110, 70], [-125, 25], [-100, -15], [-120, -55], [-90, -85]] },
+  { id: "sehir", name: "Gece Şehri", icon: "🌃", pay: 2.2, botTop: 45.5, botAcc: 19, botCars: ["simsek", "formul"], pads: [0.18, 0.47, 0.8], seed: 37,
+    theme: { kind: "sehir", sky: 0x0b1026, ground: 0x1b1e2a, verge: 0x262b3b, fog: [70, 420], hemi: 0.62, sun: 0.4, sunCol: 0x9db4ff, wall: ["#22d3ee", "#f472b6"], night: true },
+    pts: [[-40, -100], [60, -100], [120, -95], [135, -60], [130, -20], [100, 5], [55, 0], [30, -30], [-5, -35], [-25, -5], [-10, 35], [35, 50], [90, 55],
+      [130, 80], [125, 125], [80, 140], [20, 135], [-40, 125], [-90, 135], [-130, 110], [-135, 60], [-110, 25], [-80, 10], [-75, -25], [-110, -50], [-120, -85], [-90, -100]] },
+];
+const TRACK = Object.fromEntries(TRACKS.map(t => [t.id, t]));
+const BOT_NAMES = ["Hızlı Efe", "Turbo Elif", "Rüzgâr Can", "Şimşek Zeynep", "Roket Mert", "Drift Ada", "Nitro Deniz", "Yıldız Ece", "Viraj Kaan", "Gaz Defne"];
+const BOT_COLORS = ["#118ab2", "#06d6a0", "#ffd166", "#f72585", "#7b2cbf"];
+const SKINS = ["#ffdbac", "#f1c27d", "#e0ac69", "#c68642", "#8d5524"], FACES = ["smile", "cool", "wow", "grin"], HATS = ["none", "cap", "headphones", "helmet", "cap"];
+
+// ================================================================ Kayıt
+const SAVE_KEY = "kupYarisi";
+function freshSave() {
+  return { money: 0, owned: { mini: true }, car: "mini", paint: "avatar", lv: { motor: 0, turbo: 0, lastik: 0, nitro: 0 }, passes: {},
+    tracks: { vadi: true }, track: "vadi", best: {}, diff: "normal", autoGas: null, races: 0, wins: 0, podiums: 0, helpSeen: false, muted: false, giftIds: [] };
+}
+let save = freshSave();
+try {
+  const s = JSON.parse(localStorage.getItem(SAVE_KEY) || "null");
+  if (s && typeof s === "object") save = { ...save, ...s, owned: { ...save.owned, ...(s.owned || {}) }, lv: { ...save.lv, ...(s.lv || {}) }, passes: { ...(s.passes || {}) },
+    tracks: { ...save.tracks, ...(s.tracks || {}) }, best: { ...(s.best || {}) }, giftIds: Array.isArray(s.giftIds) ? s.giftIds : [] };
+} catch (e) {}
+if (!CAR[save.car] || !save.owned[save.car]) save.car = "mini";
+if (!TRACK[save.track] || !save.tracks[save.track]) save.track = "vadi";
+if (!DIFFS[save.diff]) save.diff = "normal";
+for (const u of UPGRADES) save.lv[u.id] = clamp(Math.floor(+save.lv[u.id] || 0), 0, u.max);
+let lastSave = 0;
+function persist(force) {
+  if (!force && performance.now() - lastSave < 4000) return;
+  lastSave = performance.now();
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) {}
+  reportStats();
+}
+
+// ================================================================ Küp Evreni köprüsü
+const platform = { inside: window.parent !== window, profile: null, reqs: {} };
+const playerName = () => (platform.profile && platform.profile.name) || "Sen";
+const DEF_AVATAR = { skin: "#ffdbac", shirt: "#e63946", pants: "#2b2d42", hat: "cap", hatColor: "#e63946", face: "smile" };
+const myAvatar = () => ({ ...DEF_AVATAR, ...((platform.profile && platform.profile.avatar) || {}) });
+function reportStats() {
+  if (!platform.inside) return;
+  parent.postMessage({ type: "kup:stats", stats: { "🏆 Birincilik": fmt(save.wins), "🥉 Podyum": fmt(save.podiums), "🏁 Yarış": fmt(save.races),
+    "🚗 Araba": `${CARS.filter(c => save.owned[c.id]).length}/${CARS.length}`, "🗺️ Pist": `${TRACKS.filter(t => save.tracks[t.id]).length}/${TRACKS.length}`, "💰 Para": fmt(save.money) } }, "*");
+}
+function requestPurchase(item, done) {
+  if (!platform.inside) { notify("Robux ile almak için oyunu Küp Evreni'nden aç (ana klasördeki index.html)"); return; }
+  const reqId = Math.random().toString(36).slice(2);
+  platform.reqs[reqId] = done;
+  parent.postMessage({ type: "kup:purchase", reqId, id: item.id, name: item.name, price: item.jeton, icon: item.icon }, "*");
+}
+addEventListener("message", e => {
+  if (!platform.inside || e.source !== parent) return;
+  const m = e.data || {};
+  if (m.type === "kup:profile") { platform.profile = m; refreshPlayerCar(); rerenderOpen(); }
+  else if (m.type === "kup:purchaseResult") {
+    if (platform.profile) platform.profile.jeton = m.jeton;
+    const done = platform.reqs[m.reqId]; delete platform.reqs[m.reqId];
+    if (done) done(!!m.ok);
+    rerenderOpen();
+  }
+  else if (m.type === "kup:gift") receiveGifts(m.gifts);
+});
+if (platform.inside) parent.postMessage({ type: "kup:ready" }, "*");
+
+// ================================================================ Küp Evreni hediyeleri (admin panelinden)
+// kup:gift { gifts: [{ gid, items: [{ key, n }] }] } → uygula, kaydet → kup:giftAck { gid, skipped }
+function applyGiftItem(key, n) {
+  if (key === "money") { save.money = Math.min(1e12, save.money + Math.min(n, 1e9)); return true; }
+  const [kind, id] = key.split(":");
+  if (kind === "car") { if (!CAR[id] || save.owned[id]) return false; save.owned[id] = true; return true; }
+  if (kind === "upgrade") {
+    const u = UPG[id];
+    if (!u || save.lv[id] >= u.max) return false;
+    save.lv[id] = Math.min(u.max, save.lv[id] + n); return true;
+  }
+  if (kind === "track") { if (!TRACK[id] || save.tracks[id]) return false; save.tracks[id] = true; return true; }
+  if (kind === "pass") {
+    const p = PASSES.find(x => x.id === id && !x.consumable);
+    if (!p || save.passes[id]) return false;
+    save.passes[id] = true; return true;
+  }
+  return false;
+}
+function receiveGifts(gifts) {
+  save.giftIds = save.giftIds || [];
+  let any = false;
+  const acks = [];
+  for (const g of Array.isArray(gifts) ? gifts : []) {
+    if (!g || !g.gid) continue;
+    const skipped = [];
+    if (!save.giftIds.includes(g.gid)) {
+      for (const it of g.items || []) {
+        const n = Math.max(1, Math.floor(Number(it.n) || 1));
+        if (applyGiftItem(String(it.key), n)) any = true; else skipped.push(String(it.key));
+      }
+      save.giftIds = [g.gid, ...save.giftIds].slice(0, 200);
+    }
+    acks.push({ type: "kup:giftAck", gid: g.gid, skipped });
+  }
+  persist(true);
+  if (platform.inside) for (const a of acks) parent.postMessage(a, "*");
+  if (any) { SFX.pickup(); notify("🎁 Hediye alındı!"); rerenderOpen(); }
+}
+
+// ================================================================ Ses (WebAudio ile sentezlenir)
+const A = { ctx: null };
+const VOL = 0.45;
+function initAudio() {
+  if (A.ctx) { if (A.ctx.state === "suspended") A.ctx.resume(); return; }
+  try { A.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return; }
+  const c = A.ctx;
+  A.master = c.createGain(); A.master.gain.value = save.muted ? 0 : VOL; A.master.connect(c.destination);
+  A.noise = c.createBuffer(1, c.sampleRate, c.sampleRate);
+  const d = A.noise.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  // Motor: iki osilatör + alçak geçiren süzgeç. Lastik ve nitro: süzülmüş gürültü döngüleri.
+  A.engG = c.createGain(); A.engG.gain.value = 0;
+  const f = c.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 900; f.connect(A.engG).connect(A.master);
+  A.eng = c.createOscillator(); A.eng.type = "sawtooth"; A.eng.frequency.value = 60; A.eng.connect(f); A.eng.start();
+  A.eng2 = c.createOscillator(); A.eng2.type = "square"; A.eng2.frequency.value = 30; const g2 = c.createGain(); g2.gain.value = 0.5; A.eng2.connect(g2).connect(f); A.eng2.start();
+  const loop = (type, freq, q) => {
+    const s = c.createBufferSource(); s.buffer = A.noise; s.loop = true;
+    const bf = c.createBiquadFilter(); bf.type = type; bf.frequency.value = freq; bf.Q.value = q;
+    const g = c.createGain(); g.gain.value = 0; s.connect(bf).connect(g).connect(A.master); s.start(); return g;
+  };
+  A.skidG = loop("bandpass", 1500, 3); A.nitG = loop("highpass", 1800, 0.5);
+}
+function tone(freq, dur, type = "sine", gain = 0.1, freqEnd, delay = 0) {
+  if (!A.ctx || A.ctx.state !== "running" || gain < 0.002) return;
+  const t0 = A.ctx.currentTime + delay, o = A.ctx.createOscillator(), g = A.ctx.createGain();
+  o.type = type; o.frequency.setValueAtTime(freq, t0);
+  if (freqEnd) o.frequency.exponentialRampToValueAtTime(freqEnd, t0 + dur);
+  g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(gain, t0 + 0.005); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  o.connect(g).connect(A.master); o.start(t0); o.stop(t0 + dur + 0.05);
+}
+function noise(dur, gain, freq, type = "lowpass", delay = 0) {
+  if (!A.ctx || A.ctx.state !== "running" || gain < 0.002) return;
+  const t0 = A.ctx.currentTime + delay, s = A.ctx.createBufferSource(), f = A.ctx.createBiquadFilter(), g = A.ctx.createGain();
+  s.buffer = A.noise; f.type = type; f.frequency.value = freq;
+  g.gain.setValueAtTime(gain, t0); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  s.connect(f).connect(g).connect(A.master); s.start(t0, Math.random() * 0.5); s.stop(t0 + dur + 0.05);
+}
+const SFX = {
+  click: () => tone(1500, 0.03, "square", 0.04),
+  beep: hi => tone(hi ? 1320 : 660, hi ? 0.5 : 0.16, "triangle", 0.12),
+  crash: v => { noise(0.22, 0.4 * v, 700); tone(110, 0.16, "sawtooth", 0.1 * v, 55); },
+  bump: () => { noise(0.1, 0.2, 1100); tone(180, 0.08, "square", 0.05, 90); },
+  boost: () => { tone(440, 0.25, "sawtooth", 0.07, 1320); noise(0.3, 0.12, 3000, "highpass"); },
+  lap: () => [784, 1046].forEach((f, i) => tone(f, 0.14, "triangle", 0.09, undefined, i * 0.1)),
+  pickup: () => [660, 880, 1100].forEach((f, i) => tone(f, 0.1, "triangle", 0.07, undefined, i * 0.06)),
+  win: () => [523, 659, 784, 1046, 1318].forEach((f, i) => tone(f, 0.25, "triangle", 0.09, undefined, i * 0.12)),
+  finish: () => [659, 784, 880].forEach((f, i) => tone(f, 0.2, "triangle", 0.08, undefined, i * 0.12)),
+  lose: () => [523, 440, 349].forEach((f, i) => tone(f, 0.25, "triangle", 0.08, undefined, i * 0.15)),
+};
+function updateAudio() {
+  if (!A.ctx || !A.engG) return;
+  const t = A.ctx.currentTime, c = player, live = race.on && c && !anyOverlay();
+  if (!live) { for (const g of [A.engG, A.skidG, A.nitG]) g.gain.setTargetAtTime(0, t, 0.08); return; }
+  // 4 vitesli motor sesi: her viteste perde yükselip düşer
+  const r = clamp(Math.abs(c.speed) / (c.st.top * 1.3), 0, 0.999) * 4, gear = Math.floor(r), w = r - gear;
+  const fr = 58 + gear * 16 + w * 86 + (c.inp.throttle ? 8 : 0);
+  A.eng.frequency.setTargetAtTime(fr, t, 0.06); A.eng2.frequency.setTargetAtTime(fr / 2, t, 0.06);
+  A.engG.gain.setTargetAtTime(0.045 + (c.inp.throttle ? 0.03 : 0), t, 0.1);
+  A.skidG.gain.setTargetAtTime(Math.abs(c.speed) > 6 ? clamp((c.slip - 3) / 9, 0, 1) * 0.12 : 0, t, 0.06);
+  A.nitG.gain.setTargetAtTime(c.nitroOn || c.boostT > 0 ? 0.12 : 0, t, 0.05);
+}
+
+// ================================================================ 3D sahne
+const canvas = $("game");
+let renderer;
+try { renderer = new THREE.WebGLRenderer({ canvas, antialias: true }); }
+catch (e) { $("noWebgl").style.display = "flex"; throw e; }
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(BASE_FOV, 1, 0.4, 900);
+const hemi = new THREE.HemisphereLight(0xffffff, 0x5aa850, 0.85);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xfff1d6, 0.8);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -55, right: 55, top: 55, bottom: -55, near: 1, far: 160 });
+scene.add(sun, sun.target);
+
+const lambert = (color, extra = {}) => new THREE.MeshLambertMaterial({ color, ...extra });
+const basic = (color, extra = {}) => new THREE.MeshBasicMaterial({ color, ...extra });
+function mesh(geo, material, x = 0, y = 0, z = 0, parent = scene, shadow = true) {
+  const m = new THREE.Mesh(geo, material);
+  m.position.set(x, y, z); m.castShadow = shadow; m.receiveShadow = shadow;
+  parent.add(m); return m;
+}
+function canvasTex(w, h, draw) {
+  const c = document.createElement("canvas"); c.width = w; c.height = h;
+  draw(c.getContext("2d"), w, h);
+  const t = new THREE.CanvasTexture(c); t.anisotropy = 4;
+  return t;
+}
+function disposeGroup(g) {
+  g.traverse(o => {
+    if (o.geometry) o.geometry.dispose();
+    for (const m of [].concat(o.material || [])) { if (m.map) m.map.dispose(); m.dispose(); }
+  });
+}
+
+// ================================================================ Pist verisi (örnekleme)
+function sampleTrack(def) {
+  const curve = new THREE.CatmullRomCurve3(def.pts.map(([x, z]) => new THREE.Vector3(x, 0, z)), true, "centripetal");
+  curve.arcLengthDivisions = 3000;
+  const len = curve.getLength(), n = Math.round(len / 2), ds = len / n, sp = curve.getSpacedPoints(n);
+  const T = { def, id: def.id, n, ds, len, px: [], pz: [], tx: [], tz: [], nx: [], nz: [], ang: [], curv: [] };
+  for (let i = 0; i < n; i++) { T.px.push(sp[i].x); T.pz.push(sp[i].z); }
+  for (let i = 0; i < n; i++) {
+    const a = (i + n - 1) % n, b = (i + 1) % n;
+    let dx = T.px[b] - T.px[a], dz = T.pz[b] - T.pz[a];
+    const L = Math.hypot(dx, dz) || 1; dx /= L; dz /= L;
+    T.tx.push(dx); T.tz.push(dz); T.nx.push(dz); T.nz.push(-dx); T.ang.push(Math.atan2(dx, dz));   // n = teğetin yanı (yerel +x)
+  }
+  for (let i = 0; i < n; i++) T.curv.push(Math.abs(angDiff(T.ang[(i + n - 2) % n], T.ang[(i + 2) % n])) / (4 * ds));
+  T.minX = Math.min(...T.px); T.maxX = Math.max(...T.px); T.minZ = Math.min(...T.pz); T.maxZ = Math.max(...T.pz);
+  T.cx = (T.minX + T.maxX) / 2; T.cz = (T.minZ + T.maxZ) / 2; T.rad = Math.max(T.maxX - T.minX, T.maxZ - T.minZ) / 2;
+  T.padIdx = def.pads.map(f => Math.round(f * n) % n);
+  return T;
+}
+const TRACK_DATA = Object.fromEntries(TRACKS.map(d => [d.id, sampleTrack(d)]));
+let track = null, trackGroup = null;
+const wrapI = (i, n) => ((i % n) + n) % n;
+
+// ================================================================ Pist modeli
+// o1..o2 yan uzaklıkları arasında pisti izleyen şerit (y1 = y2 ise yatay, o1 = o2 ise dik duvar)
+function ribbon(T, o1, o2, y1, y2, vScale, material) {
+  const pos = [], uv = [], idx = [];
+  for (let i = 0; i <= T.n; i++) {
+    const k = i % T.n, v = i * T.ds / vScale;
+    pos.push(T.px[k] + T.nx[k] * o1, y1, T.pz[k] + T.nz[k] * o1, T.px[k] + T.nx[k] * o2, y2, T.pz[k] + T.nz[k] * o2);
+    uv.push(0, v, 1, v);
+    if (i < T.n) { const a = i * 2; idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx); g.computeVertexNormals();
+  const m = new THREE.Mesh(g, material); m.receiveShadow = true;
+  return m;
+}
+// Pist üzerindeki noktaya hizalı grup: yerel x = yana, z = ileri
+function at(T, i, lat = 0, along = 0) {
+  const g = new THREE.Group(), k = wrapI(i, T.n);
+  g.position.set(T.px[k] + T.nx[k] * lat + T.tx[k] * along, 0, T.pz[k] + T.nz[k] * lat + T.tz[k] * along);
+  g.rotation.y = T.ang[k];
+  return g;
+}
+function instanced(geo, material, list, G, shadow = true) {
+  if (!list.length) return null;
+  const im = new THREE.InstancedMesh(geo, material, list.length), d = new THREE.Object3D();
+  list.forEach((o, i) => {
+    d.position.set(o.x, o.y || 0, o.z); d.rotation.set(0, o.ry || 0, 0);
+    d.scale.set(o.sx || 1, o.sy || o.sx || 1, o.sz || o.sx || 1); d.updateMatrix(); im.setMatrixAt(i, d.matrix);
+  });
+  im.instanceMatrix.needsUpdate = true; im.frustumCulled = false; im.castShadow = shadow;
+  G.add(im); return im;
+}
+// Pistten minD..maxD uzaklıkta rastgele noktalar
+function scatter(T, R, count, minD, maxD, fn) {
+  let placed = 0;
+  for (let tries = 0; placed < count && tries < count * 40; tries++) {
+    const x = lerp(T.minX - maxD, T.maxX + maxD, R()), z = lerp(T.minZ - maxD, T.maxZ + maxD, R());
+    let d2 = 1e12;
+    for (let i = 0; i < T.n; i += 2) { const dx = x - T.px[i], dz = z - T.pz[i], q = dx * dx + dz * dz; if (q < d2) d2 = q; }
+    const d = Math.sqrt(d2);
+    if (d >= minD && d <= maxD) fn(x, z, placed++);
+  }
+}
+const flat = { side: THREE.DoubleSide, polygonOffset: true };
+function buildTrack(id) {
+  if (track && track.id === id) return;
+  if (trackGroup) { scene.remove(trackGroup); disposeGroup(trackGroup); }
+  const T = track = TRACK_DATA[id], th = T.def.theme, G = trackGroup = new THREE.Group(), R = seeded(T.def.seed);
+  scene.add(G);
+  scene.background = new THREE.Color(th.sky); scene.fog = new THREE.Fog(th.sky, th.fog[0], th.fog[1]);
+  hemi.intensity = th.hemi; hemi.groundColor.set(th.ground); sun.intensity = th.sun; sun.color.set(th.sunCol);
+  document.body.style.background = "#" + new THREE.Color(th.sky).getHexString();
+
+  const ground = mesh(new THREE.PlaneGeometry(1600, 1600), lambert(th.ground), T.cx, -0.12, T.cz, G);
+  ground.rotation.x = -Math.PI / 2; ground.castShadow = false;
+  G.add(ribbon(T, -WALL_OFF, WALL_OFF, 0, 0, 10, lambert(th.verge, { ...flat, polygonOffsetFactor: -1, polygonOffsetUnits: -1 })));
+  // Asfalt: kenar çizgileri + kesikli orta çizgi
+  const roadTex = canvasTex(128, 256, (g, w, h) => {
+    g.fillStyle = th.night ? "#2c303a" : "#454a52"; g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 700; i++) { g.fillStyle = `rgba(${R() < 0.5 ? "0,0,0" : "255,255,255"},${0.04 + R() * 0.06})`; g.fillRect(R() * w, R() * h, 2, 2); }
+    g.fillStyle = "#f4f4f4"; g.fillRect(5, 0, 4, h); g.fillRect(w - 9, 0, 4, h);
+    g.fillStyle = th.night ? "#ffd166" : "#f4f4f4"; g.fillRect(w / 2 - 2, 0, 4, h / 2);
+  });
+  roadTex.wrapT = THREE.RepeatWrapping;
+  G.add(ribbon(T, -HW, HW, 0.04, 0.04, 8, new THREE.MeshLambertMaterial({ map: roadTex, ...flat, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })));
+  const curbTex = canvasTex(8, 32, (g, w, h) => { g.fillStyle = "#e63946"; g.fillRect(0, 0, w, h / 2); g.fillStyle = "#f4f4f4"; g.fillRect(0, h / 2, w, h / 2); });
+  curbTex.wrapT = THREE.RepeatWrapping; curbTex.magFilter = THREE.NearestFilter;
+  const curbMat = new THREE.MeshLambertMaterial({ map: curbTex, ...flat, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
+  G.add(ribbon(T, HW, HW + 0.9, 0.06, 0.06, 3, curbMat), ribbon(T, -HW - 0.9, -HW, 0.06, 0.06, 3, curbMat));
+  // Bariyerler
+  const wallTex = canvasTex(8, 32, (g, w, h) => { g.fillStyle = th.wall[0]; g.fillRect(0, 0, w, h / 2); g.fillStyle = th.wall[1]; g.fillRect(0, h / 2, w, h / 2); });
+  wallTex.wrapT = THREE.RepeatWrapping; wallTex.magFilter = THREE.NearestFilter;
+  const wallMat = th.night ? new THREE.MeshBasicMaterial({ map: wallTex, side: THREE.DoubleSide }) : new THREE.MeshLambertMaterial({ map: wallTex, side: THREE.DoubleSide });
+  for (const s of [-1, 1]) { const w = ribbon(T, s * WALL_OFF, s * WALL_OFF, 0, 1, 4, wallMat); w.castShadow = true; G.add(w); }
+
+  // Başlangıç çizgisi + takı
+  const st = at(T, 0); G.add(st);
+  const chk = canvasTex(64, 16, (g, w, h) => { for (let x = 0; x < 16; x++) for (let y = 0; y < 4; y++) { g.fillStyle = (x + y) % 2 ? "#111" : "#fff"; g.fillRect(x * 4, y * 4, 4, 4); } });
+  chk.magFilter = THREE.NearestFilter;
+  const line = mesh(new THREE.PlaneGeometry(HW * 2, 2.4), new THREE.MeshLambertMaterial({ map: chk, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }), 0, 0.07, 0, st);
+  line.rotation.x = -Math.PI / 2; line.castShadow = false;
+  const post = lambert(0x2b2d42);
+  for (const s of [-1, 1]) mesh(new THREE.BoxGeometry(0.7, 7, 0.7), post, s * (WALL_OFF + 0.6), 3.5, 0, st);
+  const banTex = canvasTex(512, 64, (g, w, h) => {
+    g.fillStyle = "#c1121f"; g.fillRect(0, 0, w, h); g.fillStyle = "#fff"; g.font = '700 40px "Trebuchet MS", system-ui, sans-serif'; g.textAlign = "center"; g.textBaseline = "middle";
+    g.fillText(`🏁 KÜP YARIŞI · ${T.def.name.toLocaleUpperCase("tr")} 🏁`, w / 2, h / 2 + 2);
+  });
+  const banM = th.night ? new THREE.MeshBasicMaterial({ map: banTex }) : new THREE.MeshLambertMaterial({ map: banTex });
+  mesh(new THREE.BoxGeometry(WALL_OFF * 2 + 1.9, 1.6, 0.4), [post, post, post, post, banM, banM], 0, 6.6, 0, st);
+
+  // Hızlandırıcılar (sarı oklar)
+  const padTex = canvasTex(64, 64, (g, w, h) => {
+    g.fillStyle = "rgba(20,20,30,0.55)"; g.fillRect(0, 0, w, h); g.strokeStyle = "#ffd166"; g.lineWidth = 9; g.lineJoin = "miter";
+    for (const y of [50, 30, 10]) { g.beginPath(); g.moveTo(8, y + 12); g.lineTo(32, y - 6); g.lineTo(56, y + 12); g.stroke(); }
+  });
+  for (const pi of T.padIdx) {
+    const p = at(T, pi); G.add(p);
+    const m = mesh(new THREE.PlaneGeometry(6, 7), new THREE.MeshBasicMaterial({ map: padTex, transparent: true, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }), 0, 0.08, 0, p, false);
+    m.rotation.x = -Math.PI / 2; m.rotation.z = Math.PI;   // okların ucu ileri (+z) baksın
+  }
+
+  // Tribün (başlangıç düzlüğünde)
+  if (!th.night) {
+    const sd = at(T, -10, WALL_OFF + 7); G.add(sd);
+    const cols = ["#e63946", "#ffd166", "#06d6a0", "#118ab2", "#f2f3f5", "#f72585"];
+    const crowd = canvasTex(512, 16, (g, w, h) => {
+      g.fillStyle = "#3b4252"; g.fillRect(0, 0, w, h);
+      for (let x = 5; x < w; x += 9) { g.fillStyle = cols[Math.floor(R() * cols.length)]; g.beginPath(); g.arc(x + R() * 2, 7 + R() * 3, 3.6, 0, 7); g.fill(); }
+    });
+    const crowdMat = new THREE.MeshLambertMaterial({ map: crowd });
+    for (let k = 0; k < 4; k++) {   // basamaklar + her basamağın önünde seyirci sırası (piste bakar)
+      mesh(new THREE.BoxGeometry(2.2, 1.4 + k * 1.4, 34), lambert(0x596275), k * 2.2, (1.4 + k * 1.4) / 2, 0, sd);
+      const row = mesh(new THREE.PlaneGeometry(34, 1.4), crowdMat, k * 2.2 - 1.12, k * 1.4 + 0.7, 0, sd, false); row.rotation.y = -Math.PI / 2;
+    }
+    mesh(new THREE.BoxGeometry(0.4, 8.2, 35), lambert(0x596275), 7.9, 4.1, 0, sd);
+    mesh(new THREE.BoxGeometry(9.6, 0.3, 35), lambert(0xc1121f), 3.3, 8.2, 0, sd);
+  }
+
+  // Dekor
+  const ring = (count, r0, r1, fn) => { for (let i = 0; i < count; i++) { const a = (i + R() * 0.6) / count * Math.PI * 2, r = T.rad + lerp(r0, r1, R()); fn(T.cx + Math.sin(a) * r, T.cz + Math.cos(a) * r); } };
+  if (th.kind === "vadi") {
+    const trees = []; scatter(T, R, 170, WALL_OFF + 4, 90, (x, z) => trees.push({ x, z, sx: 0.8 + R() * 0.9, ry: R() * 6 }));
+    const tg = new THREE.CylinderGeometry(0.3, 0.42, 2, 6); tg.translate(0, 1, 0);
+    const lg = new THREE.ConeGeometry(1.9, 4.6, 7); lg.translate(0, 4.2, 0);
+    instanced(tg, lambert(0x7a4a21), trees, G); instanced(lg, lambert(0x2f8f3a), trees, G);
+    const bushes = []; scatter(T, R, 60, WALL_OFF + 2, 60, (x, z) => bushes.push({ x, z, y: 0.3, sx: 0.8 + R() * 0.8, sy: 0.6 + R() * 0.4 }));
+    instanced(new THREE.DodecahedronGeometry(1), lambert(0x3fa34d), bushes, G);
+    const hills = []; ring(11, 130, 240, (x, z) => hills.push({ x, z, y: -4, sx: 45 + R() * 45, sy: 16 + R() * 20 }));
+    instanced(new THREE.SphereGeometry(1, 14, 8), lambert(0x4a9a48), hills, G, false);
+  } else if (th.kind === "col") {
+    const cacti = []; scatter(T, R, 90, WALL_OFF + 3, 80, (x, z) => cacti.push({ x, z, sx: 0.8 + R() * 0.8, ry: R() * 6 }));
+    const cg = new THREE.CylinderGeometry(0.4, 0.46, 3.2, 8); cg.translate(0, 1.6, 0);
+    const ag = new THREE.BoxGeometry(1.7, 0.36, 0.36); ag.translate(0, 1.9, 0);
+    const cm = lambert(0x3f8f4f); instanced(cg, cm, cacti, G); instanced(ag, cm, cacti, G);
+    const rocks = []; scatter(T, R, 80, WALL_OFF + 2, 90, (x, z) => rocks.push({ x, z, y: 0.3, sx: 0.8 + R() * 2, sy: 0.5 + R() * 1.1, sz: 0.8 + R() * 2, ry: R() * 6 }));
+    instanced(new THREE.DodecahedronGeometry(1), lambert(0xa8683c), rocks, G);
+    const mesas = []; ring(10, 120, 230, (x, z) => mesas.push({ x, z, sx: 28 + R() * 26, sy: 16 + R() * 18, ry: R() * 6 }));
+    const mg = new THREE.CylinderGeometry(1, 1.2, 1, 8); mg.translate(0, 0.5, 0);
+    instanced(mg, lambert(0xb5613a), mesas, G, false);
+  } else {
+    // Gece şehri: ışıklı pencereli binalar, sokak lambaları, yıldızlar
+    const bg = new THREE.BoxGeometry(1, 1, 1); bg.translate(0, 0.5, 0);
+    const sets = [[], [], []];
+    scatter(T, R, 120, WALL_OFF + 14, 120, (x, z, i) => sets[i % 3].push({ x, z, sx: 10 + R() * 9, sy: 12 + R() * 38, sz: 10 + R() * 9, ry: R() < 0.5 ? 0 : Math.PI / 2 }));
+    ring(26, 150, 260, (x, z) => sets[Math.floor(R() * 3)].push({ x, z, sx: 16 + R() * 14, sy: 30 + R() * 60, sz: 16 + R() * 14 }));
+    for (const [i, col] of [["#ffd98a"], ["#9fd8ff"], ["#ffb3d1"]].entries()) {
+      const wt = canvasTex(64, 128, (g, w, h) => {
+        g.fillStyle = "#141826"; g.fillRect(0, 0, w, h);
+        for (let y = 4; y < h - 4; y += 10) for (let x = 5; x < w - 5; x += 10) { g.fillStyle = R() < 0.45 ? col[0] : "#232a3d"; g.fillRect(x, y, 6, 6); }
+      });
+      instanced(bg, new THREE.MeshBasicMaterial({ map: wt }), sets[i], G, false);
+    }
+    const poles = [], bulbs = [], pools = [];
+    for (let i = 0, s = 1; i < T.n; i += 11, s = -s) {
+      const lat = s * (WALL_OFF + 0.9), x = T.px[i] + T.nx[i] * lat, z = T.pz[i] + T.nz[i] * lat;
+      poles.push({ x, z }); bulbs.push({ x: x - T.nx[i] * s * 1.6, y: 7, z: z - T.nz[i] * s * 1.6 }); pools.push({ x: T.px[i] + T.nx[i] * s * 2.5, y: 0.1, z: T.pz[i] + T.nz[i] * s * 2.5 });
+    }
+    const pg = new THREE.CylinderGeometry(0.12, 0.17, 7, 6); pg.translate(0, 3.5, 0);
+    instanced(pg, lambert(0x596275), poles, G, false);
+    instanced(new THREE.SphereGeometry(0.45, 10, 8), basic(0xffe9a8), bulbs, G, false);
+    const glow = canvasTex(64, 64, (g, w) => { const gr = g.createRadialGradient(32, 32, 2, 32, 32, 32); gr.addColorStop(0, "rgba(255,225,160,0.9)"); gr.addColorStop(1, "rgba(255,225,160,0)"); g.fillStyle = gr; g.fillRect(0, 0, w, w); });
+    const plg = new THREE.PlaneGeometry(20, 20); plg.rotateX(-Math.PI / 2);
+    instanced(plg, new THREE.MeshBasicMaterial({ map: glow, transparent: true, opacity: 0.3, depthWrite: false, blending: THREE.AdditiveBlending }), pools, G, false);
+    const sp = []; for (let i = 0; i < 350; i++) { const a = R() * Math.PI * 2, e = 0.12 + R() * 1.2, r = 700; sp.push(T.cx + Math.cos(a) * Math.cos(e) * r, Math.sin(e) * r, T.cz + Math.sin(a) * Math.cos(e) * r); }
+    const sg = new THREE.BufferGeometry(); sg.setAttribute("position", new THREE.Float32BufferAttribute(sp, 3));
+    G.add(new THREE.Points(sg, new THREE.PointsMaterial({ color: 0xffffff, size: 2.2, sizeAttenuation: false, fog: false })));
+  }
+  setupMini();
+}
+
+// ================================================================ Avatar ve araba modelleri
+function drawFace(kind) {
+  const c = document.createElement("canvas"); c.width = c.height = 128;
+  const x = c.getContext("2d");
+  x.fillStyle = "#1b1b1b"; x.strokeStyle = "#1b1b1b"; x.lineWidth = 7; x.lineCap = "round";
+  if (kind === "cool") { x.fillRect(22, 40, 36, 18); x.fillRect(70, 40, 36, 18); x.fillRect(56, 44, 16, 5); }
+  else { x.beginPath(); x.ellipse(44, 50, 7, kind === "wow" ? 12 : 10, 0, 0, 7); x.ellipse(84, 50, 7, kind === "wow" ? 12 : 10, 0, 0, 7); x.fill(); }
+  x.beginPath();
+  if (kind === "wow") { x.ellipse(64, 92, 10, 13, 0, 0, 7); x.fill(); }
+  else if (kind === "grin") { x.moveTo(36, 82); x.quadraticCurveTo(64, 116, 92, 82); x.closePath(); x.fill(); }
+  else { x.arc(64, 74, 26, 0.25 * Math.PI, 0.75 * Math.PI); x.stroke(); }
+  return c;
+}
+// Sürücü: platform avatarı, oturur halde (bacaklar öne, kollar direksiyonda)
+function buildDriver(a, scale) {
+  const g = new THREE.Group(); g.scale.setScalar(scale);
+  const part = (w, h, d, c, x, y, z) => mesh(new THREE.BoxGeometry(w, h, d), lambert(c), x, y, z, g);
+  for (const sx of [-0.5, 0.5]) { const l = part(0.9, 2, 1, a.pants, sx, 2, 0); l.geometry.translate(0, -1, 0); l.rotation.x = -1.45; }
+  part(2, 2, 1, a.shirt, 0, 3, 0);
+  for (const sx of [-1.45, 1.45]) { const l = part(0.9, 2, 1, a.skin, sx, 3.8, 0); l.geometry.translate(0, -0.8, 0); l.rotation.x = -1.15; l.rotation.z = sx > 0 ? 0.25 : -0.25; }
+  mesh(new THREE.CylinderGeometry(0.62, 0.62, 1.2, 16), lambert(a.skin), 0, 4.6, 0, g);
+  const face = FACES.includes(a.face) ? a.face : "smile";
+  mesh(new THREE.PlaneGeometry(0.9, 0.9), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(drawFace(face)), transparent: true }), 0, 4.6, 0.63, g, false);
+  const hc = a.hatColor || "#e63946";
+  if (a.hat === "cap") { mesh(new THREE.CylinderGeometry(0.66, 0.66, 0.35, 16), lambert(hc), 0, 5.3, 0, g); part(1.1, 0.08, 0.6, hc, 0, 5.15, 0.75); }
+  else if (a.hat === "crown") {
+    mesh(new THREE.CylinderGeometry(0.6, 0.55, 0.4, 8, 1, true), lambert(a.crownColor || "#ffd166", { side: THREE.DoubleSide }), 0, 5.4, 0, g);
+    for (let i = 0; i < 6; i++) { const an = i / 6 * Math.PI * 2; mesh(new THREE.ConeGeometry(0.1, 0.3, 4), lambert(a.crownColor || "#ffd166"), Math.cos(an) * 0.55, 5.7, Math.sin(an) * 0.55, g); }
+  } else if (a.hat === "headphones") {
+    mesh(new THREE.TorusGeometry(0.7, 0.07, 8, 20, Math.PI), lambert(hc), 0, 4.75, 0, g);
+    part(0.25, 0.5, 0.5, hc, -0.7, 4.6, 0); part(0.25, 0.5, 0.5, hc, 0.7, 4.6, 0);
+  } else if (a.hat === "helmet") mesh(new THREE.SphereGeometry(0.95, 20, 14), lambert("#cfe8ff", { transparent: true, opacity: 0.35, depthWrite: false }), 0, 4.65, 0, g, false);
+  return g;
+}
+// Araba: ön yüzü +z. color "gold" = altın boya
+function buildCarModel(carId, color, av) {
+  const S = CAR[carId].shape, g = new THREE.Group(), body = new THREE.Group(); g.add(body);
+  const paint = color === "gold" ? new THREE.MeshLambertMaterial({ color: 0xffc93c, emissive: 0x7a5200 }) : lambert(color);
+  const dark = lambert(0x1c1f26), grey = lambert(0x9aa1aa), white = lambert(0xf4f4f4);
+  const box = (w, h, d, m, x, y, z) => mesh(new THREE.BoxGeometry(w, h, d), m, x, y, z, body);
+  const r = S.wr, y0 = r * 0.55 + 0.1, top = y0 + S.h, L = S.len;
+  box(S.w, S.h, L, paint, 0, y0 + S.h / 2, 0);                                        // gövde
+  box(S.w * 0.84, S.h * 0.62, L * 0.2, paint, 0, y0 + S.h * 0.31, L * 0.58);          // burun
+  box(S.w * 0.9, 0.1, L * 0.38, dark, 0, top + 0.03, -L * 0.06);                      // kokpit
+  box(Math.min(S.w * 0.66, 1.1), 0.66, 0.16, dark, 0, top + 0.33, -L * 0.22);         // koltuk
+  const glass = new THREE.MeshLambertMaterial({ color: 0xbfe6ff, transparent: true, opacity: 0.45 });
+  const ws = box(S.w * 0.8, 0.44, 0.05, glass, 0, top + 0.24, L * 0.17); ws.rotation.x = -0.4; ws.castShadow = false;
+  const wheelRim = mesh(new THREE.TorusGeometry(0.2, 0.04, 6, 14), dark, 0, top + 0.3, L * 0.07, body, false); wheelRim.rotation.x = -0.5;
+  if (S.stripe) box(0.34, 0.02, L * 0.3, white, 0, top + 0.012, L * 0.33);
+  for (const s of [-1, 1]) mesh(new THREE.BoxGeometry(0.36, 0.16, 0.06), basic(0xfff6c0), s * S.w * 0.3, y0 + S.h * 0.55, L * 0.68 + 0.01, body, false);   // farlar
+  const tailMat = basic(0x8a0f0f);
+  for (const s of [-1, 1]) mesh(new THREE.BoxGeometry(0.4, 0.14, 0.06), tailMat, s * S.w * 0.3, y0 + S.h * 0.7, -L / 2 - 0.02, body, false);
+  if (S.spoiler) {
+    const hgt = S.spoiler === 2 ? 0.62 : 0.34, wide = S.spoiler === 2 ? Math.max(S.w, 1.7) + 0.2 : S.w * 0.92;
+    for (const s of [-1, 1]) box(0.08, hgt, 0.3, dark, s * Math.min(S.w, 1.3) * 0.36, top + hgt / 2, -L / 2 + 0.3);
+    box(wide, 0.07, 0.5, paint, 0, top + hgt, -L / 2 + 0.28);
+  }
+  if (S.bar) {   // Kaplan: takla demiri + kasa + tampon
+    for (const s of [-1, 1]) box(0.12, 0.95, 0.12, grey, s * S.w * 0.4, top + 0.47, -L * 0.3);
+    box(S.w * 0.8 + 0.12, 0.12, 0.12, grey, 0, top + 0.95, -L * 0.3);
+    box(S.w * 0.96, 0.18, 0.2, grey, 0, y0 + 0.2, L * 0.7);
+  }
+  if (S.wing) {  // Formül K: ön kanat + yan kutular
+    box(S.tr * 2 + 0.5, 0.06, 0.55, paint, 0, y0 + 0.02, L * 0.66);
+    for (const s of [-1, 1]) box(0.5, S.h * 0.8, L * 0.34, paint, s * (S.w / 2 + 0.2), y0 + S.h * 0.4, -L * 0.08);
+  }
+  // Sürücü
+  const drv = buildDriver(av, 0.3); drv.position.set(0, top - 0.55, -L * 0.12); body.add(drv);
+  // Tekerlekler: pivot (direksiyon) → teker (dönme)
+  const wheels = [], pivots = [];
+  const wg = new THREE.CylinderGeometry(r, r, 0.36, 16); wg.rotateZ(Math.PI / 2);
+  const hg = new THREE.BoxGeometry(0.38, r * 1.1, r * 0.36);
+  for (const [sx, sz] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) {
+    const p = new THREE.Group(); p.position.set(sx * S.tr, r, sz * L * 0.33); g.add(p);
+    const w = mesh(wg, dark, 0, 0, 0, p); mesh(hg, grey, 0, 0, 0, w, false);
+    wheels.push(w); if (sz > 0) pivots.push(p);
+  }
+  return { group: g, body, wheels, pivots, tailMat, r, len: L, w: S.w };
+}
+function makeTag(name) {
+  const tex = canvasTex(256, 64, (g, w, h) => {
+    g.fillStyle = "rgba(0,0,0,0.55)"; const r = 18; g.beginPath(); g.moveTo(r, 4); g.arcTo(w - 4, 4, w - 4, h - 4, r); g.arcTo(w - 4, h - 4, 4, h - 4, r); g.arcTo(4, h - 4, 4, 4, r); g.arcTo(4, 4, w - 4, 4, r); g.fill();
+    g.fillStyle = "#fff"; g.textAlign = "center"; g.textBaseline = "middle"; g.font = '700 30px "Trebuchet MS", system-ui, sans-serif';
+    const tw = g.measureText(name).width; if (tw > w - 30) g.font = `700 ${Math.floor(30 * (w - 30) / tw)}px "Trebuchet MS", system-ui, sans-serif`;
+    g.fillText(name, w / 2, h / 2 + 2);
+  });
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
+  s.scale.set(3.4, 0.85, 1); s.position.y = 3.1;
+  return s;
+}
+
+// ================================================================ Arabalar
+const cars = [];
+let player = null;
+const paintColor = () => save.paint === "gold" ? (save.passes.gold ? "gold" : myAvatar().shirt) : save.paint === "avatar" ? myAvatar().shirt : save.paint;
+function playerStats() {
+  const c = CAR[save.car], lv = save.lv;
+  return { top: c.top * (1 + 0.025 * lv.motor), acc: c.acc * (1 + 0.05 * lv.turbo), turn: TURN * c.hand * (1 + 0.03 * lv.lastik), nitroCap: 1 + 0.15 * lv.nitro, corner: 0.8 };
+}
+function makeCar(isPlayer, name, carId, color, avatar, st) {
+  const model = buildCarModel(carId, color, avatar);
+  scene.add(model.group);
+  const c = { isPlayer, name, carId, color, model, st, baseTop: st.top, x: 0, z: 0, h: 0, vx: 0, vz: 0, speed: 0, steer: 0, slip: 0, nitro: 0.4, nitroOn: false, boostT: 0,
+    idx: 0, pIdx: 0, frac: 0, off: 0, lap: 0, maxLap: 0, lapStart: 0, bestLap: 0, lastLap: 0, finished: false, finT: 0, place: 0, pos: 0,
+    stuckT: 0, wrongT: 0, resetCd: 0, lane: 0, laneGoal: 0, laneT: 0, useN: false, fxT: 0, spin: 0, inp: { steer: 0, throttle: 0, brake: 0, drift: false, nitro: false } };
+  if (!isPlayer) { c.tag = makeTag(name); model.group.add(c.tag); }
+  if (track.def.theme.night) {   // gece: far ışığı havuzu
+    const hl = mesh(new THREE.PlaneGeometry(7, 12), new THREE.MeshBasicMaterial({ map: headTex(), transparent: true, opacity: isPlayer ? 0.5 : 0.28, depthWrite: false, blending: THREE.AdditiveBlending }), 0, 0.12, model.len / 2 + 6.2, model.group, false);
+    hl.rotation.x = -Math.PI / 2;
+  }
+  cars.push(c);
+  return c;
+}
+let _headTex = null;
+function headTex() {
+  return _headTex || (_headTex = canvasTex(64, 128, (g, w, h) => {   // kenarlarda tamamen sönen oval ışık (arabaya yakın ucu parlak)
+    g.translate(32, 64); g.scale(1, 2);
+    const gr = g.createRadialGradient(0, 14, 1, 0, 0, 31); gr.addColorStop(0, "rgba(255,245,200,1)"); gr.addColorStop(1, "rgba(255,245,200,0)");
+    g.fillStyle = gr; g.fillRect(-32, -32, 64, 64);
+  }));
+}
+function clearCars() {
+  for (const c of cars) { scene.remove(c.model.group); disposeGroup(c.model.group); }
+  cars.length = 0; player = null; _headTex = null;
+}
+function resetCar(c) {
+  const T = track, i = c.idx;
+  c.x = T.px[i]; c.z = T.pz[i]; c.h = T.ang[i]; c.vx = c.vz = c.speed = c.steer = c.slip = 0; c.stuckT = 0; c.boostT = 0; c.off = 0; c.lane = c.laneGoal = 0;
+}
+function setupRace() {
+  clearCars();
+  const T = track, d = DIFFS[save.diff];
+  const names = [...BOT_NAMES].sort(() => Math.random() - 0.5);
+  for (let i = 0; i < GRID - 1; i++) {   // 0 = en hızlı rakip, en önde başlar
+    const st = { top: T.def.botTop * d.f * (1 - i * 0.014), acc: T.def.botAcc, turn: TURN * 1.03, nitroCap: 1, corner: d.corner * (1 - i * 0.012) };
+    const col = BOT_COLORS[i % BOT_COLORS.length];
+    makeCar(false, names[i], pick(T.def.botCars), col, { skin: pick(SKINS), shirt: col, pants: "#2b2d42", hat: pick(HATS), hatColor: col, face: pick(FACES) }, st);
+  }
+  player = makeCar(true, playerName(), save.car, paintColor(), myAvatar(), playerStats());
+  cars.forEach((c, slot) => {
+    const row = Math.floor(slot / 2), i = wrapI(T.n - 3 - row * 4, T.n), lat = slot % 2 ? 2.7 : -2.7, along = slot % 2 ? -2 : 0;
+    c.x = T.px[i] + T.nx[i] * lat + T.tx[i] * along; c.z = T.pz[i] + T.nz[i] * lat + T.tz[i] * along; c.h = T.ang[i];
+    c.idx = c.pIdx = i; c.off = lat; c.lane = c.laneGoal = lat; c.laneT = rand(2, 5);
+  });
+}
+// Kendi arabanın görünümünü yenile (boya, araba ya da avatar değişince)
+function refreshPlayerCar() {
+  if (!player) return;
+  const old = player.model, m = buildCarModel(save.car, paintColor(), myAvatar());
+  for (const ch of [...old.group.children]) if (ch !== old.body && !old.pivots.includes(ch) && !old.wheels.some(w => w.parent === ch)) m.group.add(ch);   // far havuzu vb.
+  scene.remove(old.group); disposeGroup(old.group);
+  scene.add(m.group); player.model = m; player.carId = save.car;
+  if (!race.on) { player.st = playerStats(); player.baseTop = player.st.top; }
+}
+
+// ================================================================ Fizik
+function stepCar(c, inp, dt) {
+  const st = c.st;
+  c.steer += clamp(inp.steer - c.steer, -dt * 5, dt * 5);
+  const sf = c.vx * Math.sin(c.h) + c.vz * Math.cos(c.h);       // ileri hız
+  let sp = Math.hypot(c.vx, c.vz);
+  const off = Math.abs(c.off) > HW + 0.4;                        // çimde
+  const nitroOn = inp.nitro && c.nitro > 0.02 && sf > 4;
+  if (nitroOn) c.nitro = Math.max(0, c.nitro - dt / (NITRO_TIME * st.nitroCap));
+  else c.nitro = Math.min(1, c.nitro + dt * 0.035);
+  c.nitroOn = nitroOn;
+  if (c.boostT > 0) c.boostT -= dt;
+  const top = st.top * (nitroOn ? 1.3 : 1) * (c.boostT > 0 ? 1.22 : 1) * (off ? 0.5 : 1);
+  const acc = st.acc * (nitroOn ? 1.7 : 1) * (c.boostT > 0 ? 1.4 : 1) * (off ? 0.6 : 1);
+  if (sf < -0.3 || (inp.brake > 0 && sp < 1)) {
+    // Geri vites: kayma yok, direksiyon ters çalışır
+    let r = Math.min(sf, 0);
+    r = inp.brake > 0 ? Math.max(-9, r - acc * 0.5 * dt) : Math.min(0, r + (inp.throttle > 0 ? BRAKE : 5) * dt);
+    c.h -= c.steer * st.turn * 0.7 * clamp(-r / 6, 0, 1) * dt;
+    c.vx = Math.sin(c.h) * r; c.vz = Math.cos(c.h) * r;
+    c.speed = r; c.slip = 0; c.drifting = false;
+  } else {
+    // İleri: hızın yönü (va) arabanın baktığı yöne (h) tutunma kadar çabuk döner; aradaki açı = kayma
+    let va = sp > 0.5 ? Math.atan2(c.vx, c.vz) : c.h;
+    if (inp.brake > 0) sp = Math.max(0, sp - BRAKE * dt);
+    else if (inp.throttle > 0 && sp < top) sp += acc * (1 - Math.pow(sp / top, 2) * 0.85) * dt;
+    if (sp > top) sp = Math.max(top, sp - (off ? 28 : 12) * dt);
+    sp *= Math.exp(-(inp.throttle > 0 ? 0.02 : 0.4) * dt);
+    const drifting = inp.drift && sp > 8;
+    const g = clamp(sp / 9, 0, 1) * (1 - 0.45 * clamp(sp / st.top, 0, 1.2));
+    c.h += c.steer * st.turn * g * (drifting ? 1.35 : 1) * dt;
+    va += angDiff(va, c.h) * (1 - Math.exp(-(drifting ? 2.4 : 8.5) * (off ? 0.6 : 1) * dt));
+    const beta = angDiff(c.h, va), sb = Math.abs(Math.sin(beta));
+    sp = Math.max(0, sp - sp * sb * (drifting ? 0.3 : 0.65) * dt);   // kayarken hız kaybı
+    if (drifting && sb > 0.12) c.nitro = Math.min(1, c.nitro + dt * 0.22);
+    c.vx = Math.sin(va) * sp; c.vz = Math.cos(va) * sp;
+    c.speed = sp * Math.cos(beta); c.slip = sp * sb; c.drifting = drifting;
+  }
+  c.x += c.vx * dt; c.z += c.vz * dt;
+}
+// Arabanın pistteki yeri: en yakın örnek, yana uzaklık
+function locate(c) {
+  const T = track, n = T.n;
+  let best = c.idx, bd = 1e12;
+  for (let k = -12; k <= 18; k++) { const i = wrapI(c.idx + k, n), dx = c.x - T.px[i], dz = c.z - T.pz[i], d = dx * dx + dz * dz; if (d < bd) { bd = d; best = i; } }
+  c.idx = best;
+  const dx = c.x - T.px[best], dz = c.z - T.pz[best];
+  c.off = dx * T.nx[best] + dz * T.nz[best];
+  c.frac = clamp((dx * T.tx[best] + dz * T.tz[best]) / T.ds, -0.5, 0.5);
+}
+function walls(c) {
+  const T = track, i = c.idx, lim = WALL_OFF - CAR_R;
+  if (Math.abs(c.off) <= lim) return;
+  const s = Math.sign(c.off), over = Math.abs(c.off) - lim, nx = T.nx[i] * s, nz = T.nz[i] * s;
+  c.x -= nx * over; c.z -= nz * over; c.off = s * lim;
+  const vn = c.vx * nx + c.vz * nz;
+  if (vn > 0) {
+    c.vx -= nx * vn * 1.25; c.vz -= nz * vn * 1.25;
+    if (vn > 4) { c.vx *= 0.82; c.vz *= 0.82; if (c.isPlayer) { SFX.crash(clamp(vn / 14, 0.3, 1)); shake = 0.3; } }
+  }
+  c.vx *= 0.994; c.vz *= 0.994;
+}
+function pads(c) {
+  const T = track;
+  if (Math.abs(c.off) > 3.3 || c.boostT > 1.2) return;
+  for (const p of T.padIdx) {
+    const d = wrapI(c.idx - p, T.n);
+    if (d <= 1 || d >= T.n - 1) {
+      c.boostT = 1.8; const fx = Math.sin(c.h), fz = Math.cos(c.h); c.vx += fx * 5; c.vz += fz * 5;
+      if (c.isPlayer) { SFX.boost(); bigMsg("⚡", "", 0.7); }
+    }
+  }
+}
+function collideCars() {
+  const D = CAR_R * 2;
+  for (let i = 0; i < cars.length; i++) for (let j = i + 1; j < cars.length; j++) {
+    const a = cars[i], b = cars[j], dx = b.x - a.x, dz = b.z - a.z, d2 = dx * dx + dz * dz;
+    if (d2 >= D * D || d2 < 1e-6) continue;
+    const d = Math.sqrt(d2), nx = dx / d, nz = dz / d, o = (D - d) / 2;
+    a.x -= nx * o; a.z -= nz * o; b.x += nx * o; b.z += nz * o;
+    const rel = (a.vx - b.vx) * nx + (a.vz - b.vz) * nz;
+    if (rel > 0) {
+      a.vx -= nx * rel * 0.55; a.vz -= nz * rel * 0.55; b.vx += nx * rel * 0.55; b.vz += nz * rel * 0.55;
+      if (rel > 3 && (a.isPlayer || b.isPlayer)) { SFX.bump(); shake = Math.max(shake, 0.15); }
+    }
+  }
+}
+
+// ================================================================ Rakip yapay zekâsı
+// Bu eğrilikte (1/m) arabanın dönebileceği en yüksek hız
+function cornerSpeed(st, k) {
+  const a = st.turn / Math.max(k, 0.003);
+  return (st.corner || 0.8) * a / (1 + 0.45 * a / st.top);
+}
+function botInput(c, dt) {
+  const T = track, n = T.n, sf = c.speed, inp = c.inp;
+  // Şerit: ara sıra değişir; önünde yavaş araba varsa yanından geçer
+  c.laneT -= dt;
+  if (c.laneT <= 0) { c.laneT = rand(2.5, 6); c.laneGoal = rand(-1, 1) * (HW - 2.6); }
+  for (const o of cars) {
+    if (o === c) continue;
+    const dI = wrapI(o.idx - c.idx, n);
+    if (dI > 0 && dI < 10 && Math.abs(o.off - c.lane) < 2.7 && o.speed < sf + 2) { c.laneGoal = clamp(o.off + (o.off > 0 ? -1 : 1) * 4.4, -(HW - 2), HW - 2); c.laneT = 1.5; }
+  }
+  c.lane += clamp(c.laneGoal - c.lane, -dt * 4, dt * 4);
+  // Lastik bant: oyuncudan çok öndeyse biraz yavaşlar, çok gerideyse hızlanır
+  if (player && c !== player && !player.finished) {
+    const gap = ((c.lap - player.lap) * n + c.idx - player.idx) * T.ds;
+    c.st.top = c.baseTop * clamp(1 - gap / 70 * 0.035, 0.965, 1.035);
+  }
+  const look = Math.round((7 + Math.max(sf, 0) * 0.42) / T.ds), j = wrapI(c.idx + look, n);
+  const lane = c.lane * clamp(1 - T.curv[j] * 9, 0.35, 1);   // virajda ortaya yaklaş
+  const want = Math.atan2(T.px[j] + T.nx[j] * lane - c.x, T.pz[j] + T.nz[j] * lane - c.z), d = angDiff(c.h, want);
+  inp.steer = clamp(d * 2.6, -1, 1);
+  // Hedef hız: ilerideki virajlara fren mesafesiyle yetişecek kadar
+  const B = BRAKE * 0.8;
+  let vT = c.st.top * 1.4;
+  const maxK = Math.round((sf * sf / (2 * B) + 16) / T.ds);
+  for (let k = 0; k <= maxK; k += 2) {
+    const vc = cornerSpeed(c.st, T.curv[wrapI(c.idx + k, n)]), allowed = Math.sqrt(vc * vc + 2 * B * Math.max(0, k * T.ds - 5));
+    if (allowed < vT) vT = allowed;
+  }
+  if (Math.abs(c.off) > HW + 0.5) vT = Math.min(vT, 16);
+  inp.throttle = sf < vT ? 1 : 0; inp.brake = sf > vT + 1.5 ? 1 : 0; inp.drift = false;
+  if (!c.useN && c.nitro > 0.55 && vT > c.st.top * 1.25 && Math.abs(d) < 0.1 && sf > c.st.top * 0.6) c.useN = true;
+  if (c.useN && (c.nitro < 0.04 || vT < c.st.top)) c.useN = false;
+  inp.nitro = c.useN;
+}
+
+// ================================================================ Oyuncu girdisi
+const keys = new Set();
+const touch = { left: false, right: false, gas: false, brake: false, drift: false, nitro: false };
+const isTouch = matchMedia("(pointer: coarse)").matches || "ontouchstart" in window;
+if (isTouch) document.body.classList.add("touch");
+const autoGas = () => save.autoGas == null ? isTouch : !!save.autoGas;
+function playerInput(c) {
+  const i = c.inp, k = keys;
+  const L = k.has("KeyA") || k.has("ArrowLeft") || touch.left, R = k.has("KeyD") || k.has("ArrowRight") || touch.right;
+  i.steer = (L ? 1 : 0) - (R ? 1 : 0);
+  i.brake = k.has("KeyS") || k.has("ArrowDown") || touch.brake ? 1 : 0;
+  i.throttle = !i.brake && (k.has("KeyW") || k.has("ArrowUp") || touch.gas || autoGas()) ? 1 : 0;
+  i.drift = k.has("Space") || touch.drift;
+  i.nitro = k.has("ShiftLeft") || k.has("ShiftRight") || k.has("KeyN") || touch.nitro;
+}
+function playerReset() {
+  if (!race.on || race.phase !== "go" || !player || player.finished || player.resetCd > 0) return;
+  resetCar(player); player.resetCd = 2; SFX.click(); notify("🔄 Piste döndün");
+}
+
+// ================================================================ Yarış
+const race = { on: false, ended: false, phase: "", t: 0, countT: 0, shown: 0, doneT: 0, limit: 0, finished: 0, dnf: false };
+let shake = 0;
+function startRace() {
+  initAudio();
+  buildTrack(save.track); setupRace();
+  Object.assign(race, { on: true, ended: false, phase: "count", t: 0, countT: 3, shown: 4, doneT: 0, limit: 0, finished: 0, dnf: false });
+  hideAll(); document.body.classList.add("playing");
+  document.body.classList.toggle("manualGas", !autoGas());
+  rank(); updateCamera(0, true); updateHud();
+}
+function lapLogic(c) {
+  const n = track.n;
+  if (c.pIdx > n * 0.75 && c.idx < n * 0.25) {
+    c.lap++;
+    if (c.lap > c.maxLap) {
+      c.maxLap = c.lap;
+      if (c.lap >= 2) { c.lastLap = race.t - c.lapStart; if (!c.bestLap || c.lastLap < c.bestLap) c.bestLap = c.lastLap; }
+      c.lapStart = race.t;
+      if (c.lap > LAPS) finish(c);
+      else if (c.isPlayer && c.lap >= 2) { SFX.lap(); bigMsg(c.lap === LAPS ? "🏁 Son tur!" : `Tur ${c.lap}/${LAPS}`, `Tur süresi ${fmtT(c.lastLap)}`); }
+    }
+  } else if (c.pIdx < n * 0.25 && c.idx > n * 0.75) c.lap--;
+  c.pIdx = c.idx;
+}
+function finish(c) {
+  if (c.finished) return;
+  c.finished = true; c.finT = race.t; c.place = ++race.finished;
+  if (c.isPlayer) { race.phase = "done"; race.doneT = 3; race.limit = 0; (c.place === 1 ? SFX.win : SFX.finish)(); bigMsg(c.place === 1 ? "🏆 BİRİNCİ!" : `🏁 ${c.place}. oldun`, fmtT(c.finT), 2.6); }
+  else if (race.finished === 1 && !player.finished) race.limit = FINISH_LIMIT;
+}
+const progress = c => c.lap * track.n + c.idx + c.frac;
+function rank() {
+  const list = [...cars].sort((a, b) => (a.finished ? 1e9 - a.finT : progress(a)) < (b.finished ? 1e9 - b.finT : progress(b)) ? 1 : -1);
+  list.forEach((c, i) => c.pos = i + 1);
+  return list;
+}
+function raceUpdate(dt) {
+  const T = track;
+  if (race.phase === "count") {
+    race.countT -= dt;
+    const n = Math.ceil(race.countT);
+    if (n !== race.shown && n > 0) { race.shown = n; bigMsg(String(n), "", 0.9); SFX.beep(false); }
+    if (race.countT <= 0) { race.phase = "go"; bigMsg("BAŞLA!", "", 1); SFX.beep(true); }
+    return;
+  }
+  race.t += dt;
+  for (const c of cars) {
+    if (c.isPlayer && !c.finished && !window.autoPilot) playerInput(c); else botInput(c, dt);
+    stepCar(c, c.inp, dt);
+  }
+  collideCars();
+  for (const c of cars) {
+    locate(c); walls(c); pads(c); lapLogic(c);
+    if (c.resetCd > 0) c.resetCd -= dt;
+    if (!c.isPlayer || c.finished || window.autoPilot) {   // takılan rakip piste döner
+      c.stuckT = Math.abs(c.speed) < 1.5 ? c.stuckT + dt : 0;
+      if (c.stuckT > 2.2) resetCar(c);
+    }
+  }
+  const p = player;
+  p.wrongT = (Math.sin(p.h) * T.tx[p.idx] + Math.cos(p.h) * T.tz[p.idx] < -0.35 && Math.abs(p.speed) > 2) ? p.wrongT + dt : 0;
+  rank();
+  if (race.limit > 0 && race.phase === "go") {
+    race.limit -= dt;
+    if (race.limit <= 0) { race.dnf = true; race.phase = "done"; race.doneT = 0.6; SFX.lose(); bigMsg("⏱️ Süre doldu", "", 1.5); }
+  }
+  if (race.phase === "done") { race.doneT -= dt; if (race.doneT <= 0) endRace(); }
+}
+function endRace() {
+  const T = track, def = T.def, d = DIFFS[save.diff], list = rank(), p = player, place = p.pos;
+  race.on = false; race.ended = true;
+  const rows = [];
+  const base = Math.round(PLACE_PAY[place - 1] * def.pay);
+  rows.push([`${place}. sıra (${def.name})`, base]);
+  let total = base;
+  if (d.reward !== 1) { const v = Math.round(base * d.reward) - base; rows.push([`Zorluk: ${d.name} ×${String(d.reward).replace(".", ",")}`, v]); total += v; }
+  const old = save.best[def.id] || {};
+  if (p.bestLap && old.lap && p.bestLap < old.lap) { const v = Math.round(40 * def.pay); rows.push(["⏱️ Tur rekoru!", v]); total += v; }
+  if (save.passes.double) { rows.push(["💰 2x Para", total]); total *= 2; }
+  save.money += total; save.races++;
+  if (place === 1) save.wins++;
+  if (place <= 3) save.podiums++;
+  save.best[def.id] = { lap: p.bestLap && (!old.lap || p.bestLap < old.lap) ? p.bestLap : old.lap || 0, race: p.finished && (!old.race || p.finT < old.race) ? p.finT : old.race || 0 };
+  let unlocked = null;
+  const next = TRACKS[TRACKS.indexOf(def) + 1];
+  if (place <= 3 && next && !save.tracks[next.id]) { save.tracks[next.id] = true; unlocked = next; }
+  persist(true);
+  document.body.classList.remove("playing");
+  $("endTitle").textContent = race.dnf ? `⏱️ Süre doldu: ${place}. oldun` : place === 1 ? "🏆 Birinci oldun!" : place <= 3 ? `${place === 2 ? "🥈" : "🥉"} Podyum: ${place}. oldun!` : `🏁 ${place}. oldun`;
+  $("endTable").innerHTML = `<tr><th>#</th><th>Yarışçı</th><th class="n">Süre</th><th class="n">En iyi tur</th></tr>` + list.map((c, i) =>
+    `<tr class="${c.isPlayer ? "me" : ""}"><td>${i + 1}</td><td>${esc(c.name)}</td><td class="n">${c.finished ? fmtT(c.finT) : "—"}</td><td class="n">${fmtT(c.bestLap)}</td></tr>`).join("");
+  $("earn").innerHTML = rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td>+💰${fmt(v)}</td></tr>`).join("") +
+    `<tr><td><b>Toplam</b></td><td class="money">+💰${fmt(total)}</td></tr>` + (unlocked ? `<tr><td colspan="2"><b>🔓 Yeni pist açıldı: ${unlocked.icon} ${esc(unlocked.name)}</b></td></tr>` : "");
+  show("ovEnd");
+  if (unlocked) { SFX.pickup(); notify(`🔓 Yeni pist: ${unlocked.icon} ${unlocked.name}`); }
+}
+function quitRace() { race.on = false; openMenu(); }
+
+// ================================================================ Efektler (duman, toz, nitro alevi)
+const FX = { pool: [], live: [] };
+const puffTex = canvasTex(64, 64, (g, w) => { const gr = g.createRadialGradient(32, 32, 2, 32, 32, 31); gr.addColorStop(0, "rgba(255,255,255,1)"); gr.addColorStop(1, "rgba(255,255,255,0)"); g.fillStyle = gr; g.fillRect(0, 0, w, w); });
+const PUFF = { smoke: [0xe8e8e8, 0.7, 0.8, 3, 0.4], dust: [0xc9b48a, 0.6, 0.8, 2.6, 0.45], fire: [0xffa23a, 0.22, 0.9, 0.8, 0.9] };   // renk, ömür, boy, büyüme, opaklık
+function puff(x, y, z, kind) {
+  let s = FX.pool.pop();
+  if (!s) { if (FX.live.length >= 90) return; s = new THREE.Sprite(new THREE.SpriteMaterial({ map: puffTex, transparent: true, depthWrite: false })); }
+  const [col, life, s0, grow, a] = PUFF[kind];
+  s.material.color.set(col); s.material.blending = kind === "fire" ? THREE.AdditiveBlending : THREE.NormalBlending;
+  s.position.set(x, y, z); s.userData = { t: 0, life, s0, grow, a }; s.scale.setScalar(s0); s.material.opacity = a;
+  scene.add(s); FX.live.push(s);
+}
+function updateFx(dt) {
+  for (let i = FX.live.length - 1; i >= 0; i--) {
+    const s = FX.live[i], u = s.userData; u.t += dt;
+    const k = u.t / u.life;
+    if (k >= 1) { scene.remove(s); FX.live.splice(i, 1); FX.pool.push(s); continue; }
+    s.scale.setScalar(u.s0 + u.grow * k); s.material.opacity = u.a * (1 - k); s.position.y += dt * 0.7;
+  }
+}
+function clearFx() { for (const s of FX.live) { scene.remove(s); FX.pool.push(s); } FX.live.length = 0; }
+
+// ================================================================ Model senkronu + kamera
+function syncCars(dt) {
+  for (const c of cars) {
+    const m = c.model, g = m.group;
+    g.position.set(c.x, 0, c.z); g.rotation.y = c.h;
+    const k = clamp(c.speed / c.st.top, -1, 1.3);
+    m.body.rotation.z = lerp(m.body.rotation.z, c.steer * k * 0.07, clamp(dt * 8, 0, 1));           // virajda yatma
+    m.body.rotation.x = lerp(m.body.rotation.x, c.inp.brake && c.speed > 3 ? 0.035 : c.nitroOn ? -0.03 : 0, clamp(dt * 6, 0, 1));
+    c.spin += c.speed * dt / m.r;
+    for (const w of m.wheels) w.rotation.x = c.spin;
+    for (const p of m.pivots) p.rotation.y = c.steer * 0.42;
+    m.tailMat.color.setHex(c.inp.brake ? 0xff3030 : 0x8a0f0f);
+    // Efektler: sadece oyuncuya yakın arabalar
+    c.fxT -= dt;
+    if (c.fxT <= 0 && player && (c === player || Math.hypot(c.x - player.x, c.z - player.z) < 70)) {
+      const fx = Math.sin(c.h), fz = Math.cos(c.h), bx = c.x - fx * m.len * 0.45, bz = c.z - fz * m.len * 0.45;
+      if (c.nitroOn || c.boostT > 0) { puff(bx, 0.6, bz, "fire"); c.fxT = 0.03; }
+      else if (c.slip > 4 && Math.abs(c.speed) > 8) { const s = Math.random() < 0.5 ? 1 : -1; puff(bx + fz * s * 0.8, 0.3, bz - fx * s * 0.8, "smoke"); c.fxT = 0.05; }
+      else if (Math.abs(c.off) > HW + 0.6 && Math.abs(c.speed) > 8) { puff(bx, 0.3, bz, "dust"); c.fxT = 0.07; }
+    }
+  }
+}
+let camH = 0, menuT = 0, endT = 0;
+function fitFov(base) {
+  const a = innerWidth / innerHeight;
+  if (a >= 1) return base;
+  return Math.min(100, 2 * Math.atan(Math.tan(base * Math.PI / 360) / a) * 180 / Math.PI);
+}
+function setFov(f, k = 1) { const v = lerp(camera.fov, f, k); if (Math.abs(v - camera.fov) > 0.01) { camera.fov = v; camera.updateProjectionMatrix(); } }
+function lightAt(x, z) { sun.position.set(x + 34, 62, z + 22); sun.target.position.set(x, 0, z); sun.target.updateMatrixWorld(); }
+function updateCamera(dt, snap) {
+  const c = player, T = track;
+  if (c && race.on) {
+    const sp = clamp(Math.abs(c.speed) / c.st.top, 0, 1.4);
+    camH += angDiff(camH, c.h) * (snap ? 1 : clamp(dt * 5.5, 0, 1));
+    const dist = 7.4 + sp * 1.5, sh = shake > 0 ? (Math.random() - 0.5) * shake : 0;
+    camera.position.set(c.x - Math.sin(camH) * dist + sh, 3.2 + sp * 0.3 + sh * 0.5, c.z - Math.cos(camH) * dist);
+    camera.lookAt(c.x + Math.sin(c.h) * 3.5, 1.3, c.z + Math.cos(c.h) * 3.5);
+    setFov(fitFov(BASE_FOV + sp * 11 + (c.nitroOn || c.boostT > 0 ? 8 : 0)), snap ? 1 : clamp(dt * 4, 0, 1));
+    if (shake > 0) shake = Math.max(0, shake - dt * 1.2);
+    lightAt(c.x, c.z);
+  } else if (c && race.ended) {   // yarış bitti: arabanın çevresinde dön
+    endT += dt * 0.5;
+    camera.position.set(c.x + Math.sin(endT) * 9, 3.6, c.z + Math.cos(endT) * 9); camera.lookAt(c.x, 1, c.z);
+    setFov(fitFov(BASE_FOV)); lightAt(c.x, c.z);
+  } else if (T) {                  // menü: pistin üstünde yavaş tur
+    menuT += dt * 0.07;
+    const r = T.rad * 0.95 + 30;
+    camera.position.set(T.cx + Math.sin(menuT) * r, T.rad * 0.5 + 34, T.cz + Math.cos(menuT) * r); camera.lookAt(T.cx, 0, T.cz);
+    setFov(fitFov(BASE_FOV)); lightAt(T.cx, T.cz);
+  }
+}
+
+// ================================================================ HUD
+let bigTimer = 0;
+function bigMsg(t, sub = "", secs = 1.5) {
+  const el = $("big");
+  el.innerHTML = esc(t) + (sub ? `<small>${esc(sub)}</small>` : "");
+  el.classList.remove("pop"); void el.offsetWidth;
+  el.style.animationDuration = secs + "s"; el.classList.add("pop");
+}
+let mini = null, miniN = 0;
+function setupMini() {
+  const T = track, S = $("mini").width, pad = 22, sc = (S - pad * 2) / Math.max(T.maxX - T.minX, T.maxZ - T.minZ);
+  const path = new Path2D();
+  for (let i = 0; i < T.n; i += 2) { const x = S / 2 + (T.px[i] - T.cx) * sc, y = S / 2 + (T.pz[i] - T.cz) * sc; i ? path.lineTo(x, y) : path.moveTo(x, y); }
+  path.closePath();
+  mini = { S, sc, path };
+}
+function drawMini() {
+  if (!mini || !track) return;
+  const T = track, g = $("mini").getContext("2d"), { S, sc, path } = mini;
+  const X = x => S / 2 + (x - T.cx) * sc, Y = z => S / 2 + (z - T.cz) * sc;
+  g.clearRect(0, 0, S, S);
+  g.lineJoin = "round"; g.strokeStyle = "rgba(255,255,255,0.4)"; g.lineWidth = 12; g.stroke(path);
+  g.strokeStyle = "rgba(20,24,34,0.9)"; g.lineWidth = 7; g.stroke(path);
+  g.fillStyle = "#fff"; g.fillRect(X(T.px[0]) - 3, Y(T.pz[0]) - 9, 6, 18);
+  for (const c of cars) if (!c.isPlayer) { g.fillStyle = c.color; g.beginPath(); g.arc(X(c.x), Y(c.z), 6.5, 0, 7); g.fill(); }
+  if (player) { g.fillStyle = "#fff"; g.strokeStyle = "#e63946"; g.lineWidth = 4; g.beginPath(); g.arc(X(player.x), Y(player.z), 8.5, 0, 7); g.fill(); g.stroke(); }
+}
+function updateHud() {
+  const c = player;
+  if (!c) return;
+  if ($("posTxt")._p !== c.pos) { $("posTxt")._p = c.pos; $("posTxt").innerHTML = `${c.pos}<small>/${cars.length}</small>`; }
+  setText($("lapTxt"), `Tur ${clamp(c.lap, 1, LAPS)}/${LAPS}`);
+  setText($("timeTxt"), race.phase === "count" ? "0:00,00" : fmtT(c.finished ? c.finT : race.t));
+  setText($("bestTxt"), fmtT(c.bestLap || (save.best[track.id] || {}).lap));
+  setText($("kmh").firstChild, String(Math.round(Math.abs(c.speed) * KMH)));
+  $("nitroFill").style.width = Math.round(c.nitro * 100) + "%";
+  $("nitroFill").classList.toggle("use", c.nitroOn);
+  $("wrong").style.display = c.wrongT > 0.8 && race.phase === "go" ? "block" : "none";
+  const lim = race.limit > 0 && race.phase === "go";
+  $("limit").style.display = lim ? "block" : "none";
+  if (lim) setText($("limit"), `⏱️ Yarış ${Math.ceil(race.limit)} sn sonra bitiyor`);
+  if (++miniN % 2 === 0) drawMini();
+}
+
+// ================================================================ Menüler
+const overlays = ["ovMenu", "ovHelp", "ovGarage", "ovShop", "ovPause", "ovEnd"];
+const anyOverlay = () => overlays.some(id => $(id).classList.contains("show"));
+function show(id) { $(id).classList.add("show"); renderOpen(id); }
+function hide(id) { $(id).classList.remove("show"); }
+function hideAll() { for (const id of overlays) $(id).classList.remove("show"); }
+function renderOpen(id) {
+  if (id === "ovMenu") renderMenu();
+  else if (id === "ovGarage") renderGarage();
+  else if (id === "ovShop") renderShop();
+  else if (id === "ovPause") { $("bAuto").textContent = autoGas() ? "⛽ Otomatik gaz: Açık" : "⛽ Otomatik gaz: Kapalı"; $("bMute").textContent = save.muted ? "🔇 Ses kapalı" : "🔊 Ses açık"; }
+}
+function rerenderOpen() { for (const id of overlays) if ($(id).classList.contains("show")) renderOpen(id); }
+document.querySelectorAll("[data-close]").forEach(b => b.addEventListener("click", () => {
+  const ov = b.closest(".overlay"); hide(ov.id); SFX.click();
+  if (ov.id === "ovHelp" && !save.helpSeen) { save.helpSeen = true; persist(true); }
+  if (ov.id === "ovGarage") refreshPlayerCar();
+  if (!race.on && !anyOverlay()) openMenu(); else rerenderOpen();
+}));
+function openMenu() {
+  race.on = false; race.ended = false;
+  clearCars(); clearFx();
+  document.body.classList.remove("playing");
+  buildTrack(save.track);
+  hideAll(); show("ovMenu");
+}
+function renderMenu() {
+  $("menuStats").innerHTML = [["💰 Para", fmt(save.money)], ["🏆 Birincilik", fmt(save.wins)], ["🥉 Podyum", fmt(save.podiums)], ["🏁 Yarış", fmt(save.races)]]
+    .map(([k, v]) => `<div>${k}<b>${esc(v)}</b></div>`).join("");
+  $("bGarage").textContent = `${CAR[save.car].icon} Garaj: ${CAR[save.car].name}`;
+  $("trackSel").innerHTML = TRACKS.map((t, i) => {
+    const open = save.tracks[t.id], b = save.best[t.id] || {};
+    return `<button class="btn ${save.track === t.id ? "sel" : ""}" data-track="${t.id}" ${open ? "" : "disabled"}>${t.icon} ${esc(t.name)}
+      <small>${open ? `${Math.round(TRACK_DATA[t.id].len)} m · ödül ×${String(t.pay).replace(".", ",")}${b.lap ? " · tur " + fmtT(b.lap) : ""}` : `🔒 ${esc(TRACKS[i - 1].name)} pistinde ilk 3'e gir`}</small></button>`;
+  }).join("");
+  $("trackSel").querySelectorAll("[data-track]").forEach(b => b.onclick = () => { save.track = b.dataset.track; SFX.click(); persist(true); buildTrack(save.track); renderMenu(); });
+  $("diffSel").innerHTML = Object.entries(DIFFS).map(([id, d]) =>
+    `<button class="btn ${save.diff === id ? "sel" : ""}" data-diff="${id}">${d.name}<small>ödül ×${String(d.reward).replace(".", ",")}</small></button>`).join("");
+  $("diffSel").querySelectorAll("[data-diff]").forEach(b => b.onclick = () => { save.diff = b.dataset.diff; SFX.click(); persist(true); renderMenu(); });
+}
+let pvCar = null;   // garajda önizlenen araba (satın almadan bakılabilir)
+function statBars(c) {
+  const rows = [["Son hız", c.top / 52], ["Hızlanma", c.acc / 22], ["Dönüş", (c.hand - 0.9) / 0.26]];
+  return `<div class="bars">${rows.map(([k, v]) => `<span>${k}</span><div class="bar"><b style="width:${Math.round(clamp(v, 0.08, 1) * 100)}%"></b></div>`).join("")}</div>`;
+}
+function renderGarage() {
+  if (!pvCar || !CAR[pvCar]) pvCar = save.car;
+  $("garMoney").textContent = `💰 ${fmt(save.money)} · Seçili: ${CAR[save.car].name}`;
+  const paints = [["avatar", myAvatar().shirt, "🧍"], ...PAINTS.map(p => [p, p, ""]), ["gold", "#ffc93c", save.passes.gold ? "✨" : "🔒"]];
+  $("paintSel").innerHTML = paints.map(([id, col, ic]) => `<button class="swp ${save.paint === id ? "on" : ""}" data-paint="${id}" style="background:${col}" title="${id === "avatar" ? "Avatarının tişört rengi" : id === "gold" ? "Altın Boya (R$ Mağaza)" : ""}">${ic}</button>`).join("");
+  $("paintSel").querySelectorAll("[data-paint]").forEach(b => b.onclick = () => {
+    if (b.dataset.paint === "gold" && !save.passes.gold) { notify("✨ Altın Boya R$ Mağaza'da"); return; }
+    save.paint = b.dataset.paint; SFX.click(); persist(true); renderGarage();
+  });
+  $("carList").innerHTML = CARS.map(c => {
+    let btn;
+    if (save.owned[c.id]) btn = save.car === c.id ? `<button class="btn sel" disabled>✔ Seçili</button>` : `<button class="btn blue" data-eq="${c.id}">Seç</button>`;
+    else btn = `<button class="btn go" data-buy="${c.id}" ${save.money < c.price ? "disabled" : ""}>💰 ${fmt(c.price)}</button>`;
+    return `<div class="wrow"><div class="ic" data-view="${c.id}" title="Önizle">${c.icon}</div><div data-view="${c.id}"><b>${esc(c.name)}</b>${pvCar === c.id ? ' <span class="muted">· 👁 önizleme</span>' : ""}
+      <div class="muted">${esc(c.desc)}</div>${statBars(c)}</div>${btn}</div>`;
+  }).join("");
+  $("carList").querySelectorAll("[data-view]").forEach(b => b.onclick = () => { pvCar = b.dataset.view; renderGarage(); });
+  $("carList").querySelectorAll("[data-buy]").forEach(b => b.onclick = () => {
+    const c = CAR[b.dataset.buy];
+    if (save.money < c.price || save.owned[c.id]) return;
+    save.money -= c.price; save.owned[c.id] = true; save.car = pvCar = c.id;
+    SFX.pickup(); notify(`${c.icon} ${c.name} alındı ve seçildi!`); persist(true); rerenderOpen();
+  });
+  $("carList").querySelectorAll("[data-eq]").forEach(b => b.onclick = () => { save.car = pvCar = b.dataset.eq; SFX.click(); persist(true); rerenderOpen(); });
+  $("upList").innerHTML = UPGRADES.map(u => {
+    const lv = save.lv[u.id], price = upPrice(u, lv);
+    const pips = `<span class="pips">${Array.from({ length: u.max }, (_, i) => `<i class="${i < lv ? "on" : ""}"></i>`).join("")}</span>`;
+    return `<div class="wrow"><div class="ic">${u.icon}</div><div><b>${esc(u.name)}</b> <span class="muted">· seviye ${lv}/${u.max}</span><div class="muted">${esc(u.desc)}</div>${pips}</div>
+      ${lv >= u.max ? `<button class="btn" disabled>✔ En üst</button>` : `<button class="btn go" data-up="${u.id}" ${save.money < price ? "disabled" : ""}>💰 ${fmt(price)}</button>`}</div>`;
+  }).join("");
+  $("upList").querySelectorAll("[data-up]").forEach(b => b.onclick = () => {
+    const u = UPG[b.dataset.up], lv = save.lv[u.id], price = upPrice(u, lv);
+    if (lv >= u.max || save.money < price) return;
+    save.money -= price; save.lv[u.id]++;
+    SFX.pickup(); notify(`${u.icon} ${u.name} seviye ${save.lv[u.id]}!`); persist(true); rerenderOpen();
+  });
+}
+// Garaj önizlemesi: küçük ikinci 3D sahne
+let pv = null;
+function renderPreview(dt) {
+  const cv = $("pvCanvas");
+  if (pv === null) {
+    try {
+      const r = new THREE.WebGLRenderer({ canvas: cv, antialias: true, alpha: true }), sc = new THREE.Scene();
+      sc.add(new THREE.HemisphereLight(0xffffff, 0x8892a6, 0.95));
+      const d = new THREE.DirectionalLight(0xffffff, 0.6); d.position.set(4, 8, 6); sc.add(d);
+      pv = { r, sc, cam: new THREE.PerspectiveCamera(30, 2, 0.1, 60), model: null, key: "", rot: 0.6 };
+    } catch (e) { pv = false; cv.style.display = "none"; }
+  }
+  if (!pv) return;
+  const a = myAvatar(), key = [pvCar, paintColor(), a.skin, a.shirt, a.hat, a.hatColor, a.face].join("|");
+  if (key !== pv.key) {
+    if (pv.model) { pv.sc.remove(pv.model.group); disposeGroup(pv.model.group); }
+    pv.model = buildCarModel(pvCar || save.car, paintColor(), a); pv.sc.add(pv.model.group); pv.key = key;
+  }
+  const w = cv.clientWidth, h = cv.clientHeight, pr = Math.min(2, devicePixelRatio || 1);
+  if (!w || !h) return;
+  if (cv.width !== Math.round(w * pr) || cv.height !== Math.round(h * pr)) { pv.r.setPixelRatio(pr); pv.r.setSize(w, h, false); pv.cam.aspect = w / h; pv.cam.updateProjectionMatrix(); }
+  pv.rot += dt * 0.7; pv.model.group.rotation.y = pv.rot;
+  pv.cam.position.set(0, 2.5, 9.4); pv.cam.lookAt(0, 0.75, 0);
+  pv.r.render(pv.sc, pv.cam);
+}
+function renderShop() {
+  const j = platform.profile ? platform.profile.jeton : null;
+  $("shopJeton").textContent = j == null ? "" : `Robux bakiyen: R$ ${fmt(j)}`;
+  $("passList").innerHTML = PASSES.map(p => {
+    const own = !p.consumable && save.passes[p.id];
+    return `<div class="wrow"><div class="ic">${p.icon}</div><div><b>${esc(p.name)}</b><div class="muted">${esc(p.desc)}</div></div>
+      ${own ? `<button class="btn" disabled>✔ Sende</button>` : `<button class="btn go" data-pass="${p.id}">R$ ${p.jeton}</button>`}</div>`;
+  }).join("");
+  $("passList").querySelectorAll("[data-pass]").forEach(b => b.onclick = () => {
+    const p = PASSES.find(x => x.id === b.dataset.pass);
+    requestPurchase(p, ok => {
+      if (!ok) return;
+      if (p.consumable) { save.money += 1000; notify("⚡ +💰1.000"); }
+      else { save.passes[p.id] = true; if (p.id === "gold") save.paint = "gold"; notify(`${p.icon} ${p.name} senin!`); }
+      SFX.pickup(); persist(true); rerenderOpen(); refreshPlayerCar();
+    });
+  });
+  $("shopNote").textContent = platform.inside ? "Satın alımı Küp Evreni onaylar; Robux bakiyenden düşer." : "Robux ile almak için oyunu Küp Evreni'nden aç.";
+}
+function pauseGame() { if (race.on && !anyOverlay()) show("ovPause"); }
+function setMuted(m) { save.muted = m; if (A.master) A.master.gain.value = m ? 0 : VOL; persist(true); }
+$("bStart").onclick = () => { SFX.click(); startRace(); };
+$("bGarage").onclick = () => { SFX.click(); pvCar = save.car; show("ovGarage"); };
+$("bShop").onclick = () => { SFX.click(); show("ovShop"); };
+$("bHelp").onclick = () => { SFX.click(); show("ovHelp"); };
+$("bPause").onclick = e => { e.stopPropagation(); initAudio(); pauseGame(); };
+$("bReset").onclick = e => { e.stopPropagation(); initAudio(); playerReset(); };
+$("bResume").onclick = () => { hide("ovPause"); SFX.click(); };
+$("bRestart").onclick = () => { SFX.click(); startRace(); };
+$("bQuit").onclick = () => { SFX.click(); quitRace(); };
+$("bAuto").onclick = () => { save.autoGas = !autoGas(); document.body.classList.toggle("manualGas", !autoGas()); SFX.click(); persist(true); renderOpen("ovPause"); };
+$("bMute").onclick = () => { initAudio(); setMuted(!save.muted); renderOpen("ovPause"); };
+$("bAgain").onclick = () => { SFX.click(); startRace(); };
+$("bHome").onclick = () => { SFX.click(); openMenu(); };
+
+// ================================================================ Girdi olayları
+addEventListener("keydown", e => {
+  if (e.code === "Space" || e.code.startsWith("Arrow")) e.preventDefault();
+  if (e.repeat) return;
+  keys.add(e.code);
+  if (!race.on || anyOverlay()) { if (e.code === "Escape" && $("ovPause").classList.contains("show")) hide("ovPause"); return; }
+  initAudio();
+  if (e.code === "KeyR") playerReset();
+  if (e.code === "KeyP" || e.code === "Escape") pauseGame();
+  if (e.code === "KeyM") { setMuted(!save.muted); notify(save.muted ? "🔇 Ses kapalı" : "🔊 Ses açık"); }
+});
+addEventListener("keyup", e => keys.delete(e.code));
+addEventListener("blur", () => { keys.clear(); for (const k in touch) touch[k] = false; });
+addEventListener("contextmenu", e => e.preventDefault());
+document.addEventListener("visibilitychange", () => { if (document.hidden) { persist(true); pauseGame(); } });
+canvas.addEventListener("pointerdown", () => initAudio());
+// Dokunmatik butonlar: basılı tutulduğu sürece etkin
+function hold(id, key) {
+  const el = $(id);
+  const off = () => { touch[key] = false; el.classList.remove("on"); };
+  el.addEventListener("pointerdown", e => { e.preventDefault(); e.stopPropagation(); initAudio(); touch[key] = true; el.classList.add("on"); try { el.setPointerCapture(e.pointerId); } catch (_) {} });
+  el.addEventListener("pointerup", off); el.addEventListener("pointercancel", off); el.addEventListener("lostpointercapture", off);
+}
+hold("tLeft", "left"); hold("tRight", "right"); hold("tNitro", "nitro"); hold("tDrift", "drift"); hold("tBrake", "brake"); hold("tGas", "gas");
+function resize() {
+  renderer.setPixelRatio(Math.min(1.5, devicePixelRatio || 1));
+  renderer.setSize(innerWidth, innerHeight, false);
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+}
+addEventListener("resize", resize);
+
+// ================================================================ Döngü
+let last = performance.now();
+function update(dt) {
+  if (race.on && !anyOverlay()) { raceUpdate(dt); updateFx(dt); syncCars(dt); updateHud(); }
+  updateAudio();
+  persist();
+}
+function frame(t) {
+  const dt = Math.min(0.05, (t - last) / 1000);
+  last = t;
+  update(dt);
+  updateCamera(dt);
+  renderer.render(scene, camera);
+  if ($("ovGarage").classList.contains("show")) renderPreview(dt);
+  requestAnimationFrame(frame);
+}
+// Test kancası: tarayıcı rAF'ı yavaşlattığında oyun mantığını elle ilerletir
+window.step = sec => { for (let t = 0; t < sec; t += 1 / 30) { update(1 / 30); updateCamera(1 / 30); } renderer.render(scene, camera); };
+
+// ================================================================ Başlat
+resize();
+openMenu();
+if (!save.helpSeen) show("ovHelp");
+setInterval(() => persist(true), 10000);
+requestAnimationFrame(frame);
+</script>
+<div id="rotateHint" style="display:none;position:fixed;left:50%;top:30%;transform:translate(-50%,-50%);z-index:99;max-width:80vw;padding:12px 16px;border-radius:14px;background:rgba(0,0,0,0.78);color:#fff;font:600 15px system-ui,sans-serif;text-align:center;pointer-events:auto">📱↻ Daha geniş görmek için telefonu yan çevir<br><small style="opacity:.7">(kapatmak için dokun)</small></div>
+<script>
+// Dik tutulan telefonda bir kez "yan çevir" ipucu
+(() => {
+  const el = document.getElementById("rotateHint");
+  if (!matchMedia("(pointer: coarse)").matches) return;
+  let closed = false;
+  const upd = () => { el.style.display = !closed && innerWidth < innerHeight ? "block" : "none"; };
+  el.addEventListener("pointerdown", e => { e.stopPropagation(); closed = true; upd(); });
+  setTimeout(() => { closed = true; upd(); }, 8000);
+  addEventListener("resize", upd); upd();
+})();
+</script>
+</body>
+</html>

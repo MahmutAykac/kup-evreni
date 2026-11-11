@@ -354,6 +354,8 @@ const GAMES = [
   { id: "limonata", title: "Limonata Standı", icon: "🍋", saveKey: "limonataStandi", bg: "linear-gradient(135deg,#ffe259,#ffa751)" },
   { id: "arena", title: "Küp Arena", icon: "🔫", saveKey: "kupArena", bg: "linear-gradient(135deg,#1f2430,#e85d04)" },
   { id: "kopuk", title: "Daha Fazla Köpük!", icon: "🫧", saveKey: "kopukPatlamasi", bg: "linear-gradient(135deg,#3aa6e8,#d8f3ff)" },
+  { id: "futbol", title: "Küp Futbol", icon: "⚽", saveKey: "kupFutbol", bg: "linear-gradient(135deg,#1b7a3a,#7ed957)" },
+  { id: "yaris", title: "Küp Yarışı", icon: "🏎️", saveKey: "kupYarisi", bg: "linear-gradient(135deg,#c1121f,#ffb703)" },
 ];
 const BADGES = [
   { id: "welcome", icon: "👋", name: "Hoş geldin" }, { id: "firstGame", icon: "🎮", name: "İlk oyun" },
@@ -801,7 +803,7 @@ function renderSettings() {
 
 // ================================================================ Platform ayarları (ana sayfa okur: kupEvreniAyar) ve işlem kaydı
 const CFG_KEY = "kupEvreniAyar", LOG_KEY = "kupEvreniAdminLog";
-const ECO_DEFAULT = { daily: 100, play: 15, badge: 25, start: 200, double: false };
+const ECO_DEFAULT = { daily: 100, play: 15, badge: 25, start: 200, quest: 10, double: false };
 const SHAPES = [["cap", "Şapka"], ["crown", "Taç"], ["headphones", "Kulaklık"], ["helmet", "Uzay kaskı"], ["tophat", "Silindir şapka"], ["halo", "Hale"], ["horns", "Boynuz"], ["beanie", "Bere"]];
 const ANN_TYPES = [["info", "📢 Bilgi"], ["success", "✅ Başarı"], ["warn", "⚠️ Uyarı"], ["event", "🎉 Etkinlik"], ["fresh", "🆕 Yeni Eklenen"]];
 const cfg = () => load(CFG_KEY, {}) || {};
@@ -827,7 +829,7 @@ const intVal = (id, min = 0, max = 1000000) => { const v = numVal($(id)); return
 // ================================================================ Ekonomi
 function renderEco() {
   const e = eco(), m = e.double ? 2 : 1;
-  const fields = [["daily", "Günlük ödül", "Her gün ana sayfadan alınır"], ["play", "Oyun ödülü", "Her 5 dakika oyunda"], ["badge", "Rozet ödülü", "Her yeni rozette"], ["start", "Başlangıç Robux", "Yeni açılan hesaba"]];
+  const fields = [["daily", "Günlük ödül", "Her gün ana sayfadan alınır"], ["play", "Oyun ödülü", "Her 5 dakika oyunda"], ["badge", "Rozet ödülü", "Her yeni rozette"], ["start", "Başlangıç Robux", "Yeni açılan hesaba"], ["quest", "Görev ödülü tabanı", "Günlük görevler: 1× – 2× bu miktar (bonus 2×)"]];
   $("page").innerHTML = `<div class="stack">
     <div class="card"><div class="cardHead"><h2>2x Robux etkinliği</h2></div><div class="cardBody">
       <div class="rowLine" style="padding-top:0"><div class="grow"><b>${e.double ? "Etkinlik açık" : "Etkinlik kapalı"}</b>
@@ -1152,6 +1154,28 @@ const GIFT_CATALOG = {
       params: { id: [["lavanta", "💜 Lavanta ×2"], ["cilek", "🍓 Çilek ×4"], ["nane", "🌿 Nane ×8"], ["gokkusagi", "🌈 Gökkuşağı ×16"], ["altin", "✨ Altın ×40"], ["galaksi", "🌌 Galaksi ×100"]] } },
     { key: "pass:double", name: "2x Köpük (kalıcı)", icon: "🫧", kind: "once", own: "passes.double" },
     { key: "pass:autopump", name: "Süper Pompa (kalıcı)", icon: "🤖", kind: "once", own: "passes.autopump" },
+  ],
+  futbol: [
+    { key: "money", name: "Para", icon: "💰", kind: "amount", def: 1000, max: 1000000000 },
+    { key: "upgrade:{id}", name: "Yükseltme (seviye)", icon: "🛠️", kind: "count", def: 1, max: 5, own: "up.{id}", paramNames: { id: "Yükseltme" },
+      params: { id: [["boots", "👟 Krampon (en çok 5)"], ["shot", "💥 Şut Gücü (en çok 5)"], ["stamina", "⚡ Dayanıklılık (en çok 5)"], ["control", "🧲 Top Kontrolü (en çok 3)"]] } },
+    { key: "ball:{id}", name: "Top", icon: "⚽", kind: "once", own: "balls.{id}", paramNames: { id: "Top" },
+      params: { id: [["fire", "🔥 Alev Topu"], ["ice", "🧊 Buz Topu"], ["neon", "🟢 Neon Top"], ["galaxy", "🌌 Galaksi Topu"]] } },
+    { key: "kit:{id}", name: "Forma", icon: "👕", kind: "once", own: "kits.{id}", paramNames: { id: "Forma" },
+      params: { id: [["yellow", "🟡 Sarı"], ["orange", "🟠 Turuncu"], ["purple", "🟣 Mor"], ["pink", "🩷 Pembe"], ["black", "⚫ Siyah"]] } },
+    { key: "pass:double", name: "2x Para (kalıcı)", icon: "💰", kind: "once", own: "passes.double" },
+    { key: "pass:gold", name: "Altın Top (kalıcı)", icon: "🏆", kind: "once", own: "passes.gold" },
+  ],
+  yaris: [
+    { key: "money", name: "Para", icon: "💰", kind: "amount", def: 1000, max: 1000000000 },
+    { key: "car:{id}", name: "Araba", icon: "🚗", kind: "once", own: "owned.{id}", paramNames: { id: "Araba" },
+      params: { id: [["ruzgar", "🚙 Rüzgâr"], ["kaplan", "🛻 Kaplan"], ["simsek", "🏎️ Şimşek GT"], ["formul", "🏁 Formül K"]] } },
+    { key: "upgrade:{id}", name: "Yükseltme (seviye)", icon: "🛠️", kind: "count", def: 1, max: 5, own: "lv.{id}", paramNames: { id: "Yükseltme" },
+      params: { id: [["motor", "⚙️ Motor"], ["turbo", "🌀 Turbo"], ["lastik", "🛞 Yarış Lastiği"], ["nitro", "🚀 Nitro Tüpü"]] } },
+    { key: "track:{id}", name: "Pist kilidi", icon: "🗺️", kind: "once", own: "tracks.{id}", paramNames: { id: "Pist" },
+      params: { id: [["col", "🏜️ Çöl Kanyonu"], ["sehir", "🌃 Gece Şehri"]] } },
+    { key: "pass:double", name: "2x Para (kalıcı)", icon: "💰", kind: "once", own: "passes.double" },
+    { key: "pass:gold", name: "Altın Boya (kalıcı)", icon: "✨", kind: "once", own: "passes.gold" },
   ],
 };
 const giftStore = () => { const g = load(GIFT_KEY, {}) || {}; return { pending: g.pending || [], done: g.done || [] }; };

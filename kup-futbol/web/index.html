@@ -1,0 +1,1451 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Küp Futbol</title>
+<!--
+  Küp Futbol: halı sahada 3'e 3 futbol (sen + 2 bot takım arkadaşı, karşıda 3 bot; her takımda bir kaleci).
+  Küp Evreni platformunda çalışır (tek başına da açılır). Kayıt anahtarı: kupFutbol.
+  Maç: MATCH_TIME sn, berabereyse altın gol uzatması (en fazla OVERTIME_MAX sn). Saha duvarlarla çevrili: top dışarı çıkmaz, seker.
+  Modlar: Hızlı Maç (DIFFS: Kolay / Normal / Zor) ve Kupa (CUP_TEAMS: sırayla güçlenen 5 rakip).
+  Kontroller: WASD / oklar hareket · Shift koş · Space ya da sol tık şut (basılı tut = güç) · E pas / pas iste · Q müdahale ·
+    sağ tık ya da sol tık sürükle: kamera · Esc / P duraklat · M ses
+  Dokunmatik: sol yarı joystick · sağ yarı sürükle: kamera · ⚽ şut (basılı tut) · ↗ pas · 🏃 koş (aç/kapat) · 🦵 müdahale.
+  Test kancası: window.step(sn) oyun mantığını elle ilerletir.
+-->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+  :root { --panel: rgba(18, 28, 22, 0.78); --line: rgba(255,255,255,0.2); --text: #fff; --accent: #ffd166; --ok: #6ee7a0; --bad: #ff5d5d; --card: #f4f6fb; --ink: #1f2430; }
+  * { box-sizing: border-box; }
+  html, body { -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; overscroll-behavior: none; }
+  html, body { margin: 0; height: 100%; background: #8fc7ee; color: var(--text); font-family: "Trebuchet MS", system-ui, sans-serif;
+    overflow: hidden; -webkit-user-select: none; user-select: none; touch-action: none; }
+  button { font: inherit; color: inherit; }
+  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  .pill { background: var(--panel); border-radius: 14px; padding: 8px 12px; }
+  #hud { display: none; }
+  body.playing #hud { display: block; }
+  #status { position: fixed; left: 14px; top: 12px; width: 172px; }
+  #stRow { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; }
+  #stBar { flex: 1; height: 10px; border-radius: 5px; background: rgba(255,255,255,0.18); overflow: hidden; }
+  #stFill { height: 100%; width: 100%; background: var(--ok); }
+  #stFill.tired { background: var(--bad); }
+  #radar { display: block; width: 148px; height: 94px; margin-top: 8px; border-radius: 8px; }
+  #score { position: fixed; left: 50%; top: 12px; transform: translateX(-50%); text-align: center; white-space: nowrap; padding: 6px 14px; }
+  #scoreRow { display: flex; align-items: center; gap: 10px; font-size: 15px; }
+  #scoreRow .tn { display: flex; align-items: center; gap: 6px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
+  #scoreRow i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 1px solid rgba(255,255,255,0.6); flex: none; }
+  #scTxt { font-size: 24px; font-variant-numeric: tabular-nums; }
+  #timeTxt { font-size: 14px; color: #dfe9e2; font-variant-numeric: tabular-nums; }
+  #timeTxt.late { color: var(--bad); font-weight: 700; }
+  #timeTxt.gold { color: var(--accent); font-weight: 700; }
+  #menuBtns { position: fixed; right: 14px; top: 12px; display: flex; gap: 6px; }
+  #menuBtns button { border: 2px solid var(--line); background: var(--panel); border-radius: 14px; padding: 8px 12px; cursor: pointer; font-size: 15px; }
+  #charge { position: fixed; left: 50%; bottom: 18%; transform: translateX(-50%); width: 190px; height: 14px; border-radius: 7px; background: rgba(0,0,0,0.45);
+    border: 2px solid rgba(255,255,255,0.6); overflow: hidden; display: none; pointer-events: none; }
+  #chargeFill { height: 100%; width: 0; background: linear-gradient(90deg, #6ee7a0, #ffd166 60%, #ff5d5d); }
+  #tip { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); font-size: 13px; color: #eef5ef; white-space: nowrap; pointer-events: none; padding: 5px 12px; }
+  body.touch #tip { display: none; }
+  #big { position: fixed; left: 50%; top: 30%; transform: translate(-50%, -50%); text-align: center; pointer-events: none; font-size: 34px; font-weight: 700;
+    text-shadow: 0 2px 6px rgba(0,0,0,0.75); white-space: nowrap; opacity: 0; transition: opacity 0.25s; z-index: 5; }
+  #big small { display: block; font-size: 17px; font-weight: 400; margin-top: 4px; }
+  #toasts { position: fixed; top: 86px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 6px; align-items: center;
+    pointer-events: none; z-index: 20; width: max-content; max-width: calc(100vw - 32px); }
+  .toast { background: rgba(244,246,251,0.96); color: var(--ink); padding: 6px 14px; border-radius: 10px; font-size: 15px; animation: tfade 3s forwards; text-align: center; }
+  @keyframes tfade { 0%, 82% { opacity: 1; } 100% { opacity: 0; transform: translateY(-8px); } }
+  /* Dokunmatik */
+  #touch { display: none; }
+  body.touch.playing #touch { display: block; }
+  .tb { position: fixed; border-radius: 50%; border: 2px solid rgba(255,255,255,0.5); background: rgba(20,34,24,0.45); display: flex;
+    align-items: center; justify-content: center; font-size: 22px; font-weight: 700; touch-action: none; }
+  .tb.on { background: rgba(255,209,102,0.6); }
+  #tShoot { right: 22px; bottom: 26px; width: 92px; height: 92px; font-size: 34px; background: rgba(40,160,90,0.55); }
+  #tPass { right: 128px; bottom: 30px; width: 64px; height: 64px; }
+  #tSprint { right: 24px; bottom: 132px; width: 58px; height: 58px; }
+  #tTackle { right: 100px; bottom: 112px; width: 56px; height: 56px; }
+  #stick { position: fixed; width: 110px; height: 110px; margin: -55px 0 0 -55px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.45);
+    background: rgba(0,0,0,0.22); display: none; pointer-events: none; }
+  #stick div { position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px; border-radius: 50%; background: rgba(255,255,255,0.75); }
+  /* Menüler */
+  .overlay { position: fixed; inset: 0; display: none; align-items: flex-start; justify-content: center; background: rgba(8,16,10,0.6);
+    padding: 16px; overflow-y: auto; touch-action: pan-y; z-index: 10; }
+  .overlay.show { display: flex; }
+  .card { background: var(--card); color: var(--ink); border-radius: 18px; padding: 18px 22px; width: 100%; max-width: 560px; margin: auto 0; line-height: 1.45;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.35); }
+  .card h1 { margin: 0 0 6px; font-size: 26px; color: #15803d; }
+  .card h2 { margin: 14px 0 6px; font-size: 16px; color: #4b5563; }
+  .card ol, .card ul { padding-left: 22px; margin: 8px 0; }
+  .card li { margin: 3px 0; }
+  .muted { color: #5b6270; font-size: 14px; }
+  .btn { border: 0; border-radius: 12px; padding: 10px 14px; cursor: pointer; font-weight: 700; background: #e2e6ef; color: #2b3140; }
+  .btn.go { background: #16a34a; color: #fff; }
+  .btn.blue { background: #3a86ff; color: #fff; }
+  .btn.sel { background: #1f2430; color: #fff; }
+  .btn:disabled { opacity: 0.5; cursor: default; }
+  .rowb { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  .rowb .btn { flex: 1; }
+  .seg { display: flex; gap: 6px; flex-wrap: wrap; }
+  .seg .btn { flex: 1; padding: 8px 10px; font-size: 14px; }
+  .money { font-weight: 700; color: #b45309; }
+  .wrow { display: grid; grid-template-columns: 44px 1fr auto; gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid #e2e6ef; }
+  .wrow .ic { font-size: 30px; text-align: center; }
+  .wrow .btn { font-size: 14px; min-width: 96px; }
+  .pips { display: flex; gap: 4px; margin-top: 5px; }
+  .pips i { width: 22px; height: 7px; border-radius: 4px; background: #d9deea; }
+  .pips i.on { background: #16a34a; }
+  .dot { display: inline-block; width: 13px; height: 13px; border-radius: 4px; vertical-align: -1px; margin-right: 6px; border: 1px solid rgba(0,0,0,0.25); }
+  .cupRow { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: 15px; }
+  .cupRow.next { font-weight: 700; }
+  .cupRow.done { color: #8a909c; }
+  #endScore { font-size: 30px; font-weight: 700; text-align: center; margin: 6px 0 2px; font-variant-numeric: tabular-nums; }
+  #earn { width: 100%; border-collapse: collapse; }
+  #earn td { padding: 3px 0; } #earn td:last-child { text-align: right; font-weight: 700; padding-left: 16px; }
+  #earn tr.sum td { border-top: 1px solid #d9deea; padding-top: 6px; color: #b45309; font-size: 17px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 6px; margin: 8px 0; }
+  .stats div { background: #e9edf5; border-radius: 10px; padding: 6px 8px; font-size: 13px; color: #5b6270; }
+  .stats b { display: block; font-size: 17px; color: var(--ink); }
+  input[type=range] { width: 100%; }
+  #noWebgl { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 16px; text-align: center; font-size: 18px; color: #222; }
+  @media (max-width: 760px), (max-height: 480px) {
+    #status { width: 132px; padding: 6px 8px; }
+    #radar { width: 116px; height: 74px; margin-top: 6px; }
+    #scoreRow { font-size: 13px; gap: 7px; }
+    #scoreRow .tn { max-width: 84px; }
+    #scTxt { font-size: 19px; }
+    #timeTxt { font-size: 12px; }
+    #menuBtns button { padding: 6px 9px; font-size: 14px; }
+    #big { font-size: 24px; }
+    #big small { font-size: 14px; }
+    .card { padding: 14px 16px; }
+    .card h1 { font-size: 21px; }
+    #toasts { top: 66px; }
+  }
+  /* Yatay telefonda ana menü tek ekrana sığsın */
+  @media (max-height: 480px) {
+    #ovMenu .tall { display: none; }
+    #ovMenu .card h2 { margin: 8px 0 4px; }
+    #ovMenu .rowb { margin-top: 8px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud">
+  <div id="status" class="pill">
+    <div id="stRow">⚡<div id="stBar"><div id="stFill"></div></div></div>
+    <canvas id="radar" width="148" height="94"></canvas>
+  </div>
+  <div id="score" class="pill">
+    <div id="scoreRow"><span class="tn"><i id="colH"></i><span id="nmH">Takımın</span></span><b id="scTxt">0 – 0</b><span class="tn"><span id="nmA">Rakip</span><i id="colA"></i></span></div>
+    <div id="timeTxt">3:00</div>
+  </div>
+  <div id="menuBtns"><button id="bPause" title="Duraklat (Esc)"><b>❚❚</b></button></div>
+  <div id="charge"><div id="chargeFill"></div></div>
+  <div id="tip" class="pill">Space şut (basılı tut) · E pas · Q müdahale · Shift koş</div>
+  <div id="touch">
+    <div class="tb" id="tShoot">⚽</div>
+    <div class="tb" id="tPass">↗</div>
+    <div class="tb" id="tSprint">🏃</div>
+    <div class="tb" id="tTackle">🦵</div>
+  </div>
+</div>
+<div id="big"></div>
+<div id="toasts"></div>
+<div id="stick"><div></div></div>
+
+<div id="ovMenu" class="overlay show"><div class="card">
+  <h1>⚽ Küp Futbol</h1>
+  <div class="muted tall">Halı sahada 3'e 3! 3 dakikada rakipten çok gol at. Top duvardan seker, dışarı çıkmaz. Berabere biterse <b>altın gol</b>.</div>
+  <div class="stats tall" id="menuStats"></div>
+  <h2>Maç türü</h2>
+  <div class="seg" id="modeSel"></div>
+  <div id="modeInfo"></div>
+  <div class="rowb">
+    <button class="btn go" id="bStart" style="font-size:18px;flex-basis:100%">▶ Maça başla</button>
+    <button class="btn" id="bShop">🛒 Mağaza</button>
+    <button class="btn" id="bRobux">R$ Mağaza</button>
+    <button class="btn" id="bHelp">❓ Nasıl oynanır</button>
+  </div>
+</div></div>
+<div id="ovHelp" class="overlay"><div class="card">
+  <h1>❓ Nasıl oynanır</h1>
+  <ol>
+    <li>🏃 Topa koş: yanına gelince top <b>ayağına yapışır</b> ve seninle birlikte gider.</li>
+    <li>⚽ <b>Şut</b>: tuşu basılı tut, güç dolsun, bırak. Kaleye doğru bakıyorsan şut kaleyi bulur; kaleci sağdaysa sola vur!</li>
+    <li>↗ <b>Pas</b>: baktığın yöndeki en uygun arkadaşına gider. Top arkadaşındayken aynı tuş <b>pas ister</b>.</li>
+    <li>🦵 <b>Müdahale</b>: topa doğru kayarsın. Tutarsa topu kaparsın, kaçırırsan kısa süre yavaşlarsın.</li>
+    <li>💰 Gol, asist ve galibiyet <b>para</b> kazandırır. Mağazadan krampon, şut gücü, yeni top ve forma al.</li>
+    <li>🏆 <b>Kupa</b>: sırayla güçlenen 5 takımı yen, kupayı kaldır!</li>
+  </ol>
+  <p class="muted">Klavye: WASD / oklar hareket · Shift koş · Space ya da sol tık şut · E pas · Q müdahale · sağ tık sürükle: kamera · Esc duraklat · M ses.<br>
+    Dokunmatik: sol yarı joystick · sağ yarı sürükle: kamera · ⚽ şut (basılı tut) · ↗ pas · 🏃 koş · 🦵 müdahale.</p>
+  <div class="rowb"><button class="btn go" data-close>Tamam</button></div>
+</div></div>
+<div id="ovShop" class="overlay"><div class="card">
+  <h1>🛒 Mağaza</h1>
+  <div class="money" id="shopMoney"></div>
+  <div id="shopList"></div>
+  <div class="rowb"><button class="btn" data-close>Kapat</button></div>
+</div></div>
+<div id="ovRobux" class="overlay"><div class="card">
+  <h1>R$ Robux Mağazası</h1>
+  <div class="money" id="shopJeton"></div>
+  <div id="passList"></div>
+  <div class="muted" id="shopNote" style="margin-top:8px"></div>
+  <div class="rowb"><button class="btn" data-close>Kapat</button></div>
+</div></div>
+<div id="ovPause" class="overlay"><div class="card">
+  <h1>⏸ Duraklatıldı</h1>
+  <h2>Kamera hassasiyeti: <span id="sensTxt"></span></h2>
+  <input type="range" id="sens" min="0.3" max="2.5" step="0.1">
+  <div class="rowb">
+    <button class="btn go" id="bResume" style="flex-basis:100%">▶ Devam et</button>
+    <button class="btn" id="bCam">🎥 Otomatik kamera</button>
+    <button class="btn" id="bMute">🔊 Ses</button>
+    <button class="btn" id="bQuit">🚪 Maçtan çık</button>
+  </div>
+</div></div>
+<div id="ovEnd" class="overlay"><div class="card">
+  <h1 id="endTitle">Maç bitti</h1>
+  <div id="endScore"></div>
+  <div class="muted" id="endSub" style="text-align:center"></div>
+  <h2>Kazancın</h2>
+  <table id="earn"></table>
+  <div class="rowb">
+    <button class="btn go" id="bAgain">▶ Tekrar oyna</button>
+    <button class="btn" id="bHome">🏠 Menü</button>
+  </div>
+</div></div>
+<div id="noWebgl">3D için WebGL gerekli; bu tarayıcıda açılamadı. Chrome / Edge ile açmayı dene.</div>
+
+<script>
+"use strict";
+// ================================================================ Yardımcılar
+const $ = id => document.getElementById(id);
+const rand = (a, b) => a + Math.random() * (b - a);
+const pick = l => l[Math.floor(Math.random() * l.length)];
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+const fmt = n => Math.round(n).toLocaleString("tr-TR");
+function angDiff(a, b) { let d = (b - a) % (Math.PI * 2); if (d > Math.PI) d -= Math.PI * 2; if (d < -Math.PI) d += Math.PI * 2; return d; }
+function setText(el, t) { if (el._t !== t) { el._t = t; el.textContent = t; } }
+function notify(msg) {
+  const el = document.createElement("div");
+  el.className = "toast"; el.textContent = msg;
+  $("toasts").appendChild(el);
+  setTimeout(() => el.remove(), 3000);
+  while ($("toasts").children.length > 3) $("toasts").firstChild.remove();
+}
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const rgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+const colorDist = (a, b) => { const x = rgb(a), y = rgb(b); return Math.hypot(x[0] - y[0], x[1] - y[1], x[2] - y[2]); };
+const shade = (h, f, to = 0) => "#" + rgb(h).map(v => Math.round(v * f + to * (1 - f)).toString(16).padStart(2, "0")).join("");
+
+// ================================================================ Config
+const MATCH_TIME = 180, OVERTIME_MAX = 90, KICKOFF_WAIT = 1.6, CELEBRATE = 3.2;
+const FL = 26, FW = 16;                 // saha yarı uzunluğu (x) ve yarı genişliği (z), metre
+const GW = 9, GH = 3.2, GD = 2.6;       // kale genişliği, yüksekliği, derinliği
+const BALL_R = 0.34, GRAV = 20, BASE_FOV = 60;
+const WALK = 6.2, SPRINT = 8.8, BOT_WALK = 6.2, BOT_RUN = 7.7;
+const REWARD = { goal: 30, assist: 15, win: 150, draw: 60, loss: 30, cup: 500 };
+// speed: hız çarpanı · react: karar aralığı (sn) · err: şut sapması (rad) · steal: top çalma (1/sn) · tackle: müdahale isteği · gk: kaleci kurtarış oranı
+const DIFFS = {
+  easy: { name: "Kolay", speed: 0.84, react: 0.42, err: 0.17, steal: 0.7, tackle: 0.25, gk: 0.66, reward: 0.75 },
+  normal: { name: "Normal", speed: 0.94, react: 0.28, err: 0.1, steal: 1.3, tackle: 0.45, gk: 0.8, reward: 1 },
+  hard: { name: "Zor", speed: 1.03, react: 0.17, err: 0.055, steal: 2.1, tackle: 0.65, gk: 0.9, reward: 1.5 },
+};
+const MATE = { speed: 0.95, react: 0.26, err: 0.1, steal: 1.3, tackle: 0.45, gk: 0.82 };   // takım arkadaşları
+const CUP_TEAMS = [
+  { name: "Mahalle Gücü", color: "#2a9d8f", speed: 0.82, react: 0.45, err: 0.18, steal: 0.6, tackle: 0.2, gk: 0.6, reward: 1 },
+  { name: "Sahil Spor", color: "#1d6fe0", speed: 0.88, react: 0.36, err: 0.14, steal: 0.9, tackle: 0.32, gk: 0.7, reward: 1.2 },
+  { name: "Demir Ayaklar", color: "#6c757d", speed: 0.94, react: 0.28, err: 0.1, steal: 1.3, tackle: 0.45, gk: 0.8, reward: 1.4 },
+  { name: "Şimşek FK", color: "#ffd60a", speed: 1.0, react: 0.21, err: 0.075, steal: 1.7, tackle: 0.55, gk: 0.86, reward: 1.7 },
+  { name: "Küp Yıldızları", color: "#111827", speed: 1.05, react: 0.15, err: 0.05, steal: 2.3, tackle: 0.7, gk: 0.92, reward: 2 },
+];
+const UPGRADES = [
+  { id: "boots", name: "Krampon", icon: "👟", desc: "Her seviye +%4 hız", max: 5, base: 200, grow: 1.7 },
+  { id: "shot", name: "Şut Gücü", icon: "💥", desc: "Her seviye +%6 şut hızı", max: 5, base: 200, grow: 1.7 },
+  { id: "stamina", name: "Dayanıklılık", icon: "⚡", desc: "Her seviye +%20 koşu süresi", max: 5, base: 150, grow: 1.7 },
+  { id: "control", name: "Top Kontrolü", icon: "🧲", desc: "Her seviye topu kaptırma ihtimali −%12", max: 3, base: 300, grow: 2 },
+];
+const UP = Object.fromEntries(UPGRADES.map(u => [u.id, u]));
+const upPrice = u => Math.round(u.base * Math.pow(u.grow, save.up[u.id]) / 10) * 10;
+const BALLS = [
+  { id: "classic", name: "Klasik Top", icon: "⚽", price: 0, a: "#ffffff", b: "#1b1b1b" },
+  { id: "fire", name: "Alev Topu", icon: "🔥", price: 300, a: "#ff8a1a", b: "#7a1500", glow: 0x662200, trail: 0xff8a1a },
+  { id: "ice", name: "Buz Topu", icon: "🧊", price: 300, a: "#e6f8ff", b: "#3aa0e0", glow: 0x113355, trail: 0x9fdcff },
+  { id: "neon", name: "Neon Top", icon: "🟢", price: 450, a: "#c6ff3d", b: "#101010", glow: 0x335500, trail: 0xc6ff3d },
+  { id: "galaxy", name: "Galaksi Topu", icon: "🌌", price: 700, a: "#5a2ea6", b: "#0b0b2a", glow: 0x220055, trail: 0xb388ff, stars: true },
+  { id: "gold", name: "Altın Top", icon: "🏆", pass: "gold", a: "#ffd54a", b: "#a86b00", glow: 0x554400, trail: 0xffe082 },
+];
+const KITS = [
+  { id: "red", name: "Kırmızı", color: "#e63946", price: 0 },
+  { id: "yellow", name: "Sarı", color: "#ffc300", price: 150 },
+  { id: "orange", name: "Turuncu", color: "#ff7a1a", price: 150 },
+  { id: "purple", name: "Mor", color: "#7b2cbf", price: 250 },
+  { id: "pink", name: "Pembe", color: "#f72585", price: 250 },
+  { id: "black", name: "Siyah", color: "#23262b", price: 400 },
+];
+const PASSES = [
+  { id: "double", name: "2x Para", icon: "💰", desc: "Maç kazançların kalıcı olarak iki katı", jeton: 150 },
+  { id: "gold", name: "Altın Top", icon: "🏆", desc: "Parlayan altın top ve altın iz (kalıcı görünüm)", jeton: 100 },
+  { id: "cash1000", name: "+💰1.000", icon: "💵", desc: "Hemen 1.000 para", jeton: 50, consumable: true },
+];
+const SKINS = ["#ffdbac", "#f1c27d", "#e0ac69", "#c68642", "#8d5524"];
+const FACES = ["smile", "cool", "wow", "grin"];
+const BOT_NAMES = ["Efe", "Can", "Mert", "Deniz", "Arda", "Kaan", "Emre", "Baran", "Ege", "Yiğit", "Kerem", "Onur"];
+
+// ================================================================ Kayıt
+const SAVE_KEY = "kupFutbol";
+function freshSave() {
+  return { money: 0, up: { boots: 0, shot: 0, stamina: 0, control: 0 }, balls: { classic: true }, ball: "classic", kits: { red: true }, kit: "red",
+    passes: {}, diff: "normal", mode: "quick", sens: 1, autoCam: true, matches: 0, wins: 0, draws: 0, losses: 0, goals: 0, assists: 0,
+    cup: 0, trophies: 0, helpSeen: false, muted: false, giftIds: [] };
+}
+let save = freshSave();
+try {
+  const s = JSON.parse(localStorage.getItem(SAVE_KEY) || "null");
+  if (s && typeof s === "object") save = { ...save, ...s, up: { ...save.up, ...(s.up || {}) }, balls: { ...save.balls, ...(s.balls || {}) },
+    kits: { ...save.kits, ...(s.kits || {}) }, passes: { ...(s.passes || {}) }, giftIds: Array.isArray(s.giftIds) ? s.giftIds : [] };
+} catch (e) {}
+const ballOwned = b => b.pass ? !!save.passes[b.pass] : !!save.balls[b.id];
+const ballOf = id => BALLS.find(b => b.id === id) || BALLS[0];
+const kitOf = id => KITS.find(k => k.id === id) || KITS[0];
+for (const u of UPGRADES) save.up[u.id] = clamp(Math.floor(+save.up[u.id] || 0), 0, u.max);
+if (!ballOwned(ballOf(save.ball))) save.ball = "classic";
+if (!save.kits[save.kit] || kitOf(save.kit).id !== save.kit) save.kit = "red";
+if (!DIFFS[save.diff]) save.diff = "normal";
+if (save.mode !== "cup") save.mode = "quick";
+save.cup = clamp(Math.floor(+save.cup || 0), 0, CUP_TEAMS.length - 1);
+save.sens = clamp(+save.sens || 1, 0.3, 2.5);
+let lastSave = 0;
+function persist(force) {
+  if (!force && performance.now() - lastSave < 4000) return;
+  lastSave = performance.now();
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) {}
+  reportStats();
+}
+
+// ================================================================ Küp Evreni köprüsü
+const platform = { inside: window.parent !== window, profile: null, reqs: {} };
+const playerName = () => (platform.profile && platform.profile.name) || "Sen";
+function reportStats() {
+  if (!platform.inside) return;
+  parent.postMessage({ type: "kup:stats", stats: { "🏆 Galibiyet": fmt(save.wins), "⚽ Gol": fmt(save.goals), "🎯 Asist": fmt(save.assists),
+    "🎮 Maç": fmt(save.matches), "🏅 Kupa": fmt(save.trophies), "💰 Para": fmt(save.money) } }, "*");
+}
+function requestPurchase(item, done) {
+  if (!platform.inside) { notify("Robux ile almak için oyunu Küp Evreni'nden aç (ana klasördeki index.html)"); return; }
+  const reqId = Math.random().toString(36).slice(2);
+  platform.reqs[reqId] = done;
+  parent.postMessage({ type: "kup:purchase", reqId, id: item.id, name: item.name, price: item.jeton, icon: item.icon }, "*");
+}
+addEventListener("message", e => {
+  if (!platform.inside || e.source !== parent) return;
+  const m = e.data || {};
+  if (m.type === "kup:profile") { platform.profile = m; if (player && player.group) rebuildChar(player); rerenderOpen(); }
+  else if (m.type === "kup:purchaseResult") {
+    if (platform.profile) platform.profile.jeton = m.jeton;
+    const done = platform.reqs[m.reqId]; delete platform.reqs[m.reqId];
+    if (done) done(!!m.ok);
+    rerenderOpen();
+  }
+  else if (m.type === "kup:gift") receiveGifts(m.gifts);
+});
+if (platform.inside) parent.postMessage({ type: "kup:ready" }, "*");
+
+// ================================================================ Küp Evreni hediyeleri (admin panelinden)
+// kup:gift { gifts: [{ gid, items: [{ key, n }] }] } → uygula, kaydet → kup:giftAck { gid, skipped }
+function applyGiftItem(key, n) {
+  if (key === "money") { save.money = Math.min(1e12, save.money + Math.min(n, 1e9)); return true; }
+  const [kind, id] = key.split(":");
+  if (kind === "upgrade") {
+    const u = UP[id];
+    if (!u || save.up[id] >= u.max) return false;
+    save.up[id] = Math.min(u.max, save.up[id] + n); return true;
+  }
+  if (kind === "ball") {
+    const b = BALLS.find(x => x.id === id && !x.pass);
+    if (!b || save.balls[id]) return false;
+    save.balls[id] = true; return true;
+  }
+  if (kind === "kit") {
+    const k = KITS.find(x => x.id === id);
+    if (!k || save.kits[id]) return false;
+    save.kits[id] = true; return true;
+  }
+  if (kind === "pass") {
+    const p = PASSES.find(x => x.id === id && !x.consumable);
+    if (!p || save.passes[id]) return false;
+    save.passes[id] = true; return true;
+  }
+  return false;
+}
+function receiveGifts(gifts) {
+  save.giftIds = save.giftIds || [];
+  let any = false;
+  const acks = [];
+  for (const g of Array.isArray(gifts) ? gifts : []) {
+    if (!g || !g.gid) continue;
+    const skipped = [];
+    if (!save.giftIds.includes(g.gid)) {
+      for (const it of g.items || []) {
+        const n = Math.max(1, Math.floor(Number(it.n) || 1));
+        if (applyGiftItem(String(it.key), n)) any = true; else skipped.push(String(it.key));
+      }
+      save.giftIds = [g.gid, ...save.giftIds].slice(0, 200);
+    }
+    acks.push({ type: "kup:giftAck", gid: g.gid, skipped });
+  }
+  persist(true);
+  if (platform.inside) for (const a of acks) parent.postMessage(a, "*");
+  if (any) { SFX.pickup(); notify("🎁 Hediye alındı!"); rerenderOpen(); }
+}
+
+// ================================================================ Ses (WebAudio ile sentezlenir)
+const A = { ctx: null };
+function initAudio() {
+  if (A.ctx) { if (A.ctx.state === "suspended") A.ctx.resume(); return; }
+  try { A.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return; }
+  A.master = A.ctx.createGain(); A.master.gain.value = save.muted ? 0 : 0.45; A.master.connect(A.ctx.destination);
+  A.noise = A.ctx.createBuffer(1, A.ctx.sampleRate * 2, A.ctx.sampleRate);
+  const d = A.noise.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+}
+function tone(freq, dur, type = "sine", gain = 0.1, freqEnd, delay = 0) {
+  if (!A.ctx || A.ctx.state !== "running" || gain < 0.002) return;
+  const t0 = A.ctx.currentTime + delay, o = A.ctx.createOscillator(), g = A.ctx.createGain();
+  o.type = type; o.frequency.setValueAtTime(freq, t0);
+  if (freqEnd) o.frequency.exponentialRampToValueAtTime(freqEnd, t0 + dur);
+  g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(gain, t0 + 0.005); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  o.connect(g).connect(A.master); o.start(t0); o.stop(t0 + dur + 0.05);
+}
+function noise(dur, gain, freq, type = "lowpass", delay = 0) {
+  if (!A.ctx || A.ctx.state !== "running" || gain < 0.002) return;
+  const t0 = A.ctx.currentTime + delay, s = A.ctx.createBufferSource(), f = A.ctx.createBiquadFilter(), g = A.ctx.createGain();
+  s.buffer = A.noise; f.type = type; f.frequency.value = freq;
+  g.gain.setValueAtTime(gain, t0); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  s.connect(f).connect(g).connect(A.master); s.start(t0, Math.random() * 0.4); s.stop(t0 + dur + 0.05);
+}
+const SFX = {
+  kick: v => { noise(0.07, 0.3 * v, 900); tone(150, 0.1, "sine", 0.2 * v, 60); },
+  bounce: v => tone(190, 0.06, "sine", 0.09 * v, 95),
+  wall: v => { noise(0.05, 0.14 * v, 600); tone(120, 0.07, "triangle", 0.07 * v, 70); },
+  post: () => tone(540, 0.3, "triangle", 0.13, 400),
+  catch: () => { noise(0.08, 0.2, 500); tone(220, 0.08, "sine", 0.08, 140); },
+  steal: () => { tone(320, 0.05, "square", 0.05); noise(0.05, 0.12, 1200); },
+  slide: () => noise(0.25, 0.14, 700, "bandpass"),
+  whistle: long => { tone(2300, long ? 0.7 : 0.22, "square", 0.045); tone(2460, long ? 0.7 : 0.22, "square", 0.035); },
+  cheer: ours => { noise(1.8, ours ? 0.3 : 0.14, 1100, "bandpass"); if (ours) [523, 659, 784, 1046].forEach((f, i) => tone(f, 0.22, "triangle", 0.08, undefined, i * 0.1)); },
+  click: () => tone(1500, 0.03, "square", 0.04),
+  pickup: () => [660, 880, 1100].forEach((f, i) => tone(f, 0.1, "triangle", 0.07, undefined, i * 0.06)),
+  beep: hi => tone(hi ? 1320 : 880, 0.12, "triangle", 0.09),
+  win: () => [523, 659, 784, 1046, 1318].forEach((f, i) => tone(f, 0.25, "triangle", 0.09, undefined, i * 0.12)),
+  lose: () => [523, 440, 349].forEach((f, i) => tone(f, 0.25, "triangle", 0.08, undefined, i * 0.15)),
+};
+
+// ================================================================ 3D sahne
+const canvas = $("game");
+let renderer;
+try { renderer = new THREE.WebGLRenderer({ canvas, antialias: true }); }
+catch (e) { $("noWebgl").style.display = "flex"; throw e; }
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x8fc7ee);
+scene.fog = new THREE.Fog(0x8fc7ee, 90, 220);
+const camera = new THREE.PerspectiveCamera(BASE_FOV, 1, 0.1, 400);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x4c7a55, 0.78));
+const sun = new THREE.DirectionalLight(0xfff4dd, 0.78);
+sun.position.set(18, 42, 14);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -38, right: 38, top: 38, bottom: -38, near: 1, far: 120 });
+scene.add(sun);
+
+const lambert = (color, extra = {}) => new THREE.MeshLambertMaterial({ color, ...extra });
+function mesh(geo, material, x = 0, y = 0, z = 0, parent = scene, shadow = true) {
+  const m = new THREE.Mesh(geo, material);
+  m.position.set(x, y, z); m.castShadow = shadow; m.receiveShadow = true;
+  parent.add(m); return m;
+}
+function canvasTex(w, h, draw, rx = 1, ry = 1) {
+  const c = document.createElement("canvas"); c.width = w; c.height = h;
+  draw(c.getContext("2d"), w, h);
+  const t = new THREE.CanvasTexture(c); t.anisotropy = 4;
+  if (rx !== 1 || ry !== 1) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(rx, ry); }
+  return t;
+}
+function fitText(g, text, maxW, size, weight = 700) {
+  g.font = `${weight} ${size}px "Trebuchet MS", system-ui, sans-serif`;
+  const w = g.measureText(text).width;
+  if (w > maxW) g.font = `${weight} ${Math.floor(size * maxW / w)}px "Trebuchet MS", system-ui, sans-serif`;
+}
+
+// ================================================================ Saha
+const crowd = { mesh: null, base: [], on: false };
+function buildWorld() {
+  mesh(new THREE.PlaneGeometry(240, 200), lambert(0x2c6a38), 0, -0.03, 0, scene, false).rotation.x = -Math.PI / 2;
+  // Çim şeritleri ve çizgiler (20 piksel = 1 m)
+  const S = 20, W = 2 * FL * S, H = 2 * FW * S;
+  const tex = canvasTex(W, H, g => {
+    for (let i = 0; i < 13; i++) { g.fillStyle = i % 2 ? "#3a9247" : "#33853f"; g.fillRect(i * W / 13, 0, W / 13 + 1, H); }
+    g.strokeStyle = "rgba(255,255,255,0.92)"; g.fillStyle = "rgba(255,255,255,0.92)"; g.lineWidth = 3;
+    g.strokeRect(2, 2, W - 4, H - 4);
+    g.beginPath(); g.moveTo(W / 2, 0); g.lineTo(W / 2, H); g.stroke();
+    g.beginPath(); g.arc(W / 2, H / 2, 4 * S, 0, 7); g.stroke();
+    g.beginPath(); g.arc(W / 2, H / 2, 5, 0, 7); g.fill();
+    for (const sx of [0, 1]) {
+      const x0 = sx ? W - 7 * S : 0;
+      g.strokeRect(x0, H / 2 - 9 * S, 7 * S, 18 * S);
+      g.strokeRect(sx ? W - 2.5 * S : 0, H / 2 - 5.5 * S, 2.5 * S, 11 * S);
+      g.beginPath(); g.arc(sx ? W - 5 * S : 5 * S, H / 2, 4, 0, 7); g.fill();
+    }
+  });
+  mesh(new THREE.PlaneGeometry(2 * FL, 2 * FW), lambert(0xffffff, { map: tex }), 0, 0, 0, scene, false).rotation.x = -Math.PI / 2;
+  // Bantlar (alçak duvar) ve üstündeki kafes ağı
+  const board = lambert(0xf2f3f5), rail = lambert(0x1d6fe0);
+  const netMat = (rx, ry, op) => new THREE.MeshBasicMaterial({ transparent: true, opacity: op, side: THREE.DoubleSide, depthWrite: false,
+    map: canvasTex(64, 64, g => { g.strokeStyle = "#fff"; g.lineWidth = 4; g.strokeRect(0, 0, 64, 64); }, rx, ry) });
+  const wall = (cx, cz, w, d) => {
+    mesh(new THREE.BoxGeometry(w, 1.1, d), board, cx, 0.55, cz);
+    mesh(new THREE.BoxGeometry(w + 0.04, 0.12, d + 0.04), rail, cx, 1.16, cz, scene, false);
+  };
+  const cage = (cx, cz, len, ry) => { const m = mesh(new THREE.PlaneGeometry(len, 4.6), netMat(len * 1.6, 7, 0.22), cx, 3.5, cz, scene, false); m.rotation.y = ry; m.receiveShadow = false; };
+  for (const s of [-1, 1]) {
+    wall(0, s * (FW + 0.15), 2 * FL + 0.6, 0.3);
+    cage(0, s * (FW + 0.15), 2 * FL + 0.6, 0);
+    const seg = FW - GW / 2;
+    for (const t of [-1, 1]) wall(s * (FL + 0.15), t * (GW / 2 + seg / 2), 0.3, seg);
+    wall(s * (FL + GD + 0.2), 0, 0.3, GW + 0.4);
+    cage(s * (FL + 0.15), 0, 2 * FW + 0.6, Math.PI / 2);
+    // Kale: direkler, üst direk, file
+    const post = lambert(0xffffff);
+    for (const t of [-1, 1]) mesh(new THREE.BoxGeometry(0.16, GH, 0.16), post, s * FL, GH / 2, t * GW / 2);
+    mesh(new THREE.BoxGeometry(0.16, 0.16, GW + 0.16), post, s * FL, GH, 0);
+    const back = mesh(new THREE.PlaneGeometry(GW, GH), netMat(GW * 2.2, GH * 2.2, 0.75), s * (FL + GD), GH / 2, 0, scene, false); back.rotation.y = Math.PI / 2;
+    for (const t of [-1, 1]) mesh(new THREE.PlaneGeometry(GD, GH), netMat(GD * 2.2, GH * 2.2, 0.75), s * (FL + GD / 2), GH / 2, t * GW / 2, scene, false);
+    const top = mesh(new THREE.PlaneGeometry(GD, GW), netMat(GD * 2.2, GW * 2.2, 0.75), s * (FL + GD / 2), GH, 0, scene, false); top.rotation.x = Math.PI / 2;
+  }
+  // Tribünler ve seyirciler
+  const tier = lambert(0x9aa3ad), cols = [0xe63946, 0xffd166, 0x118ab2, 0xf2f3f5, 0x06d6a0, 0xff7a45, 0x7b2cbf, 0x2b2d42];
+  const spots = [];
+  for (const s of [-1, 1]) for (let i = 0; i < 3; i++) {
+    const h = 1 + i * 0.9, z = s * (FW + 3 + i * 2);
+    mesh(new THREE.BoxGeometry(2 * FL + 6, h, 2), tier, 0, h / 2, z);
+    for (let x = -FL - 1.5; x <= FL + 1.5; x += 1.25) if (Math.random() < 0.86) spots.push([x + rand(-0.15, 0.15), h + 0.45, z + rand(-0.3, 0.3)]);
+  }
+  crowd.mesh = new THREE.InstancedMesh(new THREE.BoxGeometry(0.62, 0.9, 0.55), lambert(0xffffff), spots.length);
+  const mt = new THREE.Matrix4(), col = new THREE.Color();
+  spots.forEach((p, i) => { mt.makeTranslation(p[0], p[1], p[2]); crowd.mesh.setMatrixAt(i, mt); crowd.mesh.setColorAt(i, col.setHex(pick(cols))); });
+  crowd.base = spots; crowd.mesh.castShadow = true; scene.add(crowd.mesh);
+  // Işık direkleri
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+    const x = sx * (FL + 5), z = sz * (FW + 10);
+    mesh(new THREE.CylinderGeometry(0.22, 0.3, 16, 8), lambert(0x6b7280), x, 8, z);
+    const lamp = mesh(new THREE.BoxGeometry(3, 1.4, 0.4), new THREE.MeshBasicMaterial({ color: 0xfff7d6 }), x, 16.4, z, scene, false);
+    lamp.lookAt(0, 0, 0);
+  }
+  // Uzakta binalar (derinlik için)
+  for (let i = 0; i < 18; i++) {
+    const an = i / 18 * Math.PI * 2 + rand(-0.1, 0.1), r = rand(105, 135), h = rand(10, 30);
+    mesh(new THREE.BoxGeometry(rand(8, 16), h, rand(8, 16)), lambert(pick([0xb9c4d4, 0xc9d2de, 0xa9b6c8, 0xd6dde6])), Math.cos(an) * r, h / 2, Math.sin(an) * r, scene, false);
+  }
+}
+function updateCrowd() {
+  const on = match.celebrate > 0;
+  if (!on && !crowd.on) return;
+  const mt = new THREE.Matrix4();
+  crowd.base.forEach((p, i) => { mt.makeTranslation(p[0], p[1] + (on ? Math.abs(Math.sin(now * 8 + i * 1.7)) * 0.45 : 0), p[2]); crowd.mesh.setMatrixAt(i, mt); });
+  crowd.mesh.instanceMatrix.needsUpdate = true; crowd.on = on;
+}
+
+// ================================================================ Avatar
+function drawFace(kind) {
+  const c = document.createElement("canvas"); c.width = c.height = 128;
+  const x = c.getContext("2d");
+  x.fillStyle = "#1b1b1b"; x.strokeStyle = "#1b1b1b"; x.lineWidth = 7; x.lineCap = "round";
+  if (kind === "cool") { x.fillRect(22, 40, 36, 18); x.fillRect(70, 40, 36, 18); x.fillRect(56, 44, 16, 5); }
+  else { x.beginPath(); x.ellipse(44, 50, 7, kind === "wow" ? 12 : 10, 0, 0, 7); x.ellipse(84, 50, 7, kind === "wow" ? 12 : 10, 0, 0, 7); x.fill(); }
+  x.beginPath();
+  if (kind === "wow") { x.ellipse(64, 92, 10, 13, 0, 0, 7); x.fill(); }
+  else if (kind === "grin") { x.moveTo(36, 82); x.quadraticCurveTo(64, 116, 92, 82); x.closePath(); x.fill(); }
+  else { x.arc(64, 74, 26, 0.25 * Math.PI, 0.75 * Math.PI); x.stroke(); }
+  return c;
+}
+const faceTex = {};
+function buildAvatar(a) {
+  const g = new THREE.Group(), inner = new THREE.Group();
+  g.add(inner); inner.scale.setScalar(0.36);
+  const part = (w, h, d, c, x, y, z) => mesh(new THREE.BoxGeometry(w, h, d), lambert(c), x, y, z, inner);
+  const legs = [part(0.9, 2, 1, a.pants, -0.5, 1, 0), part(0.9, 2, 1, a.pants, 0.5, 1, 0)];
+  legs.forEach(l => { l.geometry.translate(0, -1, 0); l.position.y = 2; });
+  part(2, 2, 1, a.shirt, 0, 3, 0);
+  const armCol = a.gloves ? "#f2f3f5" : a.skin;   // kaleci: beyaz eldiven / kol
+  const arms = [part(0.9, 2, 1, armCol, -1.45, 3, 0), part(0.9, 2, 1, armCol, 1.45, 3, 0)];
+  arms.forEach(l => { l.geometry.translate(0, -0.8, 0); l.position.y = 3.8; });
+  mesh(new THREE.CylinderGeometry(0.62, 0.62, 1.2, 16), lambert(a.skin), 0, 4.6, 0, inner);
+  const face = FACES.includes(a.face) ? a.face : "smile";
+  if (!faceTex[face]) faceTex[face] = new THREE.CanvasTexture(drawFace(face));
+  mesh(new THREE.PlaneGeometry(0.9, 0.9), new THREE.MeshBasicMaterial({ map: faceTex[face], transparent: true }), 0, 4.6, 0.63, inner, false);
+  const hc = a.hatColor || "#e63946";
+  if (a.hat === "cap") { mesh(new THREE.CylinderGeometry(0.66, 0.66, 0.35, 16), lambert(hc), 0, 5.3, 0, inner); part(1.1, 0.08, 0.6, hc, 0, 5.15, 0.75); }
+  else if (a.hat === "crown") {
+    mesh(new THREE.CylinderGeometry(0.6, 0.55, 0.4, 8, 1, true), lambert(a.crownColor || "#ffd166", { side: THREE.DoubleSide }), 0, 5.4, 0, inner);
+    for (let i = 0; i < 6; i++) { const an = i / 6 * Math.PI * 2; mesh(new THREE.ConeGeometry(0.1, 0.3, 4), lambert(a.crownColor || "#ffd166"), Math.cos(an) * 0.55, 5.7, Math.sin(an) * 0.55, inner); }
+  } else if (a.hat === "headphones") {
+    mesh(new THREE.TorusGeometry(0.7, 0.07, 8, 20, Math.PI), lambert(hc), 0, 4.75, 0, inner);
+    part(0.25, 0.5, 0.5, hc, -0.7, 4.6, 0); part(0.25, 0.5, 0.5, hc, 0.7, 4.6, 0);
+  } else if (a.hat === "helmet") mesh(new THREE.SphereGeometry(0.95, 20, 14), lambert("#cfe8ff", { transparent: true, opacity: 0.35, depthWrite: false }), 0, 4.65, 0, inner, false);
+  return { group: g, legs, arms };
+}
+
+// ================================================================ Karakterler
+// Yön: yaw = 0 → +z'ye bakar; ileri vektörü (sin yaw, cos yaw). Ev sahibi (takım 0) +x'e, deplasman (takım 1) −x'e hücum eder.
+const chars = [];
+let player = null;
+const dirOf = t => t === 0 ? 1 : -1;
+const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
+const dBall = c => Math.hypot(c.x - ball.x, c.z - ball.z);
+function makeChar(team, role, isPlayer) {
+  const c = { team, role, isPlayer: !!isPlayer, x: 0, z: 0, vx: 0, vz: 0, yaw: 0, noBall: 0, stun: 0, tackleT: 0, tackleCd: 0, tackleHit: false, tdx: 0, tdz: 1,
+    think: 0, mode: "pos", tx: 0, tz: 0, sprint: false, holdT: 0, dribT: 0, shootR: 15, wantPass: null, shotSeen: -1, walkT: 0,
+    stamina: 100, tired: false, restT: 0, name: "", look: null, params: MATE, group: null, av: null, tag: null, tagTex: null };
+  chars.push(c); return c;
+}
+const randomLook = () => ({ skin: pick(SKINS), face: pick(FACES), hat: pick(["none", "none", "none", "cap", "headphones"]), hatColor: pick(["#f2f3f5", "#2b2d42", "#ffd166"]) });
+const teamColor = t => t === 0 ? kitOf(save.kit).color : match.awayColor;
+const nameOf = c => c.isPlayer ? playerName() : c.name;
+function rebuildChar(c) {
+  const vis = c.group ? c.group.visible : false;
+  if (c.group) { scene.remove(c.group); c.group.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); }); }
+  const col = teamColor(c.team);
+  let a;
+  if (c.isPlayer) a = { skin: "#f1c27d", pants: "#2b2d42", hat: "none", face: "smile", ...((platform.profile && platform.profile.avatar) || {}), shirt: col };
+  else a = { ...(c.look || randomLook()), shirt: c.role === "gk" ? shade(col, 0.55) : col, pants: c.team === 0 ? "#f2f3f5" : "#1b1d23", gloves: c.role === "gk" };
+  c.av = buildAvatar(a); c.group = c.av.group; c.group.rotation.order = "YXZ"; c.group.visible = vis;
+  scene.add(c.group);
+  drawTag(c);
+}
+function drawTag(c) {
+  if (!c.tag) {
+    const cv = document.createElement("canvas"); cv.width = 256; cv.height = 64;
+    c.tagTex = new THREE.CanvasTexture(cv);
+    c.tag = new THREE.Sprite(new THREE.SpriteMaterial({ map: c.tagTex, transparent: true, depthWrite: false }));
+    c.tag.scale.set(2.5, 0.625, 1); c.tag.visible = false; scene.add(c.tag);
+  }
+  const g = c.tagTex.image.getContext("2d"), text = nameOf(c) + (c.role === "gk" ? " 🧤" : "");
+  g.clearRect(0, 0, 256, 64);
+  fitText(g, text, 236, 30); g.textAlign = "center"; g.textBaseline = "middle";
+  g.lineWidth = 6; g.strokeStyle = "rgba(0,0,0,0.75)"; g.strokeText(text, 128, 34);
+  g.fillStyle = c.isPlayer ? "#ffd166" : shade(teamColor(c.team), 0.45, 255); g.fillText(text, 128, 34);
+  c.tagTex.needsUpdate = true;
+}
+
+// ================================================================ Top
+const ball = { x: 0, y: BALL_R, z: 0, vx: 0, vy: 0, vz: 0, kx: 0, kz: 0, owner: null, last: null, prev: null, lastT: 0, prevT: 0, passTo: null, kickId: 0, inGoal: false, mesh: null, def: BALLS[0] };
+function buildBall() {
+  const def = ballOf(save.ball);
+  if (ball.mesh) { scene.remove(ball.mesh); ball.mesh.geometry.dispose(); ball.mesh.material.map.dispose(); ball.mesh.material.dispose(); }
+  const tex = canvasTex(256, 128, (g, w, h) => {
+    g.fillStyle = def.a; g.fillRect(0, 0, w, h);
+    g.fillStyle = def.b;
+    for (let r = 0; r < 3; r++) for (let i = 0; i < 6; i++) { g.beginPath(); g.arc((i + (r % 2 ? 0.5 : 0)) * w / 6 + 10, 22 + r * 42, r === 1 ? 15 : 12, 0, 7); g.fill(); }
+    if (def.stars) { g.fillStyle = "#fff"; for (let i = 0; i < 60; i++) g.fillRect(Math.random() * w, Math.random() * h, 2, 2); }
+  });
+  ball.mesh = mesh(new THREE.SphereGeometry(BALL_R, 20, 14), lambert(0xffffff, { map: tex, emissive: def.glow || 0x000000 }), ball.x, ball.y, ball.z);
+  ball.def = def;
+}
+const spinAxis = new THREE.Vector3();
+function spinBall(dx, dz) {
+  const d = Math.hypot(dx, dz);
+  if (d < 1e-5) return;
+  spinAxis.set(dz / d, 0, -dx / d);
+  ball.mesh.rotateOnWorldAxis(spinAxis, d / BALL_R);
+}
+function touch(c) {
+  if (ball.last !== c) { ball.prev = ball.last; ball.prevT = ball.lastT; ball.last = c; }
+  ball.lastT = now;
+}
+function give(c) {
+  ball.owner = c; ball.passTo = null; touch(c);
+  c.holdT = 0; c.dribT = 0; c.shootR = rand(9, 13); c.think = Math.min(c.think, c.params.react * 0.6);
+}
+function kickBall(c, dx, dz, speed, up) {
+  ball.owner = null; ball.passTo = null;
+  ball.x = c.x + dx * 0.9; ball.z = c.z + dz * 0.9; ball.y = Math.max(ball.y, BALL_R);
+  ball.vx = dx * speed; ball.vz = dz * speed; ball.vy = up; ball.kx = ball.x; ball.kz = ball.z;
+  c.noBall = 0.4; c.yaw = Math.atan2(dx, dz); c.wantPass = null;
+  ball.kickId++; touch(c);
+  SFX.kick(clamp(speed / 24, 0.35, 1));
+}
+function deflect(c, keep) {
+  let nx = ball.x - c.x, nz = ball.z - c.z; const d = Math.hypot(nx, nz) || 1; nx /= d; nz /= d;
+  const dot = ball.vx * nx + ball.vz * nz;
+  if (dot < 0) { ball.vx -= 2 * dot * nx; ball.vz -= 2 * dot * nz; }
+  ball.vx = ball.vx * keep + rand(-1.5, 1.5); ball.vz = ball.vz * keep + rand(-1.5, 1.5); ball.vy = Math.abs(ball.vy) * 0.4 + 2.5;
+  touch(c); SFX.wall(0.8);
+}
+function stepBall(h) {
+  const px = ball.x, pz = ball.z;
+  ball.vy -= GRAV * h;
+  ball.x += ball.vx * h; ball.y += ball.vy * h; ball.z += ball.vz * h;
+  if (ball.y <= BALL_R) {
+    ball.y = BALL_R;
+    if (ball.vy < -2) { ball.vy = -ball.vy * 0.55; SFX.bounce(clamp(ball.vy / 8, 0.1, 1)); } else ball.vy = 0;
+    const f = Math.exp(-0.75 * h); ball.vx *= f; ball.vz *= f;
+    if (Math.hypot(ball.vx, ball.vz) < 0.15) ball.vx = ball.vz = 0;
+  } else { const f = Math.exp(-0.08 * h); ball.vx *= f; ball.vz *= f; }
+  const ax = Math.abs(ball.x), sx = Math.sign(ball.x) || 1;
+  if (ball.inGoal) {   // filenin içinde: yavaşla, dışarı çıkma
+    const f = Math.exp(-3 * h); ball.vx *= f; ball.vz *= f;
+    if (ax > FL + GD - BALL_R) { ball.x = sx * (FL + GD - BALL_R); ball.vx *= -0.15; }
+    if (ax < FL + BALL_R) { ball.x = sx * (FL + BALL_R); ball.vx = 0; }
+    if (Math.abs(ball.z) > GW / 2 - BALL_R) { ball.z = Math.sign(ball.z) * (GW / 2 - BALL_R); ball.vz *= -0.15; }
+    if (ball.y > GH - BALL_R) { ball.y = GH - BALL_R; ball.vy *= -0.15; }
+  } else {
+    if (Math.abs(ball.z) > FW - BALL_R) { ball.z = Math.sign(ball.z) * (FW - BALL_R); ball.vz *= -0.7; SFX.wall(clamp(Math.abs(ball.vz) / 10, 0.1, 1)); }
+    if (ax > FL - BALL_R) {
+      const mouth = Math.abs(ball.z) < GW / 2 - BALL_R * 0.6 && ball.y < GH - BALL_R * 0.6;
+      if (mouth) { if (ax > FL + BALL_R * 0.5) { ball.inGoal = true; if (live()) goal(sx > 0 ? 0 : 1); } }
+      else {
+        ball.x = sx * (FL - BALL_R); ball.vx *= -0.7;
+        if (Math.abs(ball.z) < GW / 2 + 0.5 && ball.y < GH + 0.5 && Math.abs(ball.vx) > 2) SFX.post(); else SFX.wall(clamp(Math.abs(ball.vx) / 10, 0.1, 1));
+      }
+    }
+  }
+  spinBall(ball.x - px, ball.z - pz);
+}
+function tryPickup() {
+  let c = null, bd = 1e9;
+  const fast = Math.hypot(ball.vx, ball.vz) > 9;
+  for (const o of chars) {
+    if (o.noBall > 0 || o.stun > 0.2) continue;
+    const d = dBall(o), gk = o.role === "gk";
+    if (d < (gk ? (fast ? 2 : 1.45) : o.tackleT > 0 ? 1.25 : 0.95) && ball.y < (gk ? 2.9 : 1.25) && d < bd) { c = o; bd = d; }   // kaleci şuta uzanır
+  }
+  if (!c) return;
+  const rel = Math.hypot(ball.vx - c.vx, ball.vz - c.vz, ball.vy);
+  if (c.role === "gk") {
+    if (rel > 9 && c.shotSeen !== ball.kickId) {   // şut: her şutta bir kez kurtarış zarı (sert ve yakından şut daha zor)
+      c.shotSeen = ball.kickId;
+      const close = clamp((12 - Math.hypot(ball.x - ball.kx, ball.z - ball.kz)) / 12, 0, 1);
+      const p = clamp(c.params.gk - Math.max(0, rel - 16) * 0.01 - close * 0.12, 0.12, 0.95);
+      if (Math.random() > p) { c.noBall = 0.7; return; }
+      if (Math.random() < 0.3) { deflect(c, 0.45); c.noBall = 0.5; return; }
+    }
+    give(c); SFX.catch();
+  } else {
+    if (rel > (ball.passTo === c ? 26 : c.isPlayer ? 17 : 15)) { deflect(c, 0.4); c.noBall = 0.35; return; }   // sert top vücuttan seker
+    give(c);
+  }
+}
+function trySteals(o, dt) {
+  const ctrl = o.isPlayer ? 1 - 0.12 * save.up.control : 1;
+  for (const c of chars) {
+    if (c.team === o.team || c.noBall > 0 || c.stun > 0) continue;
+    const d = dBall(c);
+    let ok = false;
+    if (c.tackleT > 0) { if (d < 1.3 && !c.tackleHit) { c.tackleHit = true; ok = Math.random() < 0.85 * ctrl; } }
+    else if (c.role === "gk") ok = d < 1.3 && Math.random() < 3 * dt;
+    else if (d < 0.8) ok = Math.random() < (c.isPlayer ? 1.8 : c.params.steal) * ctrl * dt;
+    if (ok) { o.noBall = 0.8; o.stun = c.tackleT > 0 ? 0.6 : 0.3; give(c); SFX.steal(); return; }
+  }
+}
+function updateBall(dt) {
+  const o = ball.owner;
+  if (o) {
+    const gk = o.role === "gk", off = gk ? 0.55 : 0.8, k = Math.min(1, dt * 16), px = ball.x, pz = ball.z;
+    const tx = clamp(o.x + Math.sin(o.yaw) * off, -FL + BALL_R, FL - BALL_R), tz = clamp(o.z + Math.cos(o.yaw) * off, -FW + BALL_R, FW - BALL_R);
+    ball.x += (tx - ball.x) * k; ball.z += (tz - ball.z) * k; ball.y += ((gk ? 1.15 : BALL_R) - ball.y) * k;
+    ball.vx = o.vx; ball.vz = o.vz; ball.vy = 0; ball.lastT = now;
+    spinBall(ball.x - px, ball.z - pz);
+    if (!gk) trySteals(o, dt);
+    return;
+  }
+  const sp = Math.hypot(ball.vx, ball.vy, ball.vz), n = Math.max(1, Math.ceil(sp * dt / 0.45)), h = dt / n;
+  for (let i = 0; i < n && !ball.owner; i++) { stepBall(h); if (live()) tryPickup(); }
+}
+
+// ================================================================ Pas, şut, müdahale
+function nearestOpp(c) { let bo = null, bd = 1e9; for (const o of chars) if (o.team !== c.team) { const d = dist(o, c); if (d < bd) { bd = d; bo = o; } } return { o: bo, d: bd }; }
+function laneClear(ax, az, bx, bz, team, w = 1.3) {   // a → b hattında rakip yok mu
+  const dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz || 1;
+  for (const o of chars) if (o.team !== team) {
+    const t = clamp(((o.x - ax) * dx + (o.z - az) * dz) / L2, 0, 1);
+    if (Math.hypot(ax + dx * t - o.x, az + dz * t - o.z) < w) return false;
+  }
+  return true;
+}
+function bestMate(c, fx, fz) {   // fx, fz: tercih edilen yön (oyuncuda baktığı yön)
+  const dir = dirOf(c.team); let best = null, bs = -1e9;
+  for (const m of chars) {
+    if (m.team !== c.team || m === c) continue;
+    const dx = m.x - c.x, dz = m.z - c.z, d = Math.hypot(dx, dz) || 1;
+    if (d < 2.5) continue;
+    let s = Math.min(nearestOpp(m).d, 8) + dx * dir * 0.35 - Math.abs(d - 12) * 0.15;
+    if (m.role === "gk") s -= 9;
+    if (!laneClear(c.x, c.z, m.x, m.z, c.team)) s -= 6;
+    if (fx !== undefined) s += (dx * fx + dz * fz) / d * 7;
+    if (s > bs) { bs = s; best = m; }
+  }
+  return best;
+}
+function passTo(c, m) {
+  const lead = clamp(dist(c, m) / 22, 0.15, 0.6);
+  const tx = clamp(m.x + m.vx * lead, -FL + 1, FL - 1), tz = clamp(m.z + m.vz * lead, -FW + 1, FW - 1);
+  const dx = tx - c.x, dz = tz - c.z, d = Math.hypot(dx, dz) || 1;
+  kickBall(c, dx / d, dz / d, clamp(6 + d * 0.8, 9, 22), d > 15 ? 3.2 : 0.8);
+  ball.passTo = m;
+}
+function shootAt(c, tz, charge, err) {
+  const a = Math.atan2(dirOf(c.team) * FL - c.x, tz - c.z) + (Math.random() * 2 - 1) * err;
+  kickBall(c, Math.sin(a), Math.cos(a), 13 + 15 * charge, 1.2 + 5 * charge);
+}
+function startTackle(c, dx, dz) { c.tackleT = 0.3; c.tackleCd = 1.4; c.tackleHit = false; c.tdx = dx; c.tdz = dz; SFX.slide(); }
+const nearLoose = c => !ball.owner && c.noBall <= 0 && dBall(c) < 1.6 && ball.y < 1.3;
+function startShot() { if (live() && !input.shootHold) { input.shootHold = true; input.charge = 0; } }
+function releaseShot() {
+  if (!input.shootHold) return;
+  input.shootHold = false;
+  const ch = Math.max(0.15, input.charge), c = player; input.charge = 0;
+  if (!live() || (ball.owner !== c && !nearLoose(c))) return;
+  // Nişan yardımı: kaleye doğru bakıyorsan şut kale içine yönelir (baktığın köşe korunur)
+  let ax = Math.sin(c.yaw), az = Math.cos(c.yaw);
+  if (ax > 0.2) {
+    const zHit = c.z + az / ax * (FL - c.x);
+    if (Math.abs(zHit) < GW / 2 + 5) { const tz = clamp(zHit, -GW / 2 + 0.8, GW / 2 - 0.8), L = Math.hypot(FL - c.x, tz - c.z) || 1; ax = (FL - c.x) / L; az = (tz - c.z) / L; }
+  }
+  kickBall(c, ax, az, (13 + 15 * ch) * (1 + 0.06 * save.up.shot), 1.2 + 5 * ch);
+}
+function playerPass() {
+  const c = player;
+  if (!live()) return;
+  if (ball.owner === c || nearLoose(c)) { const m = bestMate(c, Math.sin(c.yaw), Math.cos(c.yaw)); if (m) passTo(c, m); }
+  else if (ball.owner && ball.owner.team === 0) { ball.owner.wantPass = c; ball.owner.think = Math.min(ball.owner.think, 0.1); notify("📣 Pas istedin"); }
+}
+function playerTackle() {
+  const c = player;
+  if (!live() || c.tackleCd > 0 || c.stun > 0 || ball.owner === c) return;
+  let dx = Math.sin(c.yaw), dz = Math.cos(c.yaw);
+  const d = dBall(c);
+  if (d < 4.5 && d > 0.01) { dx = (ball.x - c.x) / d; dz = (ball.z - c.z) / d; }
+  startTackle(c, dx, dz);
+}
+
+// ================================================================ Botlar
+function think(c) {
+  const P = c.params, dir = dirOf(c.team), goalX = dir * FL, ownX = -goalX, owner = ball.owner;
+  c.sprint = false;
+  if (c.role === "gk") { thinkGk(c, dir, ownX, owner); return; }
+  if (owner === c) {
+    const dGoal = Math.hypot(goalX - c.x, c.z), near = nearestOpp(c), gk = chars.find(o => o.team !== c.team && o.role === "gk");
+    if (c.wantPass) { const m = c.wantPass; c.wantPass = null; if (dist(c, m) > 2.5) { passTo(c, m); return; } }
+    const side = gk.z > 0.3 ? -1 : gk.z < -0.3 ? 1 : Math.random() < 0.5 ? -1 : 1, aim = side * rand(1.2, GW / 2 - 0.6);   // kalecinin boş bıraktığı köşe
+    const open = laneClear(c.x, c.z, goalX - dir * 2, aim, c.team, 0.9);
+    if ((dGoal < c.shootR && Math.abs(c.z) < 10 && open) || dGoal < 6.5 || c.dribT > 7) { shootAt(c, aim, rand(0.4, 0.9), P.err); return; }
+    const m = bestMate(c);
+    const ahead = m && m.role !== "gk" && (m.x - c.x) * dir > 3 && nearestOpp(m).d > 3.5 && laneClear(c.x, c.z, m.x, m.z, c.team);
+    if (m && ((near.d < 2.8 && Math.random() < 0.6 && (m.role !== "gk" || c.x * dir < -8)) || (ahead && Math.random() < 0.3))) { passTo(c, m); return; }
+    let tz = c.z * 0.5;
+    if (near.d < 5 && (near.o.x - c.x) * dir > -1) tz = c.z + (c.z >= near.o.z ? 5 : -5);   // rakibin yanından geç
+    c.mode = "pos"; c.sprint = true; c.tx = goalX - dir * 6; c.tz = clamp(tz, -FW + 2, FW - 2);
+    return;
+  }
+  if (!owner && ball.passTo === c) { c.mode = "chase"; c.sprint = true; return; }
+  if (owner && owner.team === c.team) {   // destek: pas alabileceği boş alana git
+    if (owner.role === "gk" || owner.isPlayer || c.role === "att") {
+      c.tx = clamp(owner.x + dir * (owner.role === "gk" ? 14 : 8), -FL + 4, FL - 6);
+      c.tz = clamp((owner.z > 0 ? -1 : 1) * 7 + owner.z * 0.2, -FW + 2, FW - 2);
+    } else { c.tx = clamp(owner.x - dir * 7, -FL + 5, FL - 5); c.tz = owner.z * 0.4; }
+    c.mode = "pos"; c.sprint = Math.hypot(c.tx - c.x, c.tz - c.z) > 6;
+    return;
+  }
+  // Top boşta ya da rakipte: takımın topa en yakın saha oyuncusu basar
+  let chaser = null, cd = 1e9;
+  for (const f of chars) if (f.team === c.team && f.role !== "gk") { const d = dBall(f) * (f.isPlayer ? 1.15 : 1); if (d < cd) { cd = d; chaser = f; } }
+  const d = dBall(c);
+  if (chaser === c || (chaser.isPlayer && ball.x * dir < -2 && d < 14 && dBall(chaser) > 6)) {   // oyuncu uzaktaysa kendi yarı sahada arkadaşı da basar
+    c.mode = "chase"; c.sprint = true;
+    if (owner && d < 2.4 && d > 0.01 && c.tackleCd <= 0 && Math.random() < P.tackle) startTackle(c, (ball.x - c.x) / d, (ball.z - c.z) / d);
+    return;
+  }
+  c.tx = ball.x + (ownX - ball.x) * 0.5; c.tz = ball.z * 0.5;   // basmayan oyuncu top ile kendi kalesi arasını kapatır
+  c.mode = "pos"; c.sprint = Math.hypot(c.tx - c.x, c.tz - c.z) > 7;
+}
+function thinkGk(c, dir, ownX, owner) {
+  if (owner === c) return;
+  const homeX = ownX + dir * 1.5, dGoal = Math.hypot(ball.x - ownX, ball.z);
+  c.mode = "pos";
+  let tx = homeX, tz = clamp(ball.z * 0.7, -GW / 2 + 0.6, GW / 2 - 0.6);
+  if (!owner && ball.vx * -dir > 4) {   // şut geliyor: kale çizgisindeki yerini tahmin et
+    const t = (ownX + dir * 1.2 - ball.x) / ball.vx;
+    if (t > 0 && t < 2.5) { tz = clamp(ball.z + ball.vz * t + (Math.random() * 2 - 1) * (1 - c.params.gk) * 2.5, -GW / 2 - 0.5, GW / 2 + 0.5); c.sprint = true; }
+  } else if (!owner && dGoal < 8 && Math.hypot(ball.vx, ball.vz) < 9) {   // yakındaki boş topa en yakınsa çıkar
+    const dMe = dBall(c);
+    if (!chars.some(o => o !== c && dBall(o) < dMe - 0.5)) { c.mode = "chase"; c.sprint = true; return; }
+  } else if (owner && owner.team !== c.team && dGoal < 11) { tx = homeX + dir * clamp(11 - dGoal, 0, 2.5); tz = clamp(ball.z * 0.8, -GW / 2 + 0.4, GW / 2 - 0.4); }   // açıyı kapat
+  c.tx = tx; c.tz = tz;
+}
+function gkRelease(c) {
+  const want = c.wantPass; c.wantPass = null;
+  const m = want && dist(c, want) > 2.5 ? want : bestMate(c);
+  if (m && (m === want || nearestOpp(m).d > 3)) { passTo(c, m); return; }
+  const a = Math.atan2(dirOf(c.team), rand(-0.6, 0.6));   // uzaklaştır
+  kickBall(c, Math.sin(a), Math.cos(a), 22, 7);
+}
+function updateBot(c, dt) {
+  c.think -= dt;
+  if (ball.owner === c) {
+    c.dribT += dt;
+    if (c.role === "gk") {
+      c.holdT += dt; c.tx = c.x; c.tz = c.z; c.mode = "pos";
+      c.yaw += angDiff(c.yaw, dirOf(c.team) * Math.PI / 2) * (1 - Math.exp(-10 * dt));
+      if (c.holdT > (c.wantPass ? 0.3 : 0.8)) gkRelease(c);
+    }
+  }
+  if (c.think <= 0) { c.think = c.params.react * rand(0.7, 1.3) * (c.role === "gk" ? 0.5 : 1); think(c); }
+  let tx = c.tx, tz = c.tz;
+  if (c.mode === "chase") { const lead = Math.min(0.45, dBall(c) / 16); tx = ball.x + ball.vx * lead; tz = ball.z + ball.vz * lead; }
+  const dx = tx - c.x, dz = tz - c.z, d = Math.hypot(dx, dz);
+  const spd = (c.sprint ? BOT_RUN : BOT_WALK) * c.params.speed * (ball.owner === c ? 0.93 : 1);
+  steer(c, d > 0.25 ? dx / d : 0, d > 0.25 ? dz / d : 0, spd * Math.min(1, d / 0.8), dt);
+}
+
+// ================================================================ Hareket
+function steer(c, dx, dz, spd, dt) {
+  if (c.tackleT > 0) { dx = c.tdx; dz = c.tdz; spd = 11.5; }
+  else if (c.stun > 0) spd *= 0.4;
+  const k = 1 - Math.exp(-(c.tackleT > 0 ? 30 : 11) * dt);
+  c.vx += (dx * spd - c.vx) * k; c.vz += (dz * spd - c.vz) * k;
+  c.x = clamp(c.x + c.vx * dt, -FL + 0.5, FL - 0.5); c.z = clamp(c.z + c.vz * dt, -FW + 0.5, FW - 0.5);
+  const v = Math.hypot(c.vx, c.vz);
+  if (v > 0.6) c.yaw += angDiff(c.yaw, Math.atan2(c.vx, c.vz)) * (1 - Math.exp(-14 * dt));
+  else if (ball.owner !== c && dBall(c) > 1) c.yaw += angDiff(c.yaw, Math.atan2(ball.x - c.x, ball.z - c.z)) * (1 - Math.exp(-6 * dt));   // dururken topa bak
+  c.walkT += v * dt;
+}
+function tickChar(c, dt) {
+  if (c.noBall > 0) c.noBall -= dt;
+  if (c.stun > 0) c.stun -= dt;
+  if (c.tackleCd > 0) c.tackleCd -= dt;
+  if (c.tackleT > 0) { c.tackleT -= dt; if (c.tackleT <= 0 && ball.owner !== c) c.stun = Math.max(c.stun, 0.4); }
+}
+function separate() {
+  for (let i = 0; i < chars.length; i++) for (let j = i + 1; j < chars.length; j++) {
+    const a = chars[i], b = chars[j], dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz);
+    if (d < 0.8 && d > 1e-4) { const p = (0.8 - d) / 2 / d; a.x -= dx * p; a.z -= dz * p; b.x += dx * p; b.z += dz * p; }
+  }
+}
+
+// ================================================================ Oyuncu girdisi
+const keys = new Set();
+const stick = { id: null, ox: 0, oy: 0, x: 0, y: 0 };
+const input = { shootHold: false, charge: 0, sprint: false, lookT: -9 };
+const isTouch = matchMedia("(pointer: coarse)").matches || "ontouchstart" in window;
+if (isTouch) document.body.classList.add("touch");
+let camYaw = Math.PI / 2;
+const maxStamina = () => 100 * (1 + 0.2 * save.up.stamina);
+function updatePlayer(dt) {
+  const c = player, K = k => keys.has(k) ? 1 : 0;
+  let mx = Math.max(K("KeyD"), K("ArrowRight")) - Math.max(K("KeyA"), K("ArrowLeft")) + stick.x;
+  let mz = Math.max(K("KeyW"), K("ArrowUp")) - Math.max(K("KeyS"), K("ArrowDown")) - stick.y;
+  const L = Math.hypot(mx, mz); if (L > 1) { mx /= L; mz /= L; }
+  // Kameraya göre: ileri (sin, cos), sağ (−cos, sin)
+  const fx = Math.sin(camYaw), fz = Math.cos(camYaw);
+  const dx = fx * mz - fz * mx, dz = fz * mz + fx * mx, m = Math.min(1, Math.hypot(dx, dz));
+  const want = (keys.has("ShiftLeft") || keys.has("ShiftRight") || input.sprint) && m > 0.3;
+  const sprinting = want && c.stamina > 0 && !c.tired;
+  if (sprinting) {
+    c.stamina -= 24 * dt; c.restT = 0;
+    if (c.stamina <= 0) { c.stamina = 0; c.tired = true; input.sprint = false; $("tSprint").classList.remove("on"); }
+  } else {
+    c.restT += dt;
+    if (c.restT > 0.6) c.stamina = Math.min(maxStamina(), c.stamina + 16 * dt);
+    if (c.stamina > maxStamina() * 0.25) c.tired = false;
+  }
+  const spd = (sprinting ? SPRINT : WALK) * (1 + 0.04 * save.up.boots) * (ball.owner === c ? 0.94 : 1) * (input.shootHold ? 0.8 : 1);
+  const d = Math.hypot(dx, dz) || 1;
+  steer(c, m > 0.05 ? dx / d : 0, m > 0.05 ? dz / d : 0, spd * m, dt);
+  if (input.shootHold) input.charge = Math.min(1, input.charge + dt / 0.85);
+}
+
+// ================================================================ Maç
+const match = { on: false, ended: false, mode: "quick", opp: { ...DIFFS.normal, name: "Rakip", color: "#1d6fe0" }, awayColor: "#1d6fe0", time: MATCH_TIME,
+  score: [0, 0], freeze: 0, celebrate: 0, overtime: false, otT: 0, myGoals: 0, myAssists: 0, lastGoalTeam: -1, kickoffTeam: 0, goldenEnd: false };
+let now = 0;
+const live = () => match.on && match.freeze <= 0 && match.celebrate <= 0;
+function pickAway(pref) {
+  const kit = kitOf(save.kit).color;
+  if (colorDist(pref, kit) >= 150) return pref;
+  return colorDist("#f2f3f5", kit) >= 150 && pref !== "#f2f3f5" ? "#f2f3f5" : "#1d6fe0";
+}
+function kickoff(team) {
+  const pos = [[-1.3, 0], [-8, 5], [-FL + 1.5, 0]];   // forvet, orta, kaleci (ev sahibi; deplasman aynalı)
+  for (const c of chars) {
+    const i = c.role === "att" ? 0 : c.role === "mid" ? 1 : 2, d = dirOf(c.team);
+    let [x, z] = pos[i];
+    if (i === 0 && c.team !== team) x = -5.5;
+    Object.assign(c, { x: x * d, z: z * d, vx: 0, vz: 0, yaw: d * Math.PI / 2, noBall: 0, stun: 0, tackleT: 0, tackleCd: 0, think: rand(0, 0.2), mode: "pos", wantPass: null, holdT: 0, dribT: 0 });
+    c.tx = c.x; c.tz = c.z;
+  }
+  Object.assign(ball, { x: 0, y: BALL_R, z: 0, vx: 0, vy: 0, vz: 0, owner: null, last: null, prev: null, passTo: null, inGoal: false });
+  match.freeze = KICKOFF_WAIT; match.celebrate = 0;
+  player.stamina = Math.max(player.stamina, maxStamina() * 0.6); player.tired = false;
+  input.shootHold = false; input.charge = 0;
+  camYaw = Math.PI / 2; camSnap = true;
+}
+function startMatch(mode = save.mode) {
+  initAudio(); hideAll();
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  const cup = mode === "cup";
+  match.mode = mode;
+  match.opp = cup ? CUP_TEAMS[save.cup] : { ...DIFFS[save.diff], name: "Rakip", color: "#1d6fe0" };
+  match.awayColor = pickAway(match.opp.color);
+  Object.assign(match, { on: true, ended: false, time: MATCH_TIME, score: [0, 0], overtime: false, otT: 0, myGoals: 0, myAssists: 0, celebrate: 0, lastGoalTeam: -1, goldenEnd: false });
+  const names = [...BOT_NAMES].sort(() => Math.random() - 0.5);
+  chars.forEach((c, i) => {
+    c.params = c.team === 0 ? MATE : match.opp;
+    if (!c.isPlayer) { c.name = names[i]; c.look = randomLook(); }
+    rebuildChar(c); c.group.visible = true; c.tag.visible = true;
+  });
+  buildBall();
+  player.stamina = maxStamina(); player.tired = false; player.restT = 0;
+  input.sprint = false; $("tSprint").classList.remove("on");
+  $("colH").style.background = teamColor(0); $("colA").style.background = teamColor(1);
+  setText($("nmH"), "Takımın"); setText($("nmA"), match.opp.name);
+  document.body.classList.add("playing");
+  kickoff(0);
+  bigMsg("Hazır ol!", cup ? `Kupa ${save.cup + 1}/${CUP_TEAMS.length}: ${match.opp.name}` : `Zorluk: ${DIFFS[save.diff].name}`, 1.4);
+}
+function goal(team) {
+  match.score[team]++;
+  const s = ball.last && ball.last.team === team ? ball.last : null;
+  const a = s && ball.prev && ball.prev.team === team && ball.prev !== s && now - ball.prevT < 12 ? ball.prev : null;
+  if (s === player) { match.myGoals++; notify(`⚽ Gol attın! +💰${REWARD.goal}`); }
+  if (a === player) { match.myAssists++; notify(`🎯 Asist! +💰${REWARD.assist}`); }
+  match.celebrate = CELEBRATE; match.lastGoalTeam = team; match.kickoffTeam = 1 - team;
+  if (match.overtime) match.goldenEnd = true;
+  bigMsg(team === 0 ? "⚽ GOOOL!" : "😬 Gol yedik", s ? nameOf(s) + (a ? ` (asist: ${nameOf(a)})` : "") : "Kendi kalesine!", 2.6);
+  SFX.cheer(team === 0);
+  const gx = (team === 0 ? 1 : -1) * (FL - 1), cols = [0xffd166, 0xe63946, 0x06d6a0, 0x118ab2, 0xffffff, 0xf72585];
+  for (let i = 0; i < 70; i++) spawnFx(gx + rand(-1, 1), rand(1, 3), rand(-GW / 2, GW / 2), pick(cols), rand(-5, 5) - Math.sign(gx) * 3, rand(4, 11), rand(-5, 5), rand(1.2, 2.4));
+}
+function endMatch() {
+  match.on = false; match.ended = true;
+  input.shootHold = false; input.charge = 0;
+  const [h, a] = match.score, res = h > a ? "win" : h < a ? "loss" : "draw", cup = match.mode === "cup";
+  const mul = match.opp.reward * (save.passes.double ? 2 : 1);
+  const rows = [[{ win: "🏆 Galibiyet", draw: "🤝 Beraberlik", loss: "💪 Katılım" }[res], REWARD[res]]];
+  if (match.myGoals) rows.push([`⚽ Gol ×${match.myGoals}`, match.myGoals * REWARD.goal]);
+  if (match.myAssists) rows.push([`🎯 Asist ×${match.myAssists}`, match.myAssists * REWARD.assist]);
+  let champion = false;
+  const oppName = match.opp.name;
+  if (cup && res === "win") {
+    save.cup++;
+    if (save.cup >= CUP_TEAMS.length) { save.cup = 0; save.trophies++; champion = true; rows.push(["🏆 Kupa şampiyonluğu", REWARD.cup]); }
+  }
+  const total = Math.round(rows.reduce((t, r) => t + r[1], 0) * mul);
+  save.money += total; save.matches++; save.goals += match.myGoals; save.assists += match.myAssists;
+  save[res === "win" ? "wins" : res === "loss" ? "losses" : "draws"]++;
+  persist(true);
+  $("endTitle").textContent = champion ? "🏆 Kupa senin!" : res === "win" ? "🏆 Kazandın!" : res === "loss" ? "😔 Kaybettin" : "🤝 Berabere";
+  $("endScore").textContent = `${h} – ${a}`;
+  $("endSub").textContent = cup ? (champion ? "5 takımı da yendin. Kupa yeniden başlıyor!" : res === "win" ? `${oppName} elendi. Sıradaki rakip: ${CUP_TEAMS[save.cup].name}` : `${oppName} maçını tekrar oyna`)
+    : `Takımın – ${oppName} · ${DIFFS[save.diff].name}`;
+  const mulTxt = mul !== 1 ? `<tr><td class="muted">Çarpan (${cup ? "kupa" : "zorluk"}${save.passes.double ? " + 2x Para" : ""})</td><td>×${String(Math.round(mul * 100) / 100).replace(".", ",")}</td></tr>` : "";
+  $("earn").innerHTML = rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td>💰 ${fmt(v)}</td></tr>`).join("") + mulTxt + `<tr class="sum"><td>Toplam</td><td>💰 ${fmt(total)}</td></tr>`;
+  $("bAgain").textContent = cup && res === "win" && !champion ? "▶ Sıradaki maç" : "▶ Tekrar oyna";
+  if (res === "win") SFX.win(); else if (res === "loss") SFX.lose(); else SFX.beep();
+  SFX.whistle(true);
+  document.body.classList.remove("playing");
+  show("ovEnd");
+}
+function quitMatch() { match.on = false; openMenu(); }
+
+// ================================================================ Efektler (konfeti, top izi)
+const fx = [], fxGeo = new THREE.BoxGeometry(0.16, 0.16, 0.16), fxMats = {};
+function spawnFx(x, y, z, col, vx, vy, vz, life, grav = 14) {
+  if (fx.length > 260) return;
+  const m = new THREE.Mesh(fxGeo, fxMats[col] || (fxMats[col] = new THREE.MeshBasicMaterial({ color: col })));
+  m.position.set(x, y, z); scene.add(m);
+  fx.push({ m, vx, vy, vz, life, max: life, grav });
+}
+function updateFx(dt) {
+  for (let i = fx.length - 1; i >= 0; i--) {
+    const p = fx[i]; p.life -= dt;
+    if (p.life <= 0) { scene.remove(p.m); fx.splice(i, 1); continue; }
+    p.vy -= p.grav * dt;
+    p.m.position.x += p.vx * dt; p.m.position.y += p.vy * dt; p.m.position.z += p.vz * dt;
+    if (p.m.position.y < 0.08) { p.m.position.y = 0.08; p.vy = 0; p.vx *= 0.8; p.vz *= 0.8; }
+    p.m.rotation.x += dt * 6; p.m.rotation.y += dt * 4;
+    p.m.scale.setScalar(Math.max(0.2, p.life / p.max));
+  }
+}
+function clearFx() { for (const p of fx) scene.remove(p.m); fx.length = 0; }
+let trailT = 0;
+function ballTrail(dt) {
+  if (!ball.def.trail || Math.hypot(ball.vx, ball.vy, ball.vz) < 9) return;
+  trailT -= dt;
+  if (trailT > 0) return;
+  trailT = 0.03;
+  spawnFx(ball.x + rand(-0.1, 0.1), ball.y + rand(-0.1, 0.1), ball.z + rand(-0.1, 0.1), ball.def.trail, 0, 0.5, 0, 0.4, 0);
+}
+
+// ================================================================ HUD
+let bigT = 0, radarT = 0;
+function bigMsg(t, sub = "", secs = 1.6) {
+  const el = $("big");
+  el.innerHTML = esc(t) + (sub ? `<small>${esc(sub)}</small>` : "");
+  el.style.opacity = 1; bigT = secs;
+}
+const radar = $("radar").getContext("2d");
+function drawRadar() {
+  const g = radar, w = 148, h = 94, px = x => 4 + (x + FL) / (2 * FL) * (w - 8), pz = z => 4 + (z + FW) / (2 * FW) * (h - 8);
+  g.clearRect(0, 0, w, h);
+  g.fillStyle = "rgba(40,120,60,0.85)"; g.fillRect(0, 0, w, h);
+  g.strokeStyle = "rgba(255,255,255,0.6)"; g.lineWidth = 1;
+  g.strokeRect(4.5, 4.5, w - 9, h - 9);
+  g.beginPath(); g.moveTo(w / 2, 4); g.lineTo(w / 2, h - 4); g.stroke();
+  g.beginPath(); g.arc(w / 2, h / 2, 9, 0, 7); g.stroke();
+  g.fillStyle = "#fff"; g.fillRect(1, pz(-GW / 2), 3, pz(GW / 2) - pz(-GW / 2)); g.fillRect(w - 4, pz(-GW / 2), 3, pz(GW / 2) - pz(-GW / 2));
+  for (const c of chars) {
+    g.beginPath(); g.arc(px(c.x), pz(c.z), c.isPlayer ? 4.5 : 3.5, 0, 7);
+    g.fillStyle = teamColor(c.team); g.fill();
+    g.lineWidth = c.isPlayer ? 2 : 1; g.strokeStyle = c.isPlayer ? "#ffd166" : "rgba(0,0,0,0.6)"; g.stroke();
+  }
+  g.beginPath(); g.arc(px(clamp(ball.x, -FL, FL)), pz(ball.z), 2.6, 0, 7); g.fillStyle = "#fff"; g.fill(); g.lineWidth = 1; g.strokeStyle = "#000"; g.stroke();
+}
+function updateHud(dt) {
+  if (bigT > 0) { bigT -= dt; if (bigT <= 0) $("big").style.opacity = 0; }
+  if (!match.on) return;
+  setText($("scTxt"), `${match.score[0]} – ${match.score[1]}`);
+  const t = Math.max(0, Math.ceil(match.time)), tt = $("timeTxt");
+  setText(tt, match.overtime ? "⭐ ALTIN GOL" : `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`);
+  tt.className = match.overtime ? "gold" : t <= 15 ? "late" : "";
+  const sf = $("stFill");
+  sf.style.width = clamp(player.stamina / maxStamina() * 100, 0, 100) + "%";
+  sf.className = player.tired ? "tired" : "";
+  $("charge").style.display = input.shootHold ? "block" : "none";
+  if (input.shootHold) $("chargeFill").style.width = input.charge * 100 + "%";
+  radarT -= dt;
+  if (radarT <= 0) { radarT = 0.07; drawRadar(); }
+}
+
+// ================================================================ Kamera ve sahne senkronu
+const camPos = new THREE.Vector3(0, 18, 34);
+let camSnap = true;
+const ring = mesh(new THREE.RingGeometry(0.55, 0.74, 28), new THREE.MeshBasicMaterial({ color: 0xffd166, transparent: true, opacity: 0.85, side: THREE.DoubleSide }), 0, 0.04, 0, scene, false);
+ring.rotation.x = -Math.PI / 2; ring.receiveShadow = false; ring.visible = false;
+function updateCamera(dt) {
+  const c = player;
+  // Otomatik kamera: top sendeyken rakip kaleye, değilken topa döner (elle çevirince kısa süre bekler)
+  if (save.autoCam && live() && now - input.lookT > 1.5) {
+    const own = ball.owner === c, tx = own ? FL - c.x : ball.x - c.x, tz = own ? -c.z * 0.6 : ball.z - c.z;
+    if (Math.hypot(tx, tz) > 3) camYaw += angDiff(camYaw, Math.atan2(tx, tz)) * (1 - Math.exp(-(own ? 1.6 : 2.4) * dt));
+  }
+  const fx_ = Math.sin(camYaw), fz_ = Math.cos(camYaw), D = 9.5;
+  const cx = clamp(c.x - fx_ * D, -FL + 0.4, FL - 0.4), cz = clamp(c.z - fz_ * D, -FW + 0.4, FW - 0.4);   // kamera kafesin içinde kalır
+  const h = lerp(9, 5.4, clamp(Math.hypot(cx - c.x, cz - c.z) / D, 0, 1));
+  const k = camSnap ? 1 : 1 - Math.exp(-10 * dt); camSnap = false;
+  camPos.x += (cx - camPos.x) * k; camPos.y += (h - camPos.y) * k; camPos.z += (cz - camPos.z) * k;
+  camera.position.copy(camPos);
+  camera.lookAt(c.x + fx_ * 4, 1, c.z + fz_ * 4);
+  const fov = fitFov(BASE_FOV);
+  if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
+}
+function syncChars() {
+  for (const c of chars) {
+    const g = c.group, v = Math.hypot(c.vx, c.vz), sw = Math.sin(c.walkT * 2.4) * Math.min(1, v / 5) * 0.85;
+    const party = match.celebrate > 0 && c.team === match.lastGoalTeam, hold = ball.owner === c && c.role === "gk";
+    const y = party ? Math.abs(Math.sin(now * 9 + c.x)) * 0.45 : 0;
+    g.position.set(c.x, y, c.z); g.rotation.y = c.yaw;
+    g.rotation.x += ((c.tackleT > 0 ? -0.95 : 0) - g.rotation.x) * 0.4;   // müdahalede geriye yatar
+    g.rotation.z = c.stun > 0 && c.tackleT <= 0 ? Math.sin(now * 30) * 0.08 : 0;
+    c.av.legs[0].rotation.x = sw; c.av.legs[1].rotation.x = -sw;
+    c.av.arms[0].rotation.x = party ? Math.PI : hold ? -1.3 : -sw; c.av.arms[1].rotation.x = party ? Math.PI : hold ? -1.3 : sw;
+    c.tag.position.set(c.x, 2.5 + y, c.z);
+  }
+  ball.mesh.position.set(ball.x, ball.y, ball.z);
+  ring.position.set(player.x, 0.04, player.z); ring.visible = match.on;
+  updateCrowd();
+}
+
+// ================================================================ Menüler
+const overlays = ["ovMenu", "ovHelp", "ovShop", "ovRobux", "ovPause", "ovEnd"];
+const anyOverlay = () => overlays.some(id => $(id).classList.contains("show"));
+function show(id) { $(id).classList.add("show"); renderOpen(id); }
+function hide(id) { $(id).classList.remove("show"); }
+function hideAll() { for (const id of overlays) $(id).classList.remove("show"); }
+function renderOpen(id) {
+  if (id === "ovMenu") renderMenu();
+  else if (id === "ovShop") renderShop();
+  else if (id === "ovRobux") renderRobux();
+  else if (id === "ovPause") {
+    $("sens").value = save.sens; setText($("sensTxt"), save.sens.toFixed(1));
+    $("bMute").textContent = save.muted ? "🔇 Ses kapalı" : "🔊 Ses açık";
+    $("bCam").textContent = save.autoCam ? "🎥 Otomatik kamera: açık" : "🎥 Otomatik kamera: kapalı";
+  }
+}
+function rerenderOpen() { for (const id of overlays) if ($(id).classList.contains("show")) renderOpen(id); }
+document.querySelectorAll("[data-close]").forEach(b => b.addEventListener("click", () => {
+  const ov = b.closest(".overlay"); hide(ov.id); SFX.click();
+  if (ov.id === "ovHelp" && !save.helpSeen) { save.helpSeen = true; persist(true); }
+  if (!match.on && !anyOverlay()) openMenu();
+}));
+function openMenu() {
+  match.ended = false;
+  for (const c of chars) { if (c.group) c.group.visible = false; if (c.tag) c.tag.visible = false; }
+  Object.assign(ball, { x: 0, y: BALL_R, z: 0, vx: 0, vy: 0, vz: 0, owner: null, inGoal: false });
+  if (ball.mesh) ball.mesh.position.set(0, BALL_R, 0);
+  ring.visible = false; clearFx(); match.celebrate = 0; updateCrowd();
+  $("big").style.opacity = 0; bigT = 0;
+  document.body.classList.remove("playing");
+  hideAll(); show("ovMenu");
+}
+function renderMenu() {
+  $("menuStats").innerHTML = [["💰 Para", fmt(save.money)], ["🏆 Galibiyet", fmt(save.wins)], ["⚽ Gol", fmt(save.goals)], ["🎯 Asist", fmt(save.assists)],
+    ["🎮 Maç", fmt(save.matches)], ["🏅 Kupa", fmt(save.trophies)]].map(([k, v]) => `<div>${k}<b>${v}</b></div>`).join("");
+  $("modeSel").innerHTML = [["quick", "⚡ Hızlı Maç"], ["cup", `🏆 Kupa (${save.cup}/${CUP_TEAMS.length})`]].map(([id, n]) =>
+    `<button class="btn ${save.mode === id ? "sel" : ""}" data-mode="${id}">${n}</button>`).join("");
+  $("modeSel").querySelectorAll("[data-mode]").forEach(b => b.onclick = () => { save.mode = b.dataset.mode; SFX.click(); persist(true); renderMenu(); });
+  if (save.mode === "cup") {
+    $("modeInfo").innerHTML = `<h2>Kupa yolu</h2>` + CUP_TEAMS.map((t, i) => `<div class="cupRow ${i < save.cup ? "done" : i === save.cup ? "next" : ""}">
+      <span>${i < save.cup ? "✅" : i === save.cup ? "▶" : "🔒"}</span><span class="dot" style="background:${t.color};margin:0"></span><span>${i + 1}. ${esc(t.name)}</span>
+      <span class="muted" style="margin-left:auto">ödül ×${String(t.reward).replace(".", ",")}</span></div>`).join("") +
+      `<div class="muted">5 takımı sırayla yen: şampiyonluk ödülü 💰 ${fmt(REWARD.cup)} (son maçın çarpanıyla).</div>`;
+    $("bStart").textContent = `▶ ${CUP_TEAMS[save.cup].name} maçına başla`;
+  } else {
+    $("modeInfo").innerHTML = `<h2>Zorluk</h2><div class="seg">` + Object.entries(DIFFS).map(([id, d]) =>
+      `<button class="btn ${save.diff === id ? "sel" : ""}" data-diff="${id}">${d.name}<br><small style="font-weight:400">ödül ×${String(d.reward).replace(".", ",")}</small></button>`).join("") + `</div>`;
+    $("modeInfo").querySelectorAll("[data-diff]").forEach(b => b.onclick = () => { save.diff = b.dataset.diff; SFX.click(); persist(true); renderMenu(); });
+    $("bStart").textContent = "▶ Maça başla";
+  }
+}
+function renderShop() {
+  $("shopMoney").textContent = `💰 ${fmt(save.money)}`;
+  const ups = UPGRADES.map(u => {
+    const lv = save.up[u.id], price = upPrice(u);
+    return `<div class="wrow"><div class="ic">${u.icon}</div><div><b>${esc(u.name)}</b> <span class="muted">· ${esc(u.desc)}</span>
+      <div class="pips">${Array.from({ length: u.max }, (_, i) => `<i class="${i < lv ? "on" : ""}"></i>`).join("")}</div></div>
+      ${lv >= u.max ? `<button class="btn" disabled>✔ En üst</button>` : `<button class="btn go" data-up="${u.id}" ${save.money < price ? "disabled" : ""}>💰 ${fmt(price)}</button>`}</div>`;
+  }).join("");
+  const item = (it, own, sel, kind, lead) => `<div class="wrow"><div class="ic">${lead}</div><div><b>${esc(it.name)}</b></div>
+    ${own ? (sel ? `<button class="btn sel" disabled>✔ Seçili</button>` : `<button class="btn blue" data-eq="${kind}:${it.id}">Seç</button>`)
+      : it.pass ? `<button class="btn" data-robux="1">R$ Mağaza</button>` : `<button class="btn go" data-buy="${kind}:${it.id}" ${save.money < it.price ? "disabled" : ""}>💰 ${fmt(it.price)}</button>`}</div>`;
+  $("shopList").innerHTML = `<h2>Yükseltmeler</h2>${ups}<h2>Toplar</h2>` + BALLS.map(b => item(b, ballOwned(b), save.ball === b.id, "ball", b.icon)).join("") +
+    `<h2>Formalar</h2>` + KITS.map(k => item(k, !!save.kits[k.id], save.kit === k.id, "kit", `<span class="dot" style="background:${k.color};width:26px;height:26px;margin:0"></span>`)).join("");
+  const L = $("shopList");
+  L.querySelectorAll("[data-up]").forEach(b => b.onclick = () => {
+    const u = UP[b.dataset.up], price = upPrice(u);
+    if (save.money < price || save.up[u.id] >= u.max) return;
+    save.money -= price; save.up[u.id]++;
+    SFX.pickup(); notify(`${u.icon} ${u.name} seviye ${save.up[u.id]}!`); persist(true); rerenderOpen();
+  });
+  L.querySelectorAll("[data-buy]").forEach(b => b.onclick = () => {
+    const [kind, id] = b.dataset.buy.split(":"), it = (kind === "ball" ? BALLS : KITS).find(x => x.id === id), bag = kind === "ball" ? save.balls : save.kits;
+    if (!it || bag[id] || save.money < it.price) return;
+    save.money -= it.price; bag[id] = true; save[kind] = id;
+    SFX.pickup(); notify(`${it.name} alındı ve seçildi!`); applyLook(); persist(true); rerenderOpen();
+  });
+  L.querySelectorAll("[data-eq]").forEach(b => b.onclick = () => { const [kind, id] = b.dataset.eq.split(":"); save[kind] = id; SFX.click(); applyLook(); persist(true); rerenderOpen(); });
+  L.querySelectorAll("[data-robux]").forEach(b => b.onclick = () => { SFX.click(); hide("ovShop"); show("ovRobux"); });
+}
+function applyLook() { buildBall(); }
+function renderRobux() {
+  const j = platform.profile ? platform.profile.jeton : null;
+  $("shopJeton").textContent = j == null ? "" : `Robux bakiyen: R$ ${fmt(j)}`;
+  $("passList").innerHTML = PASSES.map(p => {
+    const own = !p.consumable && save.passes[p.id];
+    return `<div class="wrow"><div class="ic">${p.icon}</div><div><b>${esc(p.name)}</b><div class="muted">${esc(p.desc)}</div></div>
+      ${own ? `<button class="btn" disabled>✔ Sende</button>` : `<button class="btn go" data-pass="${p.id}">R$ ${p.jeton}</button>`}</div>`;
+  }).join("");
+  $("passList").querySelectorAll("[data-pass]").forEach(b => b.onclick = () => {
+    const p = PASSES.find(x => x.id === b.dataset.pass);
+    requestPurchase(p, ok => {
+      if (!ok) return;
+      if (p.consumable) { save.money += 1000; notify("💵 +💰1.000"); }
+      else { save.passes[p.id] = true; if (p.id === "gold") { save.ball = "gold"; applyLook(); } notify(`${p.icon} ${p.name} senin!`); }
+      SFX.pickup(); persist(true); rerenderOpen();
+    });
+  });
+  $("shopNote").textContent = platform.inside ? "Satın alımı Küp Evreni onaylar; Robux bakiyenden düşer." : "Robux ile almak için oyunu Küp Evreni'nden aç.";
+}
+function pauseGame() { if (match.on && !anyOverlay()) { input.shootHold = false; input.charge = 0; show("ovPause"); } }
+function setMuted(m) { save.muted = m; if (A.master) A.master.gain.value = m ? 0 : 0.45; persist(true); }
+$("bStart").onclick = () => { SFX.click(); startMatch(); };
+$("bShop").onclick = () => { SFX.click(); show("ovShop"); };
+$("bRobux").onclick = () => { SFX.click(); show("ovRobux"); };
+$("bHelp").onclick = () => { SFX.click(); show("ovHelp"); };
+$("bPause").onclick = e => { e.stopPropagation(); initAudio(); pauseGame(); };
+$("bResume").onclick = () => { hide("ovPause"); SFX.click(); };
+$("bQuit").onclick = () => { SFX.click(); quitMatch(); };
+$("bMute").onclick = () => { initAudio(); setMuted(!save.muted); renderOpen("ovPause"); };
+$("bCam").onclick = () => { save.autoCam = !save.autoCam; SFX.click(); persist(true); renderOpen("ovPause"); };
+$("sens").oninput = () => { save.sens = +$("sens").value; setText($("sensTxt"), save.sens.toFixed(1)); persist(); };
+$("bAgain").onclick = () => { SFX.click(); startMatch(match.mode); };
+$("bHome").onclick = () => { SFX.click(); openMenu(); };
+
+// ================================================================ Girdi olayları
+function look(dx, k) { camYaw -= dx * k * save.sens; input.lookT = now; }
+addEventListener("contextmenu", e => e.preventDefault());
+addEventListener("keydown", e => {
+  if (e.repeat) { if (e.code === "Space") e.preventDefault(); return; }
+  keys.add(e.code);
+  if (e.code === "Space" || e.code.startsWith("Arrow")) e.preventDefault();
+  if (!match.on || anyOverlay()) { if ((e.code === "Escape" || e.code === "KeyP") && $("ovPause").classList.contains("show")) hide("ovPause"); return; }
+  initAudio();
+  if (e.code === "Space") startShot();
+  if (e.code === "KeyE") playerPass();
+  if (e.code === "KeyQ") playerTackle();
+  if (e.code === "Escape" || e.code === "KeyP") pauseGame();
+  if (e.code === "KeyM") { setMuted(!save.muted); notify(save.muted ? "🔇 Ses kapalı" : "🔊 Ses açık"); }
+});
+addEventListener("keyup", e => { keys.delete(e.code); if (e.code === "Space") releaseShot(); });
+addEventListener("blur", () => { keys.clear(); input.shootHold = false; input.charge = 0; });
+document.addEventListener("visibilitychange", () => { if (document.hidden) { persist(true); pauseGame(); } });
+
+// Fare: sol tık şut (basılıyken sürükle = kamera), sağ tık sürükle = kamera. Dokunmatik: sol yarı joystick, sağ yarı kamera.
+const looks = new Map();
+let mouseBtn = -1, mouseShot = false;
+canvas.addEventListener("pointerdown", e => {
+  initAudio();
+  if (!match.on || anyOverlay()) return;
+  if (e.pointerType === "mouse") { mouseBtn = e.button; if (e.button === 0) { mouseShot = true; startShot(); } return; }
+  if (e.clientX < innerWidth * 0.42 && stick.id === null) {
+    stick.id = e.pointerId; stick.ox = e.clientX; stick.oy = e.clientY; stick.x = stick.y = 0;
+    const el = $("stick"); el.style.left = e.clientX + "px"; el.style.top = e.clientY + "px"; el.style.display = "block";
+  } else looks.set(e.pointerId, e.clientX);
+});
+addEventListener("pointermove", e => {
+  if (e.pointerType === "mouse") {
+    if (mouseShot && !(e.buttons & 1)) { mouseShot = false; releaseShot(); }   // sol tuş bırakıldı (başka tuş hâlâ basılı)
+    if (mouseBtn >= 0 && e.buttons && match.on && !anyOverlay() && Math.abs(e.movementX) < 250) look(e.movementX, 0.0045);
+    return;
+  }
+  if (e.pointerId === stick.id) {
+    let dx = e.clientX - stick.ox, dy = e.clientY - stick.oy;
+    const L = Math.hypot(dx, dy), max = 50;
+    if (L > max) { dx *= max / L; dy *= max / L; }
+    stick.x = dx / max; stick.y = dy / max;
+    $("stick").firstChild.style.transform = `translate(${dx}px, ${dy}px)`;
+    return;
+  }
+  if (looks.has(e.pointerId)) { look(e.clientX - looks.get(e.pointerId), 0.008); looks.set(e.pointerId, e.clientX); }
+});
+function endPtr(e) {
+  if (e.pointerType === "mouse") { if (mouseShot) { mouseShot = false; releaseShot(); } if (!e.buttons) mouseBtn = -1; return; }
+  if (e.pointerId === stick.id) { stick.id = null; stick.x = stick.y = 0; $("stick").style.display = "none"; $("stick").firstChild.style.transform = ""; }
+  looks.delete(e.pointerId);
+}
+addEventListener("pointerup", endPtr);
+addEventListener("pointercancel", endPtr);
+function tbtn(id, down, up) {   // up verilirse basılı tutma düğmesi
+  const el = $(id); let pid = null;
+  el.addEventListener("pointerdown", e => { e.preventDefault(); e.stopPropagation(); initAudio(); pid = e.pointerId; if (up) el.classList.add("on"); if (match.on && !anyOverlay()) down(); });
+  const end = e => { if (e.pointerId !== pid) return; pid = null; if (up) { el.classList.remove("on"); up(); } };
+  addEventListener("pointerup", end); addEventListener("pointercancel", end);
+}
+tbtn("tShoot", startShot, releaseShot);
+tbtn("tPass", playerPass);
+tbtn("tTackle", playerTackle);
+tbtn("tSprint", () => { input.sprint = !input.sprint && !player.tired; $("tSprint").classList.toggle("on", input.sprint); });
+
+// Dik telefonda yatay görüş daralmasın
+function fitFov(base) {
+  const a = innerWidth / innerHeight;
+  if (a >= 1) return base;
+  return Math.min(100, 2 * Math.atan(Math.tan(base * Math.PI / 360) / a) * 180 / Math.PI);
+}
+function resize() {
+  renderer.setPixelRatio(Math.min(1.5, devicePixelRatio || 1));
+  renderer.setSize(innerWidth, innerHeight, false);
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+}
+addEventListener("resize", resize);
+
+// ================================================================ Döngü
+let last = performance.now(), menuT = 0;
+function update(dt) {
+  if (match.on && !anyOverlay()) {
+    now += dt;
+    for (const c of chars) tickChar(c, dt);
+    if (match.celebrate > 0) {   // gol sevinci: top filede, oyuncular durur
+      match.celebrate -= dt;
+      for (const c of chars) steer(c, 0, 0, 0, dt);
+      updateBall(dt);
+      if (match.celebrate <= 0) { if (match.goldenEnd) endMatch(); else kickoff(match.kickoffTeam); }
+    } else if (match.freeze > 0) {   // santra bekleme
+      match.freeze -= dt;
+      if (match.freeze <= 0) { SFX.whistle(false); bigMsg("Başla!", "", 0.7); }
+    } else {
+      updatePlayer(dt);
+      for (const c of chars) if (!c.isPlayer) updateBot(c, dt);
+      separate();
+      updateBall(dt);
+      ballTrail(dt);
+      if (match.on && match.celebrate <= 0) {
+        if (match.overtime) { match.otT += dt; if (match.otT >= OVERTIME_MAX) endMatch(); }
+        else {
+          match.time -= dt;
+          if (match.time <= 10 && match.time > 0 && Math.ceil(match.time) !== Math.ceil(match.time + dt)) SFX.beep(match.time <= 1);
+          if (match.time <= 0) {
+            if (match.score[0] === match.score[1]) { match.overtime = true; match.otT = 0; SFX.whistle(false); bigMsg("⭐ Altın gol!", "İlk golü atan kazanır", 2.2); }
+            else endMatch();
+          }
+        }
+      }
+    }
+    updateFx(dt);
+  }
+  updateHud(dt);
+  persist();
+}
+function frame(t) {
+  const dt = Math.min(0.05, (t - last) / 1000);
+  last = t;
+  update(dt);
+  if (match.on) { syncChars(); updateCamera(dt); }
+  else if (!match.ended) {
+    // Menüde: sahanın üstünde yavaş dönen kamera
+    menuT += dt * 0.07;
+    camera.position.set(Math.sin(menuT) * 38, 20, Math.cos(menuT) * 38);
+    camera.lookAt(0, 0, 0);
+    const fov = fitFov(BASE_FOV);
+    if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
+  }
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+// Test kancası: tarayıcı rAF'ı yavaşlattığında oyun mantığını elle ilerletir
+window.step = sec => { for (let t = 0; t < sec; t += 1 / 30) { update(1 / 30); if (match.on) { syncChars(); updateCamera(1 / 30); } } renderer.render(scene, camera); };
+
+// ================================================================ Başlat
+buildWorld();
+player = makeChar(0, "att", true);
+makeChar(0, "mid"); makeChar(0, "gk");
+makeChar(1, "att"); makeChar(1, "mid"); makeChar(1, "gk");
+chars.forEach((c, i) => { if (!c.isPlayer) { c.name = BOT_NAMES[i]; c.look = randomLook(); } rebuildChar(c); });
+buildBall();
+resize();
+try { renderer.compile(scene, camera); } catch (e) {}
+openMenu();
+if (!save.helpSeen) show("ovHelp");
+setInterval(() => persist(true), 10000);
+requestAnimationFrame(frame);
+</script>
+<div id="rotateHint" style="display:none;position:fixed;left:50%;top:30%;transform:translate(-50%,-50%);z-index:99;max-width:80vw;padding:12px 16px;border-radius:14px;background:rgba(0,0,0,0.78);color:#fff;font:600 15px system-ui,sans-serif;text-align:center;pointer-events:auto">📱↻ Daha geniş görmek için telefonu yan çevir<br><small style="opacity:.7">(kapatmak için dokun)</small></div>
+<script>
+// Dik tutulan telefonda bir kez "yan çevir" ipucu
+(() => {
+  const el = document.getElementById("rotateHint");
+  if (!matchMedia("(pointer: coarse)").matches) return;
+  let closed = false;
+  const upd = () => { el.style.display = !closed && innerWidth < innerHeight ? "block" : "none"; };
+  el.addEventListener("pointerdown", e => { e.stopPropagation(); closed = true; upd(); });
+  setTimeout(() => { closed = true; upd(); }, 8000);
+  addEventListener("resize", upd); upd();
+})();
+</script>
+</body>
+</html>

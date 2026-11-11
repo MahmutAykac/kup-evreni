@@ -2,8 +2,8 @@
 // Sayfalar: önce internet (güncel sürüm gelsin), yoksa cihazdaki kopya.
 // Sürüm numaralı kütüphaneler (three.js, supabase-js): önce cihazdaki kopya (değişmezler).
 // Supabase istekleri (hesap, Robux) hiç saklanmaz: onlar her zaman sunucuya gider.
-const CACHE = "kup-evreni-v5";
-const GAMES = ["pizza-kulesi-tycoon", "evcil-hayvan-gezegenler", "cilgin-fabrika", "tekne-kazasi", "asmr-klavye", "kasaba-hayati", "limonata-standi", "kup-arena", "kopuk-patlamasi"];
+const CACHE = "kup-evreni-v6";
+const GAMES = ["pizza-kulesi-tycoon", "evcil-hayvan-gezegenler", "cilgin-fabrika", "tekne-kazasi", "asmr-klavye", "kasaba-hayati", "limonata-standi", "kup-arena", "kopuk-patlamasi", "kup-futbol", "kup-yarisi"];
 const PAGES = ["./", "./index.html", "./manifest.json", "./icon.svg", ...GAMES.map(g => `./${g}/web/index.html`)];
 const LIBS = [
   "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js",

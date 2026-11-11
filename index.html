@@ -121,6 +121,18 @@
   .switch.on::after { left: 25px; background: #fff; }
   .banner.fresh { background: linear-gradient(90deg, rgba(255,59,92,0.28), rgba(255,122,69,0.1)); }
   .price { font-size: 12px; color: var(--gold); font-weight: 700; margin-left: 4px; }
+  /* Günlük görevler */
+  #quests { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
+  .quest { display: grid; grid-template-columns: 40px 1fr auto; gap: 10px; align-items: center; background: var(--surface); border: 1px solid var(--line);
+    border-radius: 14px; padding: 12px 14px; }
+  .quest .qi { font-size: 28px; text-align: center; }
+  .quest b { display: block; font-size: 15px; }
+  .quest .qp { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .quest .pbar { margin-top: 6px; }
+  .quest .qr { color: var(--gold); font-weight: 700; white-space: nowrap; font-size: 14px; }
+  .quest.ready { border-color: var(--play); box-shadow: 0 0 0 1px var(--play) inset; }
+  .quest.done { opacity: 0.55; }
+  .quest .btn { padding: 8px 12px; font-size: 14px; white-space: nowrap; }
   .thumb .soon { position: absolute; inset: 0; background: rgba(10,10,14,0.6); display: grid; place-items: center; font-size: 16px; font-weight: 700; }
   .game b { display: block; margin-top: 8px; font-size: 16px; }
   .game span { display: block; font-size: 13px; color: var(--muted); }
@@ -242,6 +254,7 @@
       <div id="daily"><span style="font-size:28px">🎁</span><div><b>Günlük ödül</b><div class="muted" id="dailyTxt"></div></div>
         <button class="btn blue" id="btnDaily">Al</button></div>
     </div>
+    <div id="questWrap" style="display:none"><h2>📋 Günlük Görevler <span class="muted" id="questSub" style="font-size:14px;font-weight:400"></span></h2><div id="quests"></div></div>
     <div id="recentWrap"><h2>Devam Et</h2><div class="row" id="recent"></div></div>
     <h2>Tüm Oyunlar</h2>
     <div class="grid" id="games"></div>
@@ -315,7 +328,7 @@
   <h1>💎 Robux nasıl kazanılır?</h1>
   <div class="muted" id="earnBal"></div>
   <div id="earnList"></div>
-  <p class="muted">Robux ile oyunların içindeki mağazalardan (🍕 Pizza: 2x Para, Yardımcı Aşçı · 🐾 Gezegenler: 2x Toz, +2 Slot) satın alım yapabilirsin.</p>
+  <p class="muted">Robux ile oyunların içindeki R$ mağazalarından (2x Para, özel arabalar, altın top, kalıcı güçlendirmeler…) satın alım yapabilirsin.</p>
   <button class="btn blue" style="width:100%" id="btnEarnClose">Tamam</button>
 </div></div></div>
 <div class="modal" id="buyModal"><div class="sheet" id="buySheet"><div class="body">
@@ -382,6 +395,14 @@ const GAMES = [
     bg: "linear-gradient(135deg,#3aa6e8,#d8f3ff)", saveKey: "kopukPatlamasi",
     desc: "Küvetten köpük pompala! Köpük büyüdükçe banyoyu, evi, apartmanı, mahalleyi, şehri patlatır… sonra uzaya taşar. Pompa gücü, köpük makinesi, lastik ördekler ve renkli sabunlarla köpüğünü katla, Yeniden Köpür!",
     controls: "Tıkla / Space pompala · WASD yürü · sürükle: kamera · U yükseltmeler · Dokunmatik: 🫧 düğmesine basılı tut + joystick" },
+  { id: "futbol", title: "Küp Futbol", icon: "⚽", genre: "Spor", url: "kup-futbol/web/index.html",
+    bg: "linear-gradient(135deg,#1b7a3a,#7ed957)", saveKey: "kupFutbol",
+    desc: "Halı sahada 3'e 3! İki takım arkadaşınla rakip kaleye gol at. Basılı tutup güçlü şut çek, pas ver, kayarak topu kap. Top duvardan seker, berabere biterse altın gol! Kupa modunda 5 takımı sırayla yen, parayla krampon, alev ve galaksi topu al.",
+    controls: "WASD yürü · Shift koş · Space / sol tık şut (basılı tut = güç) · E pas · Q müdahale · sürükle: kamera · Dokunmatik: joystick + butonlar" },
+  { id: "yaris", title: "Küp Yarışı", icon: "🏎️", genre: "Yarış", url: "kup-yarisi/web/index.html",
+    bg: "linear-gradient(135deg,#c1121f,#ffb703)", saveKey: "kupYarisi",
+    desc: "5 rakibe karşı 3 turluk araba yarışı! Virajlarda drift at, nitroyu doldur, sarı oklarla hızlan. İlk 3'e girince yeni pist açılır: Yeşil Vadi, Çöl Kanyonu, Gece Şehri. Garajda Formül K'ya kadar 5 araba, motor ve turbo yükseltmeleri.",
+    controls: "W/↑ gaz · S/↓ fren · A D / ← → direksiyon · Space drift · Shift nitro · R piste dön · Dokunmatik: ◀ ▶ + 🚀 💨 ▼ (gaz otomatik)" },
 ];
 
 const BADGES = [
@@ -461,11 +482,24 @@ let profile;
 { const c = readJSON(KEY, null); profile = c && c.cloud ? { ...DEFAULT, ...c, avatar: { ...DEFAULT.avatar, ...(c.avatar || {}) } } : structuredClone(DEFAULT); }
 function cache() { writeJSON(KEY, profile); }
 // Avatar, son oyunlar, istatistikler sunucuya biraz bekleyip toplu gider
-function persist() { cache(); clearTimeout(persist.h); persist.h = setTimeout(pushSave, 1500); }
-async function pushSave() {
-  persist.h = null;
+// (Adı pushSave olmasın: aşağıdaki oyun kaydı fonksiyonu aynı adı taşıyor ve bunu ezer, avatar sunucuya hiç gitmez.)
+function persist() { cache(); persist.n++; clearTimeout(persist.h); persist.h = setTimeout(pushProfile, 1500); }
+persist.n = 0; // her değişiklikte / gönderimde artar: o sırada gelen eski sunucu cevabı yeni avatarın üstüne yazılmasın
+async function pushProfile(keep) { // keep = sayfa kapanıyor, istek arkada tamamlansın
+  clearTimeout(persist.h); persist.h = null;
   if (!session) return;
-  try { await rpc("kup_save", { p_avatar: profile.avatar, p_recent: profile.recent, p_stats: profile.gameStats }); } catch (e) {}
+  const body = { p_avatar: profile.avatar, p_recent: profile.recent, p_stats: profile.gameStats };
+  if (keep) {
+    try {
+      fetch(SB_URL + "/rest/v1/rpc/kup_save", { method: "POST", keepalive: true,
+        headers: { apikey: SB_KEY, Authorization: "Bearer " + session.access_token, "Content-Type": "application/json" },
+        body: JSON.stringify(body) });
+    } catch (e) {}
+    return;
+  }
+  persist.busy = (persist.busy || 0) + 1;
+  try { await rpc("kup_save", body); } catch (e) {}
+  persist.busy--; persist.n++;
 }
 function applyRow(r) {
   const d = r.data || {};
@@ -475,10 +509,11 @@ function applyRow(r) {
 }
 async function refreshProfile() {
   if (!sb || !session) return false;
+  const n = persist.n;
   const { data, error } = await sb.from("profiles").select("name,jeton,data").eq("id", session.user.id).maybeSingle();
   if (error) return false; // internet yoksa önbellekle devam
   if (!data) { await logout(); return false; } // hesap silinmiş
-  if (persist.h) return true; // gönderilmemiş avatar değişikliği varsa üstüne yazma
+  if (persist.h || persist.busy || persist.n !== n) return true; // gönderilmemiş / gönderilmekte olan avatar değişikliği varsa üstüne yazma
   applyRow(data);
   return true;
 }
@@ -534,6 +569,8 @@ function renderEarn() {
       <div class="pbar"><i style="width:${sec / PLAY_REWARD_SEC * 100}%"></i></div></div><span class="amt">+R$ ${playR()}</span></div>
     <div class="earn"><div class="ico">🏅</div><div><b>Rozet kazan</b><div class="muted">${got}/${BADGES.length} rozet. Profil sayfasından hangilerinin kaldığını gör</div></div>
       <span class="amt">+R$ ${badgeR()} her biri</span></div>
+    ${quests ? `<div class="earn"><div class="ico">📋</div><div><b>Günlük görevler</b><div class="muted">Ana sayfadaki görevleri bitir, her gün yenilenir</div></div>
+      <span class="amt">${questsLeft()}</span></div>` : ""}
     <div class="earn"><div class="ico">🎟️</div><div><b>Promo kod</b><div style="display:flex;gap:8px;margin-top:6px">
       <input id="promoInput" maxlength="20" placeholder="KOD" style="flex:1;min-width:0;height:38px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text);padding:0 10px;font:inherit;text-transform:uppercase">
       <button class="btn blue" id="btnPromo">Kullan</button></div></div><span></span></div>`;
@@ -552,6 +589,82 @@ async function redeem(raw) {
 const fmtTime = s => s < 60 ? `${Math.round(s)} sn` : s < 3600 ? `${Math.floor(s / 60)} dk` : `${(s / 3600).toFixed(1).replace(".", ",")} sa`;
 // Gün Türkiye saatine göre döner (sunucuyla aynı)
 const today = () => new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Istanbul" });
+
+// ================================================================ Günlük görevler (sunucu: kup_quests, kup_quest_claim; ilerlemeyi kup_tick sayar)
+// quests = { d: gün, sec: { oyun: bugünkü saniye }, got: [ödülü alınanlar], defs: [{ id, target, reward }] }
+// Hedefleri ve ödülleri sunucu belirler (güne göre değişir). "Günün oyunu" tarayıcıda güne göre seçilir.
+let quests = null;
+const questNotified = new Set();
+const dayNo = d => Math.round((Date.parse(d + "T00:00:00Z") - Date.parse("2026-01-01T00:00:00Z")) / 864e5);
+function questOfDay(q) {
+  const list = visibleGames().filter(playable);
+  return list.length ? list[dayNo(q.d) % list.length] : null;
+}
+// Her görevin ilerlemesi [şu an, hedef]
+function questProgress(q, def) {
+  const sec = q.sec || {}, vals = Object.values(sec).map(Number);
+  if (def.id === "time") return [vals.reduce((s, v) => s + v, 0), def.target];
+  if (def.id === "games") return [vals.filter(v => v >= 60).length, def.target];
+  if (def.id === "game") { const g = questOfDay(q); return [g ? Number(sec[g.id] || 0) : 0, def.target]; }
+  return [["time", "games", "game"].filter(id => q.got.includes(id)).length, 3];
+}
+function questText(q, def) {
+  if (def.id === "time") return ["⏱️", `Bugün ${def.target / 60} dakika oyna`];
+  if (def.id === "games") return ["🎮", `${def.target} farklı oyun oyna (her biri en az 1 dk)`];
+  if (def.id === "game") { const g = questOfDay(q); return [g ? g.icon : "⭐", `Günün oyunu: ${g ? g.title : "—"} (5 dk oyna)`]; }
+  return ["🏅", "Üç görevin hepsini bitir"];
+}
+const questReady = (q, def) => { const [a, b] = questProgress(q, def); return !q.got.includes(def.id) && a >= b; };
+function questsLeft() {
+  if (!quests) return "";
+  const left = quests.defs.filter(d => !quests.got.includes(d.id)).reduce((s, d) => s + d.reward, 0);
+  return left ? `+R$ ${left} kaldı` : "Bugün bitti ✓";
+}
+async function loadQuests() {
+  if (!session) return;
+  try { setQuests(await rpc("kup_quests")); } catch (e) {} // sunucuda görevler yoksa bölüm gizli kalır
+}
+function setQuests(q, fromTick) {
+  if (!q || !Array.isArray(q.defs)) return;
+  const newDay = quests && quests.d !== q.d;
+  quests = { ...q, got: Array.isArray(q.got) ? q.got : [] };
+  if (newDay) questNotified.clear();
+  // Oyun oynarken görev bitince bir kez haber ver (ödül ana sayfadan alınır)
+  if (fromTick) for (const def of quests.defs) if (questReady(quests, def) && !questNotified.has(def.id)) {
+    questNotified.add(def.id); toast(`✅ Görev tamamlandı: ${questText(quests, def)[1]}. Ödülünü ana sayfadan al!`);
+  }
+  if (!current && $("home").classList.contains("on")) renderQuests();
+}
+function renderQuests() {
+  const wrap = $("questWrap");
+  if (!quests || quests.d !== today()) { wrap.style.display = "none"; if (quests && session) { quests = null; loadQuests(); } return; }
+  wrap.style.display = "block";
+  const done = quests.got.length, all = quests.defs.length;
+  $("questSub").textContent = `· ${done}/${all} · her gün yenilenir`;
+  $("quests").innerHTML = quests.defs.map(def => {
+    const [a, b] = questProgress(quests, def), [ic, txt] = questText(quests, def), got = quests.got.includes(def.id), ready = questReady(quests, def);
+    const shown = def.id === "time" || def.id === "game" ? `${Math.min(Math.floor(a / 60), b / 60)} / ${b / 60} dk` : `${Math.min(a, b)} / ${b}`;
+    const g = def.id === "game" ? questOfDay(quests) : null;
+    const act = got ? `<span class="muted">✓ Alındı</span>`
+      : ready ? `<button class="btn play" data-quest="${def.id}">+R$ ${def.reward} al</button>`
+      : g ? `<button class="btn blue" data-qplay="${g.id}">▶ Oyna</button>` : `<span class="qr">+R$ ${def.reward}</span>`;
+    return `<div class="quest ${got ? "done" : ready ? "ready" : ""}"><div class="qi">${ic}</div>
+      <div><b>${escH(txt)}</b><div class="qp">${shown}${g && !got && !ready ? ` · ödül R$ ${def.reward}` : ""}</div><div class="pbar"><i style="width:${Math.min(100, a / b * 100)}%"></i></div></div>${act}</div>`;
+  }).join("");
+}
+$("quests").addEventListener("click", async e => {
+  const p = e.target.closest("[data-qplay]");
+  if (p) { openGameSheet(p.dataset.qplay); return; }
+  const b = e.target.closest("[data-quest]");
+  if (!b || b.disabled) return;
+  b.disabled = true;
+  const id = b.dataset.quest, g = id === "game" ? questOfDay(quests) : null;
+  try {
+    const r = await rpc("kup_quest_claim", { p_quest: id, p_game: g ? g.id : null });
+    setJeton(r.jeton); setQuests(r.q);
+    toast(`📋 Görev ödülü: +R$ ${r.amount}!`);
+  } catch (err) { toast(errMsg(err)); loadQuests(); }
+});
 
 // ================================================================ Blok avatar (three.js)
 function hasWebGL() { try { return !!document.createElement("canvas").getContext("webgl"); } catch (e) { return false; } }
@@ -682,6 +795,7 @@ function renderHome() {
   $("btnDaily").disabled = !can;
   const q = $("search").value.trim().toLocaleLowerCase("tr");
   renderBanners();
+  renderQuests();
   const list = visibleGames().filter(g => !q || g.title.toLocaleLowerCase("tr").includes(q) || g.genre.toLocaleLowerCase("tr").includes(q));
   $("games").innerHTML = list.map(gameCard).join("") || `<p class="muted">“${q}” için oyun bulunamadı.</p>`;
   const recent = profile.recent.map(id => visibleGames().find(g => g.id === id)).filter(Boolean);
@@ -935,8 +1049,8 @@ function flushGame() {
     if (typeof w.persist === "function") w.persist(true); else if (typeof w.save === "function") w.save();
   } catch (e) {}
 }
-document.addEventListener("visibilitychange", () => { if (document.hidden && current) { flushGame(); pushSave(current); } });
-addEventListener("pagehide", () => { if (current) { flushGame(); pushSave(current, true); } });
+document.addEventListener("visibilitychange", () => { if (document.hidden && current) { flushGame(); pushSave(current); } if (document.hidden && persist.h) pushProfile(); });
+addEventListener("pagehide", () => { if (current) { flushGame(); pushSave(current, true); } if (persist.h) pushProfile(true); }); // bekleyen avatar değişikliği yenilemede kaybolmasın
 
 // ================================================================ Oyun başlatma + köprü (postMessage)
 let current = null, playTimer = null, saveTimer = null;
@@ -970,6 +1084,7 @@ async function launch(id) {
       if (r.reward) toast(`⏱️ ${PLAY_REWARD_SEC / 60} dakika oynadın: +R$ ${r.reward}`);
       if (r.badge) badgeToast("hour", r.badge);
       setJeton(r.jeton);
+      if (r.q) setQuests(r.q, true);
     } catch (e) {}
   }, 10000);
   // Oyun açılmadan önce bu hesabın buluttaki kaydı yerleşir (tam ekran isteği tıklamaya yakın kalsın diye en sonda)
@@ -1188,7 +1303,7 @@ async function loadCfgRemote() {
 function afterLogin() {
   renderTop(); renderHome(); stages.forEach(s => s.update());
   if ($("profile").classList.contains("on")) renderProfile();
-  fetchGifts();
+  fetchGifts(); loadQuests();
 }
 // Admin değişiklikleri (Robux, duyuru, hediye) sayfa yenilenmeden gelsin
 async function tick() {
@@ -1197,7 +1312,15 @@ async function tick() {
   loadCfgRemote();
   if (!session) return;
   fetchGifts();
-  if (!current && !pendingBuy) { const j = profile.jeton; if (await refreshProfile()) { if (profile.jeton !== j) renderTop(); if ($("home").classList.contains("on")) renderHome(); } }
+  if (!current && !pendingBuy) {
+    const j = profile.jeton, a = JSON.stringify(profile.avatar);
+    if (await refreshProfile()) {
+      const av = JSON.stringify(profile.avatar) !== a; // başka cihazda değişen avatar burada da görünsün
+      if (profile.jeton !== j || av) renderTop();
+      if (av) { stages.forEach(s => s.update()); if ($("avatar").classList.contains("on")) renderAvatarOpts(); }
+      if ($("home").classList.contains("on")) renderHome();
+    }
+  }
 }
 setInterval(tick, 45000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) tick(); });
