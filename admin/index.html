@@ -1,0 +1,1659 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Küp Evreni Admin</title>
+<!--
+  Küp Evreni admin paneli: ayrı sayfa (ana sayfada hiçbir giriş yolu yok).
+  Veriler Supabase'de (supabase/kurulum.sql): oyuncular, satın alımlar, hediyeler, ayarlar, promo kodlar, işlem kaydı.
+  Giriş: Küp Evreni hesabı + profiles.is_admin = true. Yetkiyi sunucu kontrol eder (RLS + admin_* fonksiyonları).
+  Admin oturumu ana sayfadan ayrı tutulur (storageKey kupAdminAuth).
+  Oyun kayıtları (her oyunun kendi ilerlemesi) game_saves tablosunda, hesaba bağlı: "Zaten verildi" seçili oyuncunun kaydına bakar.
+-->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/dist/umd/supabase.min.js"></script>
+<style>
+  :root {
+    --bg: #0d0e12;
+    --surface: #16181d;
+    --surface2: #1e2128;
+    --surface3: #262a33;
+    --line: rgba(255, 255, 255, 0.08);
+    --line2: rgba(255, 255, 255, 0.14);
+    --text: #f2f3f5;
+    --text2: #c4c7cf;
+    --muted: #8a8f9a;
+    --accent: #00a2ff;
+    --accent-soft: rgba(0, 162, 255, 0.14);
+    --play: #00b06f;
+    --play-soft: rgba(0, 176, 111, 0.14);
+    --gold: #ffd166;
+    --gold-soft: rgba(255, 209, 102, 0.12);
+    --red: #ff4d5e;
+    --red-soft: rgba(255, 77, 94, 0.12);
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font-family: "Trebuchet MS", system-ui, sans-serif; font-size: 15px; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  a { color: var(--accent); text-decoration: none; }
+  svg.i { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+  .muted { color: var(--muted); }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* Butonlar ve alanlar */
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 36px; padding: 0 14px; border-radius: 10px;
+    border: 1px solid var(--line2); background: var(--surface2); cursor: pointer; font-weight: 700; font-size: 14px; white-space: nowrap; }
+  .btn:hover { background: var(--surface3); }
+  .btn.primary { background: var(--accent); border-color: transparent; color: #fff; }
+  .btn.primary:hover { filter: brightness(1.1); }
+  .btn.green { background: var(--play); border-color: transparent; color: #fff; }
+  .btn.danger { background: var(--red-soft); border-color: rgba(255, 77, 94, 0.35); color: var(--red); }
+  .btn.danger:hover { background: var(--red); color: #fff; }
+  .btn.ghost { background: none; border-color: transparent; }
+  .btn.ghost:hover { background: var(--surface2); }
+  .btn.sm { height: 30px; padding: 0 10px; font-size: 13px; }
+  .btn:disabled { opacity: 0.4; cursor: default; pointer-events: none; }
+  .field { height: 38px; border-radius: 10px; border: 1px solid var(--line2); background: var(--bg); padding: 0 12px; width: 100%; }
+  .field:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
+  label.lbl { display: block; font-size: 13px; color: var(--text2); margin: 12px 0 6px; font-weight: 700; }
+
+  /* Giriş ekranı */
+  #login { min-height: 100vh; display: grid; place-items: center; padding: 16px;
+    background: radial-gradient(circle at 20% 10%, rgba(0, 162, 255, 0.16), transparent 45%), radial-gradient(circle at 85% 90%, rgba(0, 176, 111, 0.12), transparent 45%), var(--bg); }
+  .loginCard { width: 100%; max-width: 380px; background: var(--surface); border: 1px solid var(--line); border-radius: 20px; padding: 30px 26px 26px;
+    box-shadow: 0 30px 60px rgba(0, 0, 0, 0.4); }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 17px; letter-spacing: 0.02em; }
+  .brand i { width: 26px; height: 26px; background: var(--text); transform: rotate(14deg); border-radius: 4px; display: grid; place-items: center; }
+  .brand i::after { content: ""; width: 9px; height: 9px; background: var(--surface); }
+  .brand small { font-size: 11px; font-weight: 700; color: var(--accent); background: var(--accent-soft); padding: 3px 7px; border-radius: 6px; letter-spacing: 0.04em; }
+  .loginCard h1 { font-size: 22px; margin: 26px 0 4px; }
+  .pw { position: relative; }
+  .pw .field { padding-right: 44px; height: 44px; }
+  .pw button { position: absolute; right: 4px; top: 4px; height: 36px; width: 36px; border: 0; background: none; color: var(--muted); cursor: pointer; border-radius: 8px; }
+  .pw button:hover { color: var(--text); background: var(--surface2); }
+  .loginCard .btn.primary { width: 100%; height: 44px; margin-top: 16px; font-size: 15px; }
+  .loginCard .apkLink { display: block; text-align: center; margin-top: 14px; font-size: 14px; color: var(--text2); text-decoration: none; }
+  .loginCard .apkLink:hover { color: var(--text); }
+  body.inApp .apkLink { display: none !important; }
+  .err { color: var(--red); font-size: 13px; min-height: 18px; margin-top: 8px; }
+  .shake { animation: shake 0.35s; }
+  @keyframes shake { 20%, 60% { transform: translateX(-6px); } 40%, 80% { transform: translateX(6px); } }
+
+  /* Uygulama iskeleti */
+  #app { display: none; min-height: 100vh; }
+  #app.on { display: grid; grid-template-columns: 236px minmax(0, 1fr); }
+  aside { position: sticky; top: 0; height: 100vh; background: var(--surface); border-right: 1px solid var(--line); display: flex; flex-direction: column; padding: 18px 12px; }
+  aside .brand { padding: 0 8px 18px; border-bottom: 1px solid var(--line); margin-bottom: 12px; }
+  .navTitle { font-size: 11px; color: var(--muted); font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; padding: 10px 10px 6px; }
+  #nav { flex: 1; overflow-y: auto; min-height: 0; margin: 0 -4px; padding: 0 4px; }
+  nav button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; border: 0; background: none; border-radius: 10px;
+    cursor: pointer; color: var(--text2); font-weight: 700; text-align: left; }
+  nav button:hover { background: var(--surface2); color: var(--text); }
+  nav button.on { background: var(--accent-soft); color: var(--accent); }
+  nav .count { margin-left: auto; font-size: 12px; background: var(--surface3); color: var(--text2); padding: 1px 8px; border-radius: 20px; }
+  aside .foot { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; padding-top: 12px; border-top: 1px solid var(--line); }
+  aside .foot .btn { justify-content: flex-start; width: 100%; color: var(--text2); }
+
+  .content { min-width: 0; }
+  header { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 12px; padding: 14px 28px; background: rgba(13, 14, 18, 0.85);
+    backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 20px; margin: 0; }
+  header .crumb { font-size: 13px; color: var(--muted); }
+  .search { position: relative; margin-left: auto; width: 260px; }
+  .search svg { position: absolute; left: 11px; top: 10px; color: var(--muted); }
+  .search .field { padding-left: 36px; }
+  #menuBtn { display: none; }
+  .page { padding: 24px 28px 60px; max-width: 1200px; }
+
+  /* Kartlar */
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+  .cardHead { display: flex; align-items: center; gap: 10px; padding: 16px 18px 0; }
+  .cardHead h2 { font-size: 15px; margin: 0; }
+  .cardHead .sub { font-size: 13px; color: var(--muted); }
+  .cardHead .right { margin-left: auto; }
+  .cardBody { padding: 16px 18px 18px; }
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 16px; }
+  .kpi { padding: 16px 18px; display: flex; gap: 14px; align-items: flex-start; }
+  .kpi .ico { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; flex: none; }
+  .kpi .ico svg { width: 20px; height: 20px; }
+  .kpi span { font-size: 13px; color: var(--muted); display: block; }
+  .kpi b { font-size: 24px; display: block; margin-top: 2px; }
+  .kpi small { font-size: 12px; color: var(--muted); }
+  .grid2 { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; margin-bottom: 16px; }
+
+  /* Yatay çubuk grafik (tek seri) */
+  .bars { display: flex; flex-direction: column; gap: 12px; }
+  .barRow { display: grid; grid-template-columns: 170px 1fr 64px; gap: 12px; align-items: center; font-size: 13px; position: relative; cursor: default; }
+  .barRow .lab { color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .barRow .track { height: 22px; display: flex; align-items: center; }
+  .barRow .fill { height: 14px; background: var(--accent); border-radius: 0 4px 4px 0; min-width: 2px; transition: filter 0.1s; }
+  .barRow:hover .fill { filter: brightness(1.25); }
+  .barRow .val { text-align: right; color: var(--text2); }
+  .chartGrid { position: relative; }
+  #tip { position: fixed; pointer-events: none; z-index: 60; background: var(--surface3); border: 1px solid var(--line2); border-radius: 10px; padding: 8px 10px;
+    font-size: 13px; display: none; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4); }
+  #tip b { display: block; margin-bottom: 2px; }
+
+  /* Tablolar */
+  .tableWrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 10px 18px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  td { padding: 12px 18px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  tr:last-child td { border-bottom: 0; }
+  tbody tr.click { cursor: pointer; }
+  tbody tr.click:hover td { background: var(--surface2); }
+  th.r, td.r { text-align: right; }
+  .user { display: flex; align-items: center; gap: 10px; }
+  .ava { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-size: 17px; flex: none; box-shadow: 0 0 0 2px var(--surface); }
+  .user b { display: block; }
+  .user small { color: var(--muted); font-size: 12px; }
+  .pill { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; padding: 3px 9px; border-radius: 20px; }
+  .pill.green { background: var(--play-soft); color: var(--play); }
+  .pill.gray { background: var(--surface3); color: var(--text2); }
+  .pill.gold { background: var(--gold-soft); color: var(--gold); }
+  .pill.green::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .robux { color: var(--gold); font-weight: 700; }
+  .gameIco { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; font-size: 19px; flex: none; }
+
+  /* Boş durum */
+  .empty { text-align: center; padding: 40px 20px; }
+  .empty .big { width: 56px; height: 56px; border-radius: 16px; background: var(--surface2); display: grid; place-items: center; margin: 0 auto 14px; color: var(--muted); }
+  .empty .big svg { width: 26px; height: 26px; }
+  .empty h3 { margin: 0 0 6px; font-size: 17px; }
+  .empty p { margin: 0 auto; max-width: 520px; color: var(--muted); line-height: 1.55; }
+  .empty code { background: var(--surface2); padding: 2px 6px; border-radius: 6px; color: var(--text2); }
+  .empty .btn { margin-top: 16px; }
+
+  /* Kullanıcı çekmecesi */
+  #scrim { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); z-index: 20; opacity: 0; pointer-events: none; transition: opacity 0.18s; }
+  #scrim.on { opacity: 1; pointer-events: auto; }
+  #drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(440px, 100%); background: var(--surface); border-left: 1px solid var(--line); z-index: 21;
+    transform: translateX(100%); transition: transform 0.2s ease; display: flex; flex-direction: column; }
+  #drawer.on { transform: none; }
+  .dHead { padding: 18px 20px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 12px; }
+  .dHead .ava { width: 52px; height: 52px; font-size: 26px; }
+  .dHead h2 { margin: 0; font-size: 19px; }
+  .dHead .btn { margin-left: auto; }
+  .dBody { padding: 18px 20px 30px; overflow-y: auto; flex: 1; }
+  .sec { margin-bottom: 22px; }
+  .sec h3 { font-size: 12px; color: var(--muted); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; margin: 0 0 10px; }
+  .miniStats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .miniStats div { background: var(--surface2); border-radius: 10px; padding: 10px 12px; }
+  .miniStats b { display: block; font-size: 16px; }
+  .miniStats span { font-size: 12px; color: var(--muted); }
+  .balance { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+  .balance b { font-size: 28px; color: var(--gold); }
+  .quick { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .amountRow { display: grid; grid-template-columns: 1fr auto auto auto; gap: 6px; }
+  .chips { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+  .chip { display: flex; align-items: center; gap: 8px; padding: 9px 10px; border-radius: 10px; border: 1px solid var(--line2); background: var(--surface2);
+    cursor: pointer; text-align: left; font-size: 13px; font-weight: 700; color: var(--muted); }
+  .chip .e { font-size: 18px; filter: grayscale(1); opacity: 0.5; }
+  .chip.on { border-color: rgba(0, 176, 111, 0.5); background: var(--play-soft); color: var(--text); }
+  .chip.on .e { filter: none; opacity: 1; }
+  .chip .tick { margin-left: auto; width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--line2); }
+  .chip.on .tick { background: var(--play); border-color: var(--play); }
+  .list div { display: flex; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .list div:last-child { border-bottom: 0; }
+  .dangerZone { border: 1px solid rgba(255, 77, 94, 0.3); border-radius: 12px; padding: 14px; }
+  .dangerZone p { margin: 0 0 10px; font-size: 13px; color: var(--muted); }
+
+  /* Ayarlar */
+  .settings { display: grid; gap: 16px; max-width: 640px; }
+  .kv { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+  .kv:last-child { border-bottom: 0; }
+  .kv code { color: var(--text2); word-break: break-all; text-align: right; }
+
+  /* Bildirim */
+  #toast { position: fixed; right: 20px; bottom: 20px; z-index: 70; display: flex; align-items: center; gap: 10px; background: var(--surface3); border: 1px solid var(--line2);
+    border-left: 4px solid var(--play); padding: 12px 16px; border-radius: 12px; font-weight: 700; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+    transform: translateY(20px); opacity: 0; pointer-events: none; transition: 0.18s; }
+  #toast.on { transform: none; opacity: 1; }
+  #toast.bad { border-left-color: var(--red); }
+
+  /* Silme onayı (DELETE yaz) */
+  #confirm { position: fixed; inset: 0; z-index: 50; background: rgba(0, 0, 0, 0.6); display: none; align-items: center; justify-content: center; padding: 16px; }
+  #confirm.on { display: flex; }
+  .cBox { width: 100%; max-width: 420px; background: var(--surface); border: 1px solid var(--line2); border-radius: 18px; padding: 22px; box-shadow: 0 30px 60px rgba(0, 0, 0, 0.5); }
+  .cBox .warn { width: 44px; height: 44px; border-radius: 12px; background: var(--red-soft); color: var(--red); display: grid; place-items: center; margin-bottom: 14px; }
+  .cBox .warn svg { width: 22px; height: 22px; }
+  .cBox h3 { margin: 0 0 6px; font-size: 18px; }
+  .cBox p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.5; }
+  .cBox code { background: var(--red-soft); color: var(--red); padding: 1px 6px; border-radius: 6px; font-weight: 700; }
+  .cBox .field { margin-top: 14px; font-weight: 700; letter-spacing: 0.06em; }
+  .cBox .acts { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+  .btn.dangerSolid { background: var(--red); border-color: transparent; color: #fff; }
+
+/* Yönetim sayfaları: anahtar, form ızgarası, öğe listeleri */
+  .tg { position: relative; width: 44px; height: 24px; border-radius: 20px; border: 0; background: var(--surface3); cursor: pointer; flex: none; transition: background 0.15s; }
+  .tg::after { content: ""; position: absolute; left: 3px; top: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform 0.15s; }
+  .tg.on { background: var(--play); }
+  .tg.on::after { transform: translateX(20px); }
+  .formGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 4px 14px; }
+  .formGrid .lbl { margin-top: 10px; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .rowLine { display: flex; align-items: center; gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+  .rowLine:last-child { border-bottom: 0; }
+  .rowLine .grow { flex: 1; min-width: 0; }
+  .rowLine b { display: block; }
+  .rowLine small { color: var(--muted); font-size: 13px; }
+  .stack { display: grid; gap: 16px; max-width: 900px; }
+  .seg { display: flex; flex-wrap: wrap; gap: 6px; }
+  .seg button { height: 34px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line2); background: var(--surface2); cursor: pointer; font-weight: 700; font-size: 13px; }
+  .seg button.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+  textarea.field { height: auto; min-height: 84px; padding: 10px 12px; resize: vertical; line-height: 1.5; }
+  .banner { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 14px; font-weight: 700; line-height: 1.4; border: 1px solid rgba(255,255,255,0.12); }
+  .banner .bi { font-size: 22px; }
+  .banner.info { background: linear-gradient(90deg, rgba(0,162,255,0.22), rgba(0,162,255,0.08)); }
+  .banner.success { background: linear-gradient(90deg, rgba(0,176,111,0.24), rgba(0,176,111,0.08)); }
+  .banner.warn { background: linear-gradient(90deg, rgba(255,209,102,0.24), rgba(255,209,102,0.08)); }
+  .banner.event { background: linear-gradient(90deg, rgba(167,112,255,0.3), rgba(255,94,170,0.14)); }
+  .banner.fresh { background: linear-gradient(90deg, rgba(255,59,92,0.28), rgba(255,122,69,0.1)); }
+  .swList { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .swItem { position: relative; width: 40px; height: 40px; border-radius: 10px; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.15); }
+  .swItem button { position: absolute; right: -6px; top: -6px; width: 20px; height: 20px; border-radius: 50%; border: 0; background: var(--red); color: #fff; cursor: pointer; font-size: 12px; line-height: 20px; padding: 0; }
+  .itemIco { width: 44px; height: 44px; border-radius: 12px; background: var(--surface2); display: grid; place-items: center; font-size: 24px; flex: none; }
+  .dot { width: 14px; height: 14px; border-radius: 50%; display: inline-block; vertical-align: -2px; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.2); }
+  .meter { height: 8px; background: var(--surface3); border-radius: 6px; overflow: hidden; width: 140px; }
+  .meter i { display: block; height: 100%; background: var(--play); border-radius: 0 4px 4px 0; }
+  .mono { font-family: Consolas, "Courier New", monospace; font-weight: 700; letter-spacing: 0.04em; }
+  input[type=color].field { padding: 4px; cursor: pointer; }
+  @media (max-width: 760px) { .meter { width: 70px; } }
+
+  /* Telefon / dar ekran */
+  @media (max-width: 1000px) { .kpis { grid-template-columns: repeat(2, 1fr); } .grid2 { grid-template-columns: 1fr; } }
+  @media (max-width: 760px) {
+    #app.on { grid-template-columns: minmax(0, 1fr); }
+    aside { position: fixed; left: 0; top: 0; bottom: 0; width: 250px; z-index: 30; transform: translateX(-100%); transition: transform 0.2s; }
+    aside.open { transform: none; box-shadow: 20px 0 60px rgba(0, 0, 0, 0.5); }
+    #menuBtn { display: inline-flex; }
+    header { padding: 12px 16px; flex-wrap: wrap; }
+    .search { width: 100%; order: 5; margin-left: 0; }
+    .page { padding: 16px 16px 50px; }
+    .kpi { padding: 14px; } .kpi .ico { display: none; } .kpi b { font-size: 19px; white-space: nowrap; }
+    .barRow { grid-template-columns: 100px 1fr 70px; } .barRow .val { white-space: nowrap; }
+    th, td { padding: 10px 12px; }
+    .hideSm { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Giriş -->
+<div id="login">
+  <form class="loginCard" id="loginForm" autocomplete="on">
+    <div class="brand"><i></i>KÜP EVRENİ <small>ADMIN</small></div>
+    <h1>Yönetici girişi</h1>
+    <div class="muted" style="font-size:14px">Küp Evreni'ndeki admin hesabınla gir.</div>
+    <label class="lbl" for="user">Kullanıcı adı</label>
+    <input class="field" id="user" placeholder="Kullanıcı adı" autocomplete="username" autofocus>
+    <label class="lbl" for="pass">Şifre</label>
+    <div class="pw">
+      <input class="field" type="password" id="pass" placeholder="••••••••" autocomplete="current-password">
+      <button type="button" id="eye" title="Şifreyi göster"></button>
+    </div>
+    <div class="err" id="loginErr"></div>
+    <button class="btn primary" type="submit">Giriş yap</button>
+    <a class="apkLink" href="../indir/kup-evreni-admin.apk" download>📱 Admin uygulamasını indir (Android APK)</a>
+  </form>
+</div>
+
+<!-- Panel -->
+<div id="app">
+  <aside id="side">
+    <div class="brand"><i></i>KÜP EVRENİ <small>ADMIN</small></div>
+    <nav id="nav"></nav>
+    <div class="foot">
+      <a class="btn ghost apkLink" href="../indir/kup-evreni-admin.apk" download>📱 Admin uygulaması (APK)</a>
+      <a class="btn ghost" href="../index.html" id="siteLink"></a>
+      <button class="btn ghost" id="btnLogout"></button>
+    </div>
+  </aside>
+  <div class="content">
+    <header>
+      <button class="btn ghost" id="menuBtn" aria-label="Menü"></button>
+      <div><div class="crumb">Admin</div><h1 id="pageTitle"></h1></div>
+      <div class="search"><span id="searchIco"></span><input class="field" id="search" placeholder="Kullanıcı ara…"></div>
+      <button class="btn ghost" id="btnRefresh" title="Sunucudan yenile"></button>
+    </header>
+    <div class="page" id="page"></div>
+  </div>
+</div>
+
+<div id="scrim"></div>
+<div id="drawer"></div>
+<div id="tip"></div>
+<div id="toast"></div>
+<div id="confirm"><form class="cBox" id="cForm" autocomplete="off">
+  <div class="warn" id="cIco"></div>
+  <h3 id="cTitle">Hesabı sil</h3>
+  <p id="cText"></p>
+  <input class="field" id="cInput" placeholder="DELETE" spellcheck="false" autocapitalize="characters">
+  <div class="acts"><button type="button" class="btn" id="cCancel">Vazgeç</button><button type="submit" class="btn dangerSolid" id="cOk" disabled>Kalıcı olarak sil</button></div>
+</form></div>
+
+<script>
+"use strict";
+// Admin uygulamasının (KE Admin) içindeyken "APK indir" bağlantıları gizlenir
+try {
+  // "; wv)" = Android uygulama içi görünüm (KE Admin artık WebView'da açılıyor; referrer gelmeyebilir)
+  if (document.referrer.startsWith("android-app://") || /; wv\)/.test(navigator.userAgent) || matchMedia("(display-mode: standalone)").matches) sessionStorage.setItem("kupAdminApp", "1");
+  if (sessionStorage.getItem("kupAdminApp")) document.body.classList.add("inApp");
+} catch (e) {}
+const $ = id => document.getElementById(id);
+
+// ================================================================ Veri (ana sayfadaki GAMES / BADGES ile aynı tutulmalı)
+const GAMES = [
+  { id: "pizza", title: "Pizza Kulesi Tycoon", icon: "🍕", saveKey: "pizzaKulesi", bg: "linear-gradient(135deg,#ff7a45,#ffb703)" },
+  { id: "gezegen", title: "Evcil Hayvan Simülatörü: Gezegenler", icon: "🐾", saveKey: "evcilGezegenler", bg: "linear-gradient(135deg,#0b1d51,#2bb5ff)" },
+  { id: "fabrika", title: "Kaçış Parkuru: Çılgın Fabrika", icon: "🏭", saveKey: "cilginFabrika", bg: "linear-gradient(135deg,#3a3a3a,#ff5a1f)" },
+  { id: "ada", title: "Ada Hayatta Kalma: Tekne Kazası", icon: "🏝️", saveKey: "tekneKazasi", bg: "linear-gradient(135deg,#0f7a5a,#7ad7f0)" },
+  { id: "klavye", title: "Klavye Koşusu: +1 Hız", icon: "⌨️", saveKey: "klavyeKosusu", bg: "linear-gradient(135deg,#2a1f3d,#ff9ec7)" },
+  { id: "kasaba", title: "Kasaba Hayatı RP", icon: "🏘️", saveKey: "kasabaHayati", bg: "linear-gradient(135deg,#3a86ff,#8ce99a)" },
+  { id: "limonata", title: "Limonata Standı", icon: "🍋", saveKey: "limonataStandi", bg: "linear-gradient(135deg,#ffe259,#ffa751)" },
+  { id: "arena", title: "Küp Arena", icon: "🔫", saveKey: "kupArena", bg: "linear-gradient(135deg,#1f2430,#e85d04)" },
+  { id: "kopuk", title: "Daha Fazla Köpük!", icon: "🫧", saveKey: "kopukPatlamasi", bg: "linear-gradient(135deg,#3aa6e8,#d8f3ff)" },
+  { id: "futbol", title: "Küp Futbol", icon: "⚽", saveKey: "kupFutbol", bg: "linear-gradient(135deg,#1b7a3a,#7ed957)" },
+  { id: "yaris", title: "Küp Yarışı", icon: "🏎️", saveKey: "kupYarisi", bg: "linear-gradient(135deg,#c1121f,#ffb703)" },
+  { id: "kule", title: "Kule Ustası", icon: "🧱", saveKey: "kuleUstasi", bg: "linear-gradient(135deg,#2b9de8,#ff8fc7)" },
+  { id: "hayvanat", title: "Hayvanat Bahçesi Tycoon", icon: "🦁", saveKey: "hayvanatBahcesi", bg: "linear-gradient(135deg,#2bb673,#ffd23f)" },
+  { id: "parafabrika", title: "Para Fabrikası Tycoon", icon: "🏭", saveKey: "paraFabrikasi", bg: "linear-gradient(135deg,#19b3a6,#ff8a3d)" },
+];
+const BADGES = [
+  { id: "welcome", icon: "👋", name: "Hoş geldin" }, { id: "firstGame", icon: "🎮", name: "İlk oyun" },
+  { id: "explorer", icon: "🧭", name: "Kâşif" }, { id: "stylish", icon: "🧢", name: "Tarz sahibi" },
+  { id: "hour", icon: "⏱️", name: "Bir saat" }, { id: "shopper", icon: "🛍️", name: "Alışverişçi" },
+];
+const FACES = { smile: "🙂", cool: "😎", wow: "😮", grin: "😁" };
+// Supabase (ana sayfayla aynı proje; admin oturumu ayrı anahtarda)
+const SB_URL = "https://hpgfimktdcuoikgbbggk.supabase.co", SB_KEY = "sb_publishable_o212R-fxvBvUaX7RCTIVUg__NjphVnk";
+const sb = window.supabase ? window.supabase.createClient(SB_URL, SB_KEY, { auth: { storageKey: "kupAdminAuth" } }) : null;
+let adminSession = null, adminName = "";
+
+// ================================================================ İkonlar (çizgi ikonlar)
+const ICONS = {
+  home: '<rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/>',
+  users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  cart: '<circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.7 13.4a2 2 0 0 0 2 1.6h9.7a2 2 0 0 0 2-1.6L23 6H6"/>',
+  game: '<rect x="2" y="6" width="20" height="12" rx="4"/><path d="M6 12h4M8 10v4"/><circle cx="15.5" cy="11" r="1"/><circle cx="18" cy="13" r="1"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+  gem: '<path d="M6 3h12l4 6-10 12L2 9z"/><path d="M2 9h20M12 21 8 9l4-6 4 6-4 12"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  bag: '<path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><path d="M3 6h18M16 10a4 4 0 0 1-8 0"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
+  logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5M21 12H9"/>',
+  out: '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6M10 14 21 3"/>',
+  menu: '<path d="M3 6h18M3 12h18M3 18h18"/>',
+  x: '<path d="M18 6 6 18M6 6l12 12"/>',
+  eye: '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"/><circle cx="12" cy="12" r="3"/>',
+  eyeOff: '<path d="M17.9 17.9A10 10 0 0 1 12 20C5 20 1 12 1 12a18 18 0 0 1 5.1-5.9M9.9 4.2A9 9 0 0 1 12 4c7 0 11 8 11 8a18 18 0 0 1-2.2 3.2M1 1l22 22"/><path d="M14.1 14.1a3 3 0 1 1-4.2-4.2"/>',
+  trash: '<path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>',
+  alert: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
+  download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
+  refresh: '<path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.5 9a9 9 0 0 1 14.9-3.4L23 10M1 14l4.6 4.4A9 9 0 0 0 20.5 15"/>',
+  ticket: '<path d="M2 9a3 3 0 0 0 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 0 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2z"/><path d="M13 5v2M13 17v2M13 11v2"/>',
+  coins: '<circle cx="8" cy="8" r="6"/><path d="M18.1 10.4A6 6 0 1 1 10.3 18"/><path d="M7 6h1v4"/>',
+  megaphone: '<path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>',
+  shirt: '<path d="M20.4 3.5 16 2a4 4 0 0 1-8 0L3.6 3.5a2 2 0 0 0-1.3 2.2l.6 3.5a1 1 0 0 0 1 .8H6v10a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V10h2.2a1 1 0 0 0 1-.8l.6-3.5a2 2 0 0 0-1.3-2.2z"/>',
+  award: '<circle cx="12" cy="8" r="6"/><path d="M15.5 12.9 17 22l-5-3-5 3 1.5-9.1"/>',
+  list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+  gift: '<rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7"/><path d="M7.5 8a2.5 2.5 0 0 1 0-5C11 3 12 8 12 8s1-5 4.5-5a2.5 2.5 0 0 1 0 5"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  chevron: '<path d="m9 18 6-6-6-6"/>',
+};
+const ic = (n, extra = "") => `<svg class="i" viewBox="0 0 24 24" ${extra}>${ICONS[n]}</svg>`;
+
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
+const fmtNum = n => (n || 0).toLocaleString("tr");
+function fmtTime(sec) { const m = Math.floor((sec || 0) / 60); return m < 60 ? `${m} dk` : `${Math.floor(m / 60)} sa ${m % 60} dk`; }
+function fmtDate(t) { return new Date(t).toLocaleString("tr", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }); }
+function toast(msg, bad) {
+  const t = $("toast");
+  t.textContent = msg; t.classList.toggle("bad", !!bad); t.classList.add("on");
+  clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove("on"), 2600);
+}
+const ava = a => `<span class="ava" style="background:${esc(a.avatar?.skin || "#ffdbac")}">${FACES[a.avatar?.face] || "🙂"}</span>`;
+const playSec = a => Object.values(a.playTime || {}).reduce((s, v) => s + v, 0);
+const spentOf = a => (a.purchases || []).reduce((s, p) => s + (p.price || 0), 0);
+
+// ================================================================ Sunucu verisi (Supabase)
+// Panel açılınca her şey DB'ye yüklenir; okuma DB'den (anında), yazma hem DB'ye hem sunucuya (arka planda).
+const DB = { profiles: [], buysBy: {}, purchases: [], gifts: [], cfg: {}, codes: [], packs: [], log: [], uses: {}, saves: [], reports: [] };
+async function loadAll() {
+  const [p, b, g, s, l, u, sv] = await Promise.all([
+    sb.from("profiles").select("id,name,jeton,data,is_admin,created_at,updated_at").order("created_at"),
+    sb.from("purchases").select("user_id,game,item,price,at").order("at", { ascending: false }).limit(5000),
+    sb.from("gifts").select("*").order("at", { ascending: false }).limit(1000),
+    sb.from("settings").select("key,value"),
+    sb.from("admin_log").select("at,text").order("at", { ascending: false }).limit(300),
+    sb.from("code_uses").select("code"),
+    sb.from("game_saves").select("user_id,game,data,updated_at"),
+  ]);
+  // Sohbet şikâyetleri (tablo yoksa sessizce geç)
+  try { const r = await sb.from("reports").select("*").order("created_at", { ascending: false }).limit(300); DB.reports = r.error ? [] : (r.data || []); } catch (e) { DB.reports = []; }
+  // Destek Asistanı mesajları (yama-destek.sql; tablo yoksa sessizce geç)
+  try { const r = await sb.from("support_msgs").select("*").order("id").limit(3000); DB.sup = r.error ? [] : (r.data || []); DB.supOk = !r.error; } catch (e) { DB.sup = []; DB.supOk = false; }
+  try { const r = await sb.from("messages").select("id,from_id,to_id,body,game,room,created_at,read_at").order("id", { ascending: false }).limit(3000); DB.msgs = r.error ? [] : (r.data || []); } catch (e) { DB.msgs = []; }
+  const bad = [p, b, g, s, l, u, sv].find(x => x.error);
+  if (bad) throw new Error(bad.error.message);
+  DB.profiles = p.data || [];
+  DB.purchases = b.data || [];
+  DB.buysBy = {};
+  for (const x of DB.purchases) (DB.buysBy[x.user_id] = DB.buysBy[x.user_id] || []).push({ game: x.game, id: x.item, price: x.price, at: Date.parse(x.at) });
+  DB.gifts = g.data || [];
+  const st = Object.fromEntries((s.data || []).map(x => [x.key, x.value]));
+  DB.cfg = st.cfg && typeof st.cfg === "object" ? st.cfg : {};
+  DB.codes = Array.isArray(st.codes) ? st.codes : [];
+  DB.packs = Array.isArray(st.packs) ? st.packs : [];
+  DB.log = (l.data || []).map(x => ({ at: Date.parse(x.at), text: x.text }));
+  DB.uses = {};
+  for (const x of u.data || []) DB.uses[x.code] = (DB.uses[x.code] || 0) + 1;
+  DB.saves = sv.data || [];
+}
+const saveOf = (uid, game) => DB.saves.find(x => x.user_id === uid && x.game === game) || null;
+const kb = d => (JSON.stringify(d).length / 1024).toFixed(1) + " KB";
+// Arka planda yaz; hata olursa göster
+function bg(q, what) {
+  Promise.resolve(q).then(r => { if (r && r.error) throw r.error; }).catch(e => toast(`${what} kaydedilemedi: ${e.message || e}`, true));
+}
+const MAX_ROBUX = 2000000000;
+const nowIso = () => new Date().toISOString();
+const putSetting = (key, value) => bg(sb.from("settings").upsert({ key, value, updated_at: nowIso() }), "Ayar");
+const giftRow = g => ({ gid: g.gid, to: g.to_name, toId: g.to_id, game: g.game, items: g.items || [], note: g.note || "", skipped: g.skipped || [], at: Date.parse(g.at), got: g.got ? Date.parse(g.got) : null });
+const idByName = n => (DB.profiles.find(p => p.name === n) || {}).id;
+
+// Eski panel load/save çağrıları: platform anahtarları sunucuya, oyun kayıtları bu cihazın localStorage'ına gider
+function load(key, fallback) {
+  if (key === CFG_KEY) return structuredClone({ ...DB.cfg, codes: DB.codes.map(c => ({ ...c, used: DB.uses[c.code] || 0 })) });
+  if (key === LOG_KEY) return DB.log.slice();
+  if (key === PACK_KEY) return structuredClone(DB.packs);
+  if (key === GIFT_KEY) return {
+    pending: DB.gifts.filter(g => !g.got).map(giftRow),
+    done: DB.gifts.filter(g => g.got).map(giftRow).sort((a, b) => b.got - a.got).slice(0, 100),
+  };
+  try { return JSON.parse(localStorage.getItem(key) || "null") ?? fallback; } catch (e) { return fallback; }
+}
+function save(key, val) {
+  if (key === CFG_KEY) {
+    const { codes = [], ...rest } = val || {};
+    const clean = codes.map(({ used, ...c }) => c);
+    if (JSON.stringify(rest) !== JSON.stringify(DB.cfg)) { DB.cfg = rest; putSetting("cfg", rest); }
+    if (JSON.stringify(clean) !== JSON.stringify(DB.codes)) { DB.codes = clean; putSetting("codes", clean); }
+    return;
+  }
+  if (key === PACK_KEY) { DB.packs = val || []; putSetting("packs", DB.packs); return; }
+  if (key === LOG_KEY) { // panelde sadece "Temizle" kullanıyor
+    DB.log = val || [];
+    if (!DB.log.length) bg(sb.from("admin_log").delete().gt("id", 0), "İşlem kaydı");
+    return;
+  }
+  if (key === GIFT_KEY) { // bekleyen listedeki farkı sunucuya yaz: yeni = ekle, çıkan = iptal
+    const pend = (val && val.pending) || [];
+    const added = pend.filter(x => !DB.gifts.some(g => g.gid === x.gid))
+      .map(x => ({ gid: x.gid, to_id: x.toId || idByName(x.to), to_name: x.to, game: x.game, items: x.items, note: x.note || "", at: new Date(x.at || Date.now()).toISOString() }))
+      .filter(x => x.to_id);
+    const removed = DB.gifts.filter(g => !g.got && !pend.some(x => x.gid === g.gid)).map(g => g.gid);
+    DB.gifts = [...added.map(x => ({ ...x, got: null, skipped: [] })), ...DB.gifts.filter(g => !removed.includes(g.gid))];
+    if (added.length) bg(sb.from("gifts").insert(added), "Hediye");
+    if (removed.length) bg(sb.from("gifts").delete().in("gid", removed), "Hediye iptali");
+    return;
+  }
+  try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) {}
+}
+
+// Kullanıcı kimliği = Supabase kullanıcı id'si. "active" = son 5 dakikada bir şey yaptı (çevrimiçi)
+function users() {
+  const now = Date.now();
+  return DB.profiles.map(p => ({
+    uid: p.id, active: now - Date.parse(p.updated_at) < 5 * 60 * 1000, admin: p.is_admin,
+    a: { ...(p.data || {}), name: p.name, jeton: p.jeton, joined: p.data?.joined || String(p.created_at).slice(0, 10), purchases: DB.buysBy[p.id] || [] },
+  }));
+}
+function getUser(uid) { return users().find(u => u.uid === uid) || null; }
+// Panel sadece Küp Jeton, rozet ve günlük ödülü değiştirir. Küp Jeton sadece değiştiyse gider (oyuncunun o arada kazandığı ezilmesin).
+function putUser(uid, acc) {
+  const p = DB.profiles.find(x => x.id === uid);
+  if (!p) return;
+  const patch = { badges: acc.badges || {}, lastDaily: acc.lastDaily || "" };
+  const j = Math.min(MAX_ROBUX, Math.max(0, Math.floor(acc.jeton || 0)));
+  const jChanged = j !== p.jeton;
+  p.jeton = j; p.data = { ...(p.data || {}), ...patch };
+  bg(sb.rpc("admin_patch", { p_id: uid, p_jeton: jChanged ? j : null, p_data: patch }), p.name);
+}
+
+// Bu cihazda buluttan önceki admin ayarları varsa (kod, duyuru, avatar mağazası, paketler) bir kez sunucuya taşı
+function migrateLocal() {
+  if (Object.keys(DB.cfg).length || DB.codes.length || DB.packs.length) return;
+  let c = null, packs = null, log = null;
+  try { c = JSON.parse(localStorage.getItem(CFG_KEY) || "null"); packs = JSON.parse(localStorage.getItem(PACK_KEY) || "null"); log = JSON.parse(localStorage.getItem(LOG_KEY) || "null"); } catch (e) {}
+  if (!(c && Object.keys(c).length) && !(packs && packs.length)) return;
+  if (c) save(CFG_KEY, c);
+  if (packs && packs.length) save(PACK_KEY, packs);
+  if (Array.isArray(log) && log.length) {
+    DB.log = [...DB.log, ...log].slice(0, 300);
+    bg(sb.from("admin_log").insert(log.slice(0, 300).map(x => ({ at: new Date(x.at).toISOString(), text: String(x.text) }))), "Eski işlem kaydı");
+  }
+  toast("Bu cihazdaki eski admin ayarları sunucuya taşındı");
+}
+
+// ================================================================ Oturum (Supabase hesabı + is_admin)
+function sessionOk() { return !!adminSession; }
+
+$("eye").innerHTML = ic("eye");
+$("eye").onclick = () => {
+  const show = $("pass").type === "password";
+  $("pass").type = show ? "text" : "password";
+  $("eye").innerHTML = ic(show ? "eyeOff" : "eye");
+  $("pass").focus();
+};
+function loginFail(msg) {
+  $("loginErr").textContent = msg;
+  const c = $("loginForm"); c.classList.remove("shake"); void c.offsetWidth; c.classList.add("shake");
+}
+// Oturum gerçekten admin mi? (yetkiyi asıl sunucu kontrol eder, bu sadece doğru ekranı göstermek için)
+async function checkAdmin(user) {
+  const { data } = await sb.from("profiles").select("name,is_admin").eq("id", user.id).maybeSingle();
+  return data && data.is_admin ? data.name : null;
+}
+$("loginForm").onsubmit = async e => {
+  e.preventDefault();
+  if (!sb) { loginFail("Sunucuya bağlanılamadı. İnterneti kontrol edip sayfayı yenile."); return; }
+  const btn = $("loginForm").querySelector("button[type=submit]");
+  btn.disabled = true; $("loginErr").textContent = "";
+  try {
+    const { data: email, error: e1 } = await sb.rpc("kup_login_email", { p_name: $("user").value.trim() });
+    if (e1) throw e1;
+    if (!email) { loginFail("Bu kullanıcı adıyla hesap yok."); return; }
+    const { data, error } = await sb.auth.signInWithPassword({ email, password: $("pass").value });
+    if (error) { loginFail("Şifre yanlış. Tekrar dene."); $("pass").select(); return; }
+    const name = await checkAdmin(data.user);
+    if (!name) { await sb.auth.signOut(); loginFail("Bu hesabın admin yetkisi yok."); return; }
+    adminSession = data.session; adminName = name;
+    enterApp();
+  } catch (err) { loginFail("Bağlantı hatası: " + (err.message || err)); }
+  finally { btn.disabled = false; }
+};
+async function enterApp() {
+  $("login").style.display = "none";
+  $("app").classList.add("on");
+  $("page").innerHTML = `<div class="card"><div class="cardBody muted">Sunucudan yükleniyor…</div></div>`;
+  try { await loadAll(); migrateLocal(); } catch (e) { toast("Veriler yüklenemedi: " + e.message, true); }
+  go(location.hash.slice(1) || "overview");
+}
+async function refreshData(quiet) {
+  if (!adminSession) return;
+  try { await loadAll(); render(); if (!quiet) toast("Veriler yenilendi"); } catch (e) { toast("Yenilenemedi: " + e.message, true); }
+}
+async function logout() {
+  try { await sb.auth.signOut(); } catch (e) {}
+  adminSession = null; closeDrawer();
+  $("app").classList.remove("on"); $("login").style.display = "";
+  $("pass").value = ""; $("loginErr").textContent = ""; $("user").focus();
+}
+
+// ================================================================ Gezinme
+const PAGES = [
+  { id: "overview", name: "Genel Bakış", icon: "home", group: "Genel" },
+  { id: "users", name: "Kullanıcılar", icon: "users", group: "Genel" },
+  { id: "purchases", name: "Satın Alımlar", icon: "cart", group: "Genel" },
+  { id: "games", name: "Oyunlar", icon: "game", group: "Yönetim" },
+  { id: "gifts", name: "Oyun Hediyeleri", icon: "gift", group: "Yönetim" },
+  { id: "eco", name: "Ekonomi", icon: "coins", group: "Yönetim" },
+  { id: "announce", name: "Duyurular", icon: "megaphone", group: "Yönetim" },
+  { id: "codes", name: "Promo Kodlar", icon: "ticket", group: "Yönetim" },
+  { id: "avatarShop", name: "Avatar Mağazası", icon: "shirt", group: "Yönetim" },
+  { id: "badges", name: "Rozetler", icon: "award", group: "Yönetim" },
+  { id: "support", name: "Destek", icon: "megaphone", group: "Sistem" },
+  { id: "chats", name: "Sohbetler", icon: "users", group: "Sistem" },
+  { id: "reports", name: "Şikâyetler", icon: "megaphone", group: "Sistem" },
+  { id: "log", name: "İşlem Kaydı", icon: "list", group: "Sistem" },
+  { id: "settings", name: "Ayarlar", icon: "gear", group: "Sistem" },
+];
+let page = "overview";
+function renderNav() {
+  const u = users(), buys = u.reduce((s, x) => s + (x.a.purchases || []).length, 0);
+  const c = cfg(), av = c.avatar || {};
+  const counts = { users: u.length, purchases: buys, games: GAMES.length, codes: (c.codes || []).length, gifts: (load(GIFT_KEY, {})?.pending || []).length, avatarShop: (av.hats || []).length + (av.faces || []).length + (av.colors || []).length + (av.skins || []).length };
+  const live = { eco: c.eco?.double ? "2x" : null, announce: c.duyuru?.on ? "Açık" : null, reports: DB.reports.filter(r => !r.resolved).length || null, support: supWaiting().length || null };
+  let group = "";
+  $("nav").innerHTML = PAGES.map(p => {
+    const head = p.group !== group ? `<div class="navTitle">${(group = p.group)}</div>` : "";
+    const badge = live[p.id] ? `<span class="count" style="background:var(--play-soft);color:var(--play)">${live[p.id]}</span>` : counts[p.id] ? `<span class="count">${counts[p.id]}</span>` : "";
+    return head + `<button data-page="${p.id}" class="${p.id === page ? "on" : ""}">${ic(p.icon)}${p.name}${badge}</button>`;
+  }).join("");
+}
+function go(id) {
+  page = PAGES.some(p => p.id === id) ? id : "overview";
+  history.replaceState(null, "", "#" + page);
+  $("pageTitle").textContent = PAGES.find(p => p.id === page).name;
+  $("side").classList.remove("open");
+  render();
+  scrollTo(0, 0);
+}
+function render() {
+  renderNav();
+  ({ overview: renderOverview, users: renderUsers, purchases: renderPurchases, games: renderGames, gifts: renderGifts, eco: renderEco, announce: renderAnnounce,
+     codes: renderCodes, avatarShop: renderAvatarShop, badges: renderBadges, chats: renderChats, support: renderSupport, reports: renderReports, log: renderLog, settings: renderSettings })[page]();
+  if (drawerUid) renderDrawer();
+}
+$("nav").addEventListener("click", e => { const b = e.target.closest("[data-page]"); if (b) go(b.dataset.page); });
+$("menuBtn").innerHTML = ic("menu");
+$("menuBtn").onclick = () => $("side").classList.toggle("open");
+$("siteLink").innerHTML = ic("out") + "Siteye dön";
+$("btnLogout").innerHTML = ic("logout") + "Çıkış yap";
+$("btnLogout").onclick = logout;
+$("searchIco").innerHTML = ic("search");
+$("btnRefresh").innerHTML = ic("refresh");
+$("btnRefresh").onclick = () => refreshData(false);
+// Sekmeye geri dönünce listeler tazelensin (form doldurulan sayfalarda değil)
+document.addEventListener("visibilitychange", () => { if (!document.hidden && ["overview", "users", "purchases", "badges"].includes(page) && !drawerUid) refreshData(true); });
+$("search").addEventListener("input", () => { if (page !== "users") go("users"); else renderUsers(); });
+
+// ================================================================ Boş durum (hesap yok)
+function emptyUsers() {
+  return `<div class="empty"><div class="big">${ic("users")}</div>
+    <h3>Henüz kayıtlı oyuncu yok</h3>
+    <p>Oyuncular Küp Evreni'nde hesap oluşturunca (hangi cihazdan olursa olsun) burada görünür.</p>
+    <a class="btn primary" href="../index.html" target="_blank">${ic("out")}Küp Evreni'ni aç</a>
+  </div>`;
+}
+
+// ================================================================ Genel Bakış
+function renderOverview() {
+  const u = users();
+  const totalRobux = u.reduce((s, x) => s + (x.a.jeton || 0), 0);
+  const spent = u.reduce((s, x) => s + spentOf(x.a), 0);
+  const play = u.reduce((s, x) => s + playSec(x.a), 0);
+  const kpi = (icon, color, soft, label, value, sub) => `<div class="card kpi"><div class="ico" style="background:${soft};color:${color}">${ic(icon)}</div>
+    <div><span>${label}</span><b class="num">${value}</b><small>${sub}</small></div></div>`;
+  // Oyun başına toplam oynama süresi (tüm hesaplar)
+  const perGame = GAMES.map(g => ({ g, sec: u.reduce((s, x) => s + (x.a.playTime?.[g.id] || 0), 0), players: u.filter(x => x.a.playTime?.[g.id]).length }))
+    .sort((a, b) => b.sec - a.sec);
+  const max = Math.max(1, ...perGame.map(x => x.sec));
+  const bars = perGame.map(x => `<div class="barRow" data-tip="<b>${x.g.icon} ${esc(x.g.title)}</b>${fmtTime(x.sec)} · ${x.players} oyuncu">
+      <span class="lab">${x.g.icon} ${esc(x.g.title)}</span>
+      <span class="track"><span class="fill" style="width:${(x.sec / max) * 100}%"></span></span>
+      <span class="val num">${fmtTime(x.sec)}</span></div>`).join("");
+  const top = [...u].sort((a, b) => (b.a.jeton || 0) - (a.a.jeton || 0)).slice(0, 5);
+  const buys = allPurchases().slice(0, 6);
+  $("page").innerHTML = `
+    <div class="kpis">
+      ${kpi("users", "var(--accent)", "var(--accent-soft)", "Kullanıcılar", u.length, `${u.filter(x => x.active).length} çevrimiçi (son 5 dk)`)}
+      ${kpi("gem", "var(--gold)", "var(--gold-soft)", "Dolaşımdaki Küp Jeton", "KJ " + fmtNum(totalRobux), "tüm hesapların bakiyesi")}
+      ${kpi("bag", "var(--play)", "var(--play-soft)", "Harcanan Küp Jeton", "KJ " + fmtNum(spent), allPurchases().length + " satın alım")}
+      ${kpi("clock", "var(--text2)", "var(--surface3)", "Toplam oynama", fmtTime(play), "tüm oyunlar")}
+    </div>
+    ${u.length ? "" : `<div class="card" style="margin-bottom:16px">${emptyUsers()}</div>`}
+    <div class="grid2">
+      <div class="card"><div class="cardHead"><h2>Oyunlara göre oynama süresi</h2><span class="sub right">tüm hesaplar</span></div>
+        <div class="cardBody">${play ? `<div class="bars">${bars}</div>` : `<p class="muted" style="margin:0">Henüz oynanan oyun yok.</p>`}</div></div>
+      <div class="card"><div class="cardHead"><h2>En çok Küp Jeton</h2><button class="btn sm ghost right" data-goto="users">Tümü ${ic("chevron")}</button></div>
+        <div class="cardBody" style="padding-top:8px">${top.length ? top.map(x => `<div class="user click" data-user="${x.uid}" style="padding:8px 0;cursor:pointer">${ava(x.a)}
+          <div style="flex:1;min-width:0"><b>${esc(x.a.name)}</b><small>${x.active ? "Çevrimiçi" : "Kayıtlı"}</small></div><span class="robux num">KJ ${fmtNum(x.a.jeton)}</span></div>`).join("") : `<p class="muted" style="margin:0">Hesap yok.</p>`}</div></div>
+    </div>
+    <div class="card"><div class="cardHead"><h2>Son satın alımlar</h2><button class="btn sm ghost right" data-goto="purchases">Tümü ${ic("chevron")}</button></div>
+      ${buys.length ? purchaseTable(buys) : `<div class="cardBody muted">Henüz satın alım yok.</div>`}</div>`;
+}
+
+// ================================================================ Kullanıcılar
+function renderUsers() {
+  const q = $("search").value.trim().toLocaleLowerCase("tr");
+  const u = users().filter(x => !q || x.a.name.toLocaleLowerCase("tr").includes(q));
+  const all = users().length;
+  $("page").innerHTML = `<div class="card">
+    <div class="cardHead"><h2>Tüm kullanıcılar</h2><span class="sub">${q ? `${u.length} / ${all} sonuç` : `${all} hesap`}</span></div>
+    ${!all ? emptyUsers() : !u.length ? `<div class="empty"><h3>Sonuç yok</h3><p>"${esc(q)}" ile eşleşen kullanıcı bulunamadı.</p></div>` : `
+    <div class="tableWrap" style="margin-top:10px"><table>
+      <thead><tr><th>Kullanıcı</th><th>Durum</th><th class="r">Küp Jeton</th><th class="hideSm">Rozet</th><th class="r hideSm">Oynama</th><th class="r hideSm">Harcama</th><th></th></tr></thead>
+      <tbody>${u.map(x => `<tr class="click" data-user="${x.uid}">
+        <td><div class="user">${ava(x.a)}<div><b>${esc(x.a.name)}</b><small>Katılma: ${esc(x.a.joined || "—")}</small></div></div></td>
+        <td>${x.active ? `<span class="pill green">Çevrimiçi</span>` : `<span class="pill gray">Kayıtlı</span>`}${x.admin ? ` <span class="pill gold">Admin</span>` : ""}</td>
+        <td class="r robux num">KJ ${fmtNum(x.a.jeton)}</td>
+        <td class="hideSm">${BADGES.filter(b => x.a.badges?.[b.id]).map(b => b.icon).join(" ") || "—"}</td>
+        <td class="r num hideSm">${fmtTime(playSec(x.a))}</td>
+        <td class="r num hideSm">KJ ${fmtNum(spentOf(x.a))}</td>
+        <td class="r"><button class="btn sm">Yönet</button></td></tr>`).join("")}</tbody></table></div>`}
+  </div>`;
+}
+
+// ================================================================ Satın alımlar
+function allPurchases() {
+  return users().flatMap(x => (x.a.purchases || []).map(p => ({ ...p, user: x }))).sort((a, b) => b.at - a.at);
+}
+const gameOf = id => id === "avatar" ? { icon: "🧍", title: "Avatar Mağazası" } : GAMES.find(x => x.id === id) || { icon: "🎮", title: id };
+function purchaseTable(rows) {
+  return `<div class="tableWrap" style="margin-top:10px"><table>
+    <thead><tr><th>Kullanıcı</th><th>Oyun</th><th>Ürün</th><th class="r">Fiyat</th><th class="r hideSm">Tarih</th></tr></thead>
+    <tbody>${rows.map(p => { const g = gameOf(p.game);
+      return `<tr class="click" data-user="${p.user.uid}"><td><div class="user">${ava(p.user.a)}<b>${esc(p.user.a.name)}</b></div></td>
+        <td>${g.icon} ${esc(g.title)}</td><td>${esc(p.id)}</td><td class="r robux num">KJ ${fmtNum(p.price)}</td><td class="r muted hideSm">${fmtDate(p.at)}</td></tr>`; }).join("")}</tbody></table></div>`;
+}
+let buyFilter = "";
+function renderPurchases() {
+  const rows = allPurchases().filter(p => !buyFilter || p.game === buyFilter);
+  const total = rows.reduce((s, p) => s + p.price, 0);
+  $("page").innerHTML = `<div class="card">
+    <div class="cardHead"><h2>Satın alımlar</h2><span class="sub">${rows.length} adet · KJ ${fmtNum(total)}</span>
+      <select class="field right" id="buyFilter" style="width:auto;margin-left:auto"><option value="">Tüm oyunlar</option>
+        ${GAMES.map(g => `<option value="${g.id}" ${g.id === buyFilter ? "selected" : ""}>${g.icon} ${esc(g.title)}</option>`).join("")}<option value="avatar" ${buyFilter === "avatar" ? "selected" : ""}>🧍 Avatar Mağazası</option></select></div>
+    ${rows.length ? purchaseTable(rows) : `<div class="empty"><div class="big">${ic("cart")}</div><h3>Satın alım yok</h3><p>Oyunlarda Küp Jeton ile yapılan alışverişler burada listelenir.</p></div>`}
+  </div>`;
+  $("buyFilter").onchange = e => { buyFilter = e.target.value; renderPurchases(); };
+}
+
+// ================================================================ Oyunlar
+function renderGames() {
+  const u = users();
+  $("page").innerHTML = `<div class="card">
+    <div class="cardHead"><h2>Oyunlar</h2><span class="sub">Gizli oyun ana sayfada görünmez, bakımdaki oyun açılmaz, YENİ etiketi kartın köşesinde çıkar</span></div>
+    <div class="tableWrap" style="margin-top:10px"><table>
+      <thead><tr><th>Oyun</th><th>Görünür</th><th>Bakımda</th><th>YENİ</th><th class="r hideSm">Oyuncu</th><th class="r hideSm">Oynama</th><th class="r hideSm">Satış</th><th class="r">Bulut kaydı</th></tr></thead>
+      <tbody>${GAMES.map(g => {
+        const saves = DB.saves.filter(x => x.game === g.id);
+        const players = u.filter(x => x.a.playTime?.[g.id]).length, sec = u.reduce((s, x) => s + (x.a.playTime?.[g.id] || 0), 0);
+        const sales = u.reduce((s, x) => s + (x.a.purchases || []).filter(p => p.game === g.id).reduce((t, p) => t + p.price, 0), 0);
+        const gc = (cfg().games || {})[g.id] || {};
+        return `<tr><td><div class="user"><span class="gameIco" style="background:${g.bg}">${g.icon}</span><div><b>${esc(g.title)}</b><small>${g.saveKey}</small></div></div></td>
+          <td>${tg(!gc.hidden, `data-gtog="${g.id}:hidden"`)}</td><td>${tg(gc.maint, `data-gtog="${g.id}:maint"`)}</td><td>${tg(gc.isNew, `data-gtog="${g.id}:isNew"`)}</td>
+          <td class="r num hideSm">${players}</td><td class="r num hideSm">${fmtTime(sec)}</td><td class="r robux num hideSm">KJ ${fmtNum(sales)}</td>
+          <td class="r">${saves.length ? `<span class="pill gold num">${saves.length} oyuncu</span>` : `<span class="muted">yok</span>`}</td></tr>`;
+      }).join("")}</tbody></table></div></div>`;
+  $("page").querySelectorAll("[data-gtog]").forEach(b => b.onclick = () => {
+    const [id, f] = b.dataset.gtog.split(":"), g = GAMES.find(x => x.id === id);
+    let v; setCfg(c => { c.games = c.games || {}; const o = c.games[id] = c.games[id] || {}; o[f] = !o[f]; v = o[f]; });
+    const txt = { hidden: v ? "gizlendi" : "görünür yapıldı", maint: v ? "bakıma alındı" : "bakımdan çıktı", isNew: v ? "YENİ etiketi eklendi" : "YENİ etiketi kaldırıldı" }[f];
+    logAct(`${g.title} ${txt}`); toast(`${g.icon} ${g.title} ${txt}`); render();
+  });
+}
+
+// ================================================================ Ayarlar
+function renderSettings() {
+  const u = users();
+  $("page").innerHTML = `<div class="settings">
+    <div class="card"><div class="cardHead"><h2>Admin hesabı</h2></div><div class="cardBody">
+      <div class="kv"><span class="muted">Giriş yapan</span><b>${esc(adminName)}</b></div>
+      ${[["pOld", "Mevcut şifre", "current-password", ""], ["pNew", "Yeni şifre", "new-password", "En az 6 karakter"], ["pNew2", "Yeni şifre (tekrar)", "new-password", ""]].map(([id, lab, ac, ph]) =>
+        `<label class="lbl" for="${id}">${lab}</label><div class="pw"><input class="field" type="password" id="${id}" autocomplete="${ac}" placeholder="${ph}"><button type="button" data-eye="${id}" title="Şifreyi göster">${ic("eye")}</button></div>`).join("")}
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px"><button class="btn primary" id="btnPass">Şifreyi değiştir</button></div>
+      <p class="muted" style="font-size:13px;margin:12px 0 0">Bu, Küp Evreni'ndeki hesabının şifresidir: ana sayfaya girerken de yeni şifreyi kullanırsın. Başka birini admin yapmak için Supabase SQL Editor'da:<br><code>update profiles set is_admin = true where name = 'Ad';</code></p></div></div>
+    <div class="card"><div class="cardHead"><h2>Sunucu</h2></div><div class="cardBody">
+      <div class="kv"><span class="muted">Veritabanı</span><code>${esc(SB_URL.replace("https://", ""))}</code></div>
+      <div class="kv"><span class="muted">Hesaplar</span><code>${u.length}</code></div>
+      <div class="kv"><span class="muted">Satın alımlar</span><code>${DB.purchases.length}</code></div>
+      <div class="kv"><span class="muted">Hediyeler</span><code>${DB.gifts.length}</code></div>
+      <div class="kv"><span class="muted">Oyun kayıtları</span><code>${DB.saves.length}</code></div>
+      <button class="btn" id="btnExport" style="margin-top:12px">${ic("download")}Yedek indir (JSON)</button>
+      <p class="muted" style="font-size:13px;margin:12px 0 0">Yedek: tüm hesaplar, satın alımlar, hediyeler, ayarlar, promo kodlar ve oyun kayıtları.</p></div></div>
+  </div>`;
+  $("page").querySelectorAll("[data-eye]").forEach(b => b.onclick = () => {
+    const f = $(b.dataset.eye), show = f.type === "password";
+    f.type = show ? "text" : "password"; b.innerHTML = ic(show ? "eyeOff" : "eye");
+  });
+  $("btnPass").onclick = async () => {
+    const p = $("pNew").value;
+    if (p.length < 6) { toast("Yeni şifre en az 6 karakter olmalı", true); return; }
+    if (p !== $("pNew2").value) { toast("Yeni şifreler aynı değil", true); return; }
+    const email = adminSession.user.email;
+    const chk = await sb.auth.signInWithPassword({ email, password: $("pOld").value });
+    if (chk.error) { toast("Mevcut şifre yanlış. Göz ikonuyla ne yazdığını kontrol et.", true); return; }
+    adminSession = chk.data.session;
+    const { error } = await sb.auth.updateUser({ password: p });
+    if (error) { toast("Şifre değişmedi: " + error.message, true); return; }
+    logAct("Admin şifresi değiştirildi");
+    renderSettings(); toast("Şifre değişti");
+  };
+  $("btnExport").onclick = () => {
+    const data = { at: nowIso(), profiles: DB.profiles, purchases: DB.purchases, gifts: DB.gifts, cfg: DB.cfg, codes: DB.codes, packs: DB.packs, log: DB.log, gameSaves: DB.saves };
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
+    a.download = `kup-evreni-yedek-${nowIso().slice(0, 10)}.json`;
+    a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+}
+
+// ================================================================ Platform ayarları (ana sayfa okur: kupEvreniAyar) ve işlem kaydı
+const CFG_KEY = "kupEvreniAyar", LOG_KEY = "kupEvreniAdminLog";
+const ECO_DEFAULT = { daily: 100, play: 15, badge: 25, start: 200, quest: 10, double: false };
+const SHAPES = [["cap", "Şapka"], ["crown", "Taç"], ["headphones", "Kulaklık"], ["helmet", "Uzay kaskı"], ["tophat", "Silindir şapka"], ["halo", "Hale"], ["horns", "Boynuz"], ["beanie", "Bere"]];
+const ANN_TYPES = [["info", "📢 Bilgi"], ["success", "✅ Başarı"], ["warn", "⚠️ Uyarı"], ["event", "🎉 Etkinlik"], ["fresh", "🆕 Yeni Eklenen"]];
+const cfg = () => load(CFG_KEY, {}) || {};
+function setCfg(fn) { const c = cfg(); fn(c); save(CFG_KEY, c); }
+const eco = () => ({ ...ECO_DEFAULT, ...(cfg().eco || {}) });
+const newId = () => "c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+function logAct(text) { text = `${adminName}: ${text}`; DB.log.unshift({ at: Date.now(), text }); DB.log = DB.log.slice(0, 300); bg(sb.from("admin_log").insert({ text }), "İşlem kaydı"); }
+const tg = (on, attrs) => `<button class="tg ${on ? "on" : ""}" ${attrs} aria-pressed="${!!on}"></button>`;
+// Sayı kutuları (data-num): yazarken binlik nokta konur (19.000.000), okurken noktalar atılır
+const numVal = el => { const d = String(el.value).replace(/\D/g, ""); return d === "" ? null : Number(d); };
+document.addEventListener("input", e => {
+  const el = e.target;
+  if (!el.matches || !el.matches("input[data-num]")) return;
+  const before = el.value.slice(0, el.selectionStart).replace(/\D/g, "").length; // imleçten önceki rakam sayısı
+  const d = el.value.replace(/\D/g, "").replace(/^0+(?=\d)/, "").slice(0, 12);
+  el.value = d ? Number(d).toLocaleString("tr") : "";
+  let i = 0;
+  for (let n = 0; i < el.value.length && n < before; i++) if (/\d/.test(el.value[i])) n++;
+  el.setSelectionRange(i, i);
+});
+const intVal = (id, min = 0, max = 1000000) => { const v = numVal($(id)); return v !== null && v >= min && v <= max ? v : null; };
+
+// ================================================================ Ekonomi
+function renderEco() {
+  const e = eco(), m = e.double ? 2 : 1;
+  const fields = [["daily", "Günlük ödül", "Her gün ana sayfadan alınır"], ["play", "Oyun ödülü", "Her 5 dakika oyunda"], ["badge", "Rozet ödülü", "Her yeni rozette"], ["start", "Başlangıç Küp Jeton", "Yeni açılan hesaba"], ["quest", "Görev ödülü tabanı", "Günlük görevler: 1× – 2× bu miktar (bonus 2×)"]];
+  $("page").innerHTML = `<div class="stack">
+    <div class="card"><div class="cardHead"><h2>2x Küp Jeton etkinliği</h2></div><div class="cardBody">
+      <div class="rowLine" style="padding-top:0"><div class="grow"><b>${e.double ? "Etkinlik açık" : "Etkinlik kapalı"}</b>
+        <small>Açıkken günlük, oyun ve rozet ödülleri iki katı olur, ana sayfada mor bir şerit görünür.</small></div>${tg(e.double, 'id="tgDouble"')}</div></div></div>
+    <div class="card"><div class="cardHead"><h2>Ödül miktarları</h2><span class="sub right">KJ cinsinden</span></div><div class="cardBody">
+      <div class="formGrid">${fields.map(([k, n, h]) => `<div><label class="lbl" for="eco_${k}">${n}</label>
+        <input class="field num" type="text" inputmode="numeric" data-num id="eco_${k}" value="${fmtNum(e[k])}"><div class="hint">${h} · varsayılan ${ECO_DEFAULT[k]}</div></div>`).join("")}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:18px"><button class="btn primary" id="btnEcoSave">Kaydet</button><button class="btn" id="btnEcoReset">Varsayılana döndür</button></div></div></div>
+    <div class="card"><div class="cardHead"><h2>Şu an oyuncunun aldığı</h2>${e.double ? `<span class="pill gold right">2x etkin</span>` : ""}</div><div class="cardBody">
+      <div class="stats">
+        <div class="stat" style="background:var(--surface2)"><b class="robux num">KJ ${fmtNum(e.daily * m)}</b><span>Günlük ödül</span></div>
+        <div class="stat" style="background:var(--surface2)"><b class="robux num">KJ ${fmtNum(e.play * m)}</b><span>5 dk oyun</span></div>
+        <div class="stat" style="background:var(--surface2)"><b class="robux num">KJ ${fmtNum(e.badge * m)}</b><span>Rozet başına</span></div>
+        <div class="stat" style="background:var(--surface2)"><b class="robux num">KJ ${fmtNum(e.start)}</b><span>Yeni hesap</span></div>
+      </div></div></div></div>`;
+  $("tgDouble").onclick = () => {
+    const on = !eco().double;
+    setCfg(c => c.eco = { ...eco(), double: on }); logAct(`2x Küp Jeton etkinliği ${on ? "açıldı" : "kapatıldı"}`);
+    toast(on ? "2x Küp Jeton etkinliği açıldı" : "2x Küp Jeton etkinliği kapandı"); render();
+  };
+  $("btnEcoSave").onclick = () => {
+    const next = { ...eco() };
+    for (const [k, n] of fields) { const v = intVal("eco_" + k, 0, 100000); if (v === null) { toast(`${n}: 0 ile 100.000 arası bir sayı yaz`, true); return; } next[k] = v; }
+    const old = eco(), diff = fields.filter(([k]) => old[k] !== next[k]).map(([k, n]) => `${n} ${old[k]} → ${next[k]}`);
+    setCfg(c => c.eco = next); if (diff.length) logAct("Ekonomi: " + diff.join(", "));
+    toast("Ekonomi ayarları kaydedildi"); render();
+  };
+  $("btnEcoReset").onclick = () => { setCfg(c => c.eco = { ...ECO_DEFAULT, double: eco().double }); logAct("Ekonomi varsayılana döndürüldü"); toast("Varsayılan değerler geri geldi"); render(); };
+}
+
+// ================================================================ Duyurular
+let annType = null;
+function renderAnnounce() {
+  // Yayında olmayan eski duyurunun metni kutuya gelmesin
+  const saved = cfg().duyuru, d = saved && saved.on ? saved : { text: "", type: "info", on: false };
+  if (!annType) annType = d.type || "info";
+  const icon = { info: "📢", success: "✅", warn: "⚠️", event: "🎉", fresh: "🆕" };
+  $("page").innerHTML = `<div class="stack">
+    <div class="card"><div class="cardHead"><h2>Ana sayfa duyurusu</h2>${d.on && d.text ? `<span class="pill green right">Yayında</span>` : `<span class="pill gray right">Yayında değil</span>`}</div><div class="cardBody">
+      <label class="lbl" for="annText">Duyuru metni</label>
+      <textarea class="field" id="annText" maxlength="200" placeholder="Örn: Hafta sonu yeni oyun geliyor!">${esc(d.text)}</textarea>
+      <div class="hint"><span id="annCount">${(d.text || "").length}</span>/200</div>
+      <label class="lbl">Tür</label>
+      <div class="seg" id="annSeg">${ANN_TYPES.map(([k, n]) => `<button data-t="${k}" class="${k === annType ? "on" : ""}">${n}</button>`).join("")}</div>
+      <label class="lbl">Önizleme</label>
+      <div id="annPrev"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:18px"><button class="btn primary" id="btnAnnPub">Yayınla</button>
+        <button class="btn danger" id="btnAnnOff" ${d.on ? "" : "disabled"}>Yayından kaldır</button></div></div></div></div>`;
+  const prev = () => {
+    const t = $("annText").value.trim();
+    $("annPrev").innerHTML = t ? `<div class="banner ${annType}"><span class="bi">${icon[annType]}</span>${esc(t)}</div>` : `<div class="muted" style="font-size:14px">Metin yazınca burada görünür.</div>`;
+    $("annCount").textContent = $("annText").value.length;
+  };
+  prev();
+  $("annText").oninput = prev;
+  $("annSeg").onclick = e => { const b = e.target.closest("[data-t]"); if (!b) return; annType = b.dataset.t; $("annSeg").querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b)); prev(); };
+  $("btnAnnPub").onclick = () => {
+    const t = $("annText").value.trim();
+    if (!t) { toast("Önce duyuru metnini yaz", true); $("annText").focus(); return; }
+    setCfg(c => c.duyuru = { text: t, type: annType, on: true, at: Date.now() }); logAct(`Duyuru yayınlandı: "${t}"`);
+    toast("Duyuru yayınlandı"); render();
+  };
+  $("btnAnnOff").onclick = () => { setCfg(c => { delete c.duyuru; }); annType = null; logAct("Duyuru yayından kaldırıldı"); toast("Duyuru kaldırıldı"); render(); };
+}
+
+// ================================================================ Promo kodlar
+function codeStatus(c) {
+  if (c.off) return `<span class="pill gray">Pasif</span>`;
+  if (c.expires && new Date().toISOString().slice(0, 10) > c.expires) return `<span class="pill gray">Süresi doldu</span>`;
+  if (c.max && (c.used || 0) >= c.max) return `<span class="pill gold">Doldu</span>`;
+  return `<span class="pill green">Aktif</span>`;
+}
+function renderCodes() {
+  const codes = cfg().codes || [];
+  $("page").innerHTML = `<div class="stack">
+    <div class="card"><div class="cardHead"><h2>Yeni promo kod</h2></div><div class="cardBody">
+      <div class="formGrid">
+        <div><label class="lbl" for="cCode">Kod</label><div style="display:flex;gap:6px"><input class="field mono" id="cCode" maxlength="20" placeholder="KUP100" style="text-transform:uppercase"><button class="btn" id="btnRand" title="Rastgele kod">🎲</button></div><div class="hint">3-20 harf/rakam</div></div>
+        <div><label class="lbl" for="cAmt">Küp Jeton</label><input class="field num" type="text" inputmode="numeric" data-num id="cAmt" value="100"></div>
+        <div><label class="lbl" for="cMax">Kullanım limiti</label><input class="field num" type="text" inputmode="numeric" data-num id="cMax" value="0"><div class="hint">0 = sınırsız</div></div>
+        <div><label class="lbl" for="cExp">Son tarih</label><input class="field" type="date" id="cExp"><div class="hint">Boş = süresiz</div></div>
+      </div>
+      <button class="btn primary" id="btnCode" style="margin-top:18px">Kod oluştur</button>
+      <p class="hint" style="margin-top:12px">Oyuncular kodu ana sayfada üstteki KJ butonuna basıp "Promo kod" kutusuna yazar. Her oyuncu bir kodu bir kez kullanabilir.</p></div></div>
+    <div class="card"><div class="cardHead"><h2>Kodlar</h2><span class="sub">${codes.length} kod</span></div>
+      ${codes.length ? `<div class="tableWrap" style="margin-top:10px"><table>
+        <thead><tr><th>Kod</th><th class="r">Küp Jeton</th><th class="r">Kullanım</th><th class="hideSm">Son tarih</th><th>Durum</th><th></th></tr></thead>
+        <tbody>${codes.map((c, i) => `<tr><td class="mono">${esc(c.code)}</td><td class="r robux num">KJ ${fmtNum(c.amount)}</td>
+          <td class="r num">${c.used || 0}${c.max ? " / " + c.max : " / ∞"}</td><td class="hideSm muted">${esc(c.expires || "—")}</td><td>${codeStatus(c)}</td>
+          <td class="r" style="display:flex;gap:6px;justify-content:flex-end;align-items:center">${tg(!c.off, `data-ctog="${i}" title="Aktif / pasif"`)}<button class="btn sm danger" data-cdel="${i}">${ic("trash")}</button></td></tr>`).join("")}</tbody></table></div>`
+      : `<div class="empty"><div class="big">${ic("ticket")}</div><h3>Henüz kod yok</h3><p>Yukarıdan bir kod oluştur, oyuncular Küp Jeton kazansın.</p></div>`}</div></div>`;
+  $("btnRand").onclick = () => { const A = "ABCDEFGHJKLMNPRSTUVYZ23456789"; $("cCode").value = "KUP" + Array.from({ length: 5 }, () => A[Math.floor(Math.random() * A.length)]).join(""); };
+  $("btnCode").onclick = () => {
+    const code = $("cCode").value.trim().toLocaleUpperCase("tr");
+    if (!/^[A-Z0-9ÇĞİÖŞÜ_-]{3,20}$/.test(code)) { toast("Kod 3-20 harf veya rakam olmalı (boşluksuz)", true); return; }
+    if ((cfg().codes || []).some(c => c.code === code)) { toast("Bu kod zaten var", true); return; }
+    const amount = intVal("cAmt", 1, 100000), max = intVal("cMax", 0, 100000);
+    if (amount === null) { toast("Küp Jeton 1 ile 100.000 arası olmalı", true); return; }
+    if (max === null) { toast("Kullanım limiti geçerli bir sayı olmalı", true); return; }
+    setCfg(c => c.codes = [{ code, amount, max, expires: $("cExp").value || "", used: 0, at: Date.now() }, ...(c.codes || [])]);
+    logAct(`Promo kod oluşturuldu: ${code} (KJ ${amount}${max ? `, ${max} kullanım` : ""})`); toast(`${code} oluşturuldu`); render();
+  };
+  $("page").querySelectorAll("[data-ctog]").forEach(b => b.onclick = () => {
+    let msg; setCfg(c => { const k = c.codes[+b.dataset.ctog]; k.off = !k.off; msg = `${k.code} ${k.off ? "pasif yapıldı" : "aktif yapıldı"}`; });
+    logAct("Promo kod " + msg); toast(msg); render();
+  });
+  $("page").querySelectorAll("[data-cdel]").forEach(b => b.onclick = () => {
+    const k = (cfg().codes || [])[+b.dataset.cdel]; if (!k || !confirm(`${k.code} kodu silinsin mi?`)) return;
+    setCfg(c => c.codes.splice(+b.dataset.cdel, 1)); logAct(`Promo kod silindi: ${k.code}`); toast("Kod silindi"); render();
+  });
+}
+
+// ================================================================ Avatar mağazası
+// Düzenlenen öğenin kimliği aynı kalır: satın alanların ve takanların elinden gitmez (silip yeniden eklemek gider)
+let editHat = null, editFace = null;
+function renderAvatarShop() {
+  const av = cfg().avatar || {}, u = users();
+  const eh = (av.hats || []).find(h => h.id === editHat) || null, ef = (av.faces || []).find(f => f.id === editFace) || null;
+  if (!eh) editHat = null;
+  if (!ef) editFace = null;
+  const owners = id => u.filter(x => (x.a.owned || []).includes(id)).length;
+  const wearing = (id, k) => u.filter(x => x.a.avatar?.[k] === id).length;
+  const swatches = (list, kind) => list.length ? `<div class="swList">${list.map((c, i) => `<div class="swItem" style="background:${esc(c)}" title="${esc(c)}"><button data-sdel="${kind}:${i}" aria-label="Sil">×</button></div>`).join("")}</div>` : `<div class="hint" style="margin-top:8px">Henüz eklenmedi.</div>`;
+  const price = p => p > 0 ? `<span class="robux">KJ ${fmtNum(p)}</span>` : `<span class="pill green">Ücretsiz</span>`;
+  $("page").innerHTML = `<div class="stack">
+    <div class="card"><div class="cardHead"><h2>${eh ? `Aksesuarı düzenle: ${esc(eh.name)}` : "Yeni aksesuar"}</h2></div><div class="cardBody">
+      <div class="formGrid">
+        <div><label class="lbl" for="hName">İsim</label><input class="field" id="hName" maxlength="24" placeholder="Altın Taç" value="${eh ? esc(eh.name) : ""}"></div>
+        <div><label class="lbl" for="hShape">Şekil</label><select class="field" id="hShape">${SHAPES.map(([k, n]) => `<option value="${k}" ${eh && eh.shape === k ? "selected" : ""}>${n}</option>`).join("")}</select></div>
+        <div><label class="lbl" for="hColor">Renk</label><input class="field" type="color" id="hColor" value="${eh ? esc(eh.color) : "#ffd166"}"></div>
+        <div><label class="lbl" for="hPrice">Fiyat (KJ)</label><input class="field num" type="text" inputmode="numeric" data-num id="hPrice" value="${eh ? eh.price || 0 : 0}"><div class="hint">0 = ücretsiz${eh ? " · satın alanlar sahip kalır" : ""}</div></div>
+      </div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:18px"><button class="btn primary" id="btnHat">${eh ? "Değişiklikleri kaydet" : ic("plus") + "Aksesuar ekle"}</button>${eh ? `<button class="btn ghost" id="btnHatCancel">Vazgeç</button>` : ""}</div></div>
+      ${(av.hats || []).length ? `<div class="cardBody" style="padding-top:0">${av.hats.map((h, i) => `<div class="rowLine"><span class="itemIco"><span class="dot" style="width:22px;height:22px;background:${esc(h.color)}"></span></span>
+        <div class="grow"><b>${esc(h.name)}</b><small>${(SHAPES.find(s => s[0] === h.shape) || [, h.shape])[1]} · ${owners(h.id)} sahip · ${wearing(h.id, "hat")} takıyor</small></div>${price(h.price)}
+        <button class="btn sm" data-hedit="${esc(h.id)}">Düzenle</button><button class="btn sm danger" data-hdel="${i}">${ic("trash")}</button></div>`).join("")}</div>` : ""}</div>
+    <div class="card"><div class="cardHead"><h2>${ef ? `Yüzü düzenle: ${esc(ef.emoji)} ${esc(ef.name)}` : "Yeni yüz"}</h2></div><div class="cardBody">
+      <div class="formGrid">
+        <div><label class="lbl" for="fName">İsim</label><input class="field" id="fName" maxlength="24" placeholder="Havalı Kedi" value="${ef ? esc(ef.name) : ""}"></div>
+        <div><label class="lbl" for="fEmoji">Emoji</label><input class="field" id="fEmoji" maxlength="8" placeholder="😺" style="font-size:20px" value="${ef ? esc(ef.emoji) : ""}"><div class="hint">Yüz olarak kafaya çizilir</div></div>
+        <div><label class="lbl" for="fPrice">Fiyat (KJ)</label><input class="field num" type="text" inputmode="numeric" data-num id="fPrice" value="${ef ? ef.price || 0 : 0}"><div class="hint">0 = ücretsiz${ef ? " · satın alanlar sahip kalır" : ""}</div></div>
+      </div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:18px"><button class="btn primary" id="btnFace">${ef ? "Değişiklikleri kaydet" : ic("plus") + "Yüz ekle"}</button>${ef ? `<button class="btn ghost" id="btnFaceCancel">Vazgeç</button>` : ""}</div></div>
+      ${(av.faces || []).length ? `<div class="cardBody" style="padding-top:0">${av.faces.map((f, i) => `<div class="rowLine"><span class="itemIco">${esc(f.emoji)}</span>
+        <div class="grow"><b>${esc(f.name)}</b><small>${owners(f.id)} sahip · ${wearing(f.id, "face")} kullanıyor</small></div>${price(f.price)}
+        <button class="btn sm" data-fedit="${esc(f.id)}">Düzenle</button><button class="btn sm danger" data-fdel="${i}">${ic("trash")}</button></div>`).join("")}</div>` : ""}</div>
+    <div class="card"><div class="cardHead"><h2>Yeni renk</h2><span class="sub right">Renkler ücretsizdir</span></div><div class="cardBody">
+      <div class="formGrid">
+        <div><label class="lbl" for="sTarget">Nereye</label><select class="field" id="sTarget"><option value="colors">Tişört, pantolon, aksesuar</option><option value="skins">Ten rengi</option></select></div>
+        <div><label class="lbl" for="sColor">Renk</label><input class="field" type="color" id="sColor" value="#00d1ff"></div>
+      </div><button class="btn primary" id="btnColor" style="margin-top:18px">${ic("plus")}Renk ekle</button>
+      <label class="lbl" style="margin-top:20px">Tişört, pantolon, aksesuar renkleri</label>${swatches(av.colors || [], "colors")}
+      <label class="lbl">Ten renkleri</label>${swatches(av.skins || [], "skins")}</div></div>
+    <p class="hint">Yeni öğeler oyuncuların Avatar sayfasında görünür. Fiyatlı öğeler Küp Jeton ile satın alınır. Yeni şekiller ve emoji yüzler ana sayfadaki avatarda görünür; oyunların içinde en yakın standart şekle döner.</p></div>`;
+  const price0 = id => intVal(id, 0, 100000);
+  $("btnHat").onclick = () => {
+    const name = $("hName").value.trim(), p = price0("hPrice");
+    if (name.length < 2) { toast("Aksesuara bir isim ver", true); return; }
+    if (p === null) { toast("Fiyat 0 ile 100.000 arası olmalı", true); return; }
+    const it = { name, shape: $("hShape").value, color: $("hColor").value, price: p };
+    if (eh) {
+      setCfg(c => { const h = (c.avatar?.hats || []).find(x => x.id === eh.id); if (h) Object.assign(h, it); });
+      logAct(`Avatar aksesuarı düzenlendi: ${name} (${p ? "KJ " + p : "ücretsiz"})`); toast(`${name} kaydedildi`); editHat = null; render(); return;
+    }
+    setCfg(c => { c.avatar = c.avatar || {}; c.avatar.hats = [...(c.avatar.hats || []), { id: newId(), ...it }]; });
+    logAct(`Avatar aksesuarı eklendi: ${name} (${p ? "KJ " + p : "ücretsiz"})`); toast(`${name} eklendi`); render();
+  };
+  $("btnFace").onclick = () => {
+    const name = $("fName").value.trim(), emoji = $("fEmoji").value.trim(), p = price0("fPrice");
+    if (name.length < 2) { toast("Yüze bir isim ver", true); return; }
+    if (!emoji) { toast("Bir emoji yaz (ör. 😺)", true); return; }
+    if (p === null) { toast("Fiyat 0 ile 100.000 arası olmalı", true); return; }
+    if (ef) {
+      setCfg(c => { const f = (c.avatar?.faces || []).find(x => x.id === ef.id); if (f) Object.assign(f, { name, emoji, price: p }); });
+      logAct(`Avatar yüzü düzenlendi: ${emoji} ${name} (${p ? "KJ " + p : "ücretsiz"})`); toast(`${name} kaydedildi`); editFace = null; render(); return;
+    }
+    setCfg(c => { c.avatar = c.avatar || {}; c.avatar.faces = [...(c.avatar.faces || []), { id: newId(), name, emoji, price: p }]; });
+    logAct(`Avatar yüzü eklendi: ${emoji} ${name} (${p ? "KJ " + p : "ücretsiz"})`); toast(`${name} eklendi`); render();
+  };
+  $("btnColor").onclick = () => {
+    const t = $("sTarget").value, col = $("sColor").value;
+    if ((cfg().avatar?.[t] || []).includes(col)) { toast("Bu renk zaten ekli", true); return; }
+    setCfg(c => { c.avatar = c.avatar || {}; c.avatar[t] = [...(c.avatar[t] || []), col]; });
+    logAct(`Avatar rengi eklendi: ${col} (${t === "skins" ? "ten" : "kıyafet"})`); toast("Renk eklendi"); render();
+  };
+  $("page").querySelectorAll("[data-hedit]").forEach(b => b.onclick = () => { editHat = b.dataset.hedit; render(); scrollTo(0, 0); });
+  $("page").querySelectorAll("[data-fedit]").forEach(b => b.onclick = () => { editFace = b.dataset.fedit; render(); });
+  if ($("btnHatCancel")) $("btnHatCancel").onclick = () => { editHat = null; render(); };
+  if ($("btnFaceCancel")) $("btnFaceCancel").onclick = () => { editFace = null; render(); };
+  const del = (attr, key, label) => $("page").querySelectorAll(`[${attr}]`).forEach(b => b.onclick = () => {
+    const i = +b.getAttribute(attr), it = (cfg().avatar?.[key] || [])[i];
+    if (!it) return;
+    const o = owners(it.id), w = wearing(it.id, key === "hats" ? "hat" : "face");
+    const warn = o || w ? `\n\n⚠️ ${o} oyuncu bunu satın aldı, ${w} oyuncu şu an takıyor. Silersen hepsinden gider (Küp Jeton geri verilmez).\nSadece rengini, adını ya da fiyatını değiştireceksen "Düzenle"yi kullan.` : "";
+    if (!confirm(`${label(it)} silinsin mi?${warn}`)) return;
+    setCfg(c => c.avatar[key].splice(i, 1)); logAct(`Avatar öğesi silindi: ${label(it)}`); toast("Silindi"); render();
+  });
+  del("data-hdel", "hats", h => h.name); del("data-fdel", "faces", f => `${f.emoji} ${f.name}`);
+  $("page").querySelectorAll("[data-sdel]").forEach(b => b.onclick = () => {
+    const [k, i] = b.dataset.sdel.split(":"), col = (cfg().avatar?.[k] || [])[+i];
+    setCfg(c => c.avatar[k].splice(+i, 1)); logAct(`Avatar rengi silindi: ${col}`); toast("Renk silindi"); render();
+  });
+}
+
+// ================================================================ Rozetler
+function renderBadges() {
+  const u = users();
+  $("page").innerHTML = `<div class="card"><div class="cardHead"><h2>Rozetler</h2><span class="sub">${u.length} kullanıcı</span></div>
+    ${!u.length ? emptyUsers() : `<div class="tableWrap" style="margin-top:10px"><table>
+      <thead><tr><th>Rozet</th><th>Sahip</th><th class="hideSm"></th><th></th></tr></thead>
+      <tbody>${BADGES.map(b => { const n = u.filter(x => x.a.badges?.[b.id]).length;
+        return `<tr><td><div class="user"><span class="itemIco" style="width:38px;height:38px;font-size:20px">${b.icon}</span><b>${b.name}</b></div></td>
+          <td class="num">${n} / ${u.length}</td><td class="hideSm"><div class="meter"><i style="width:${u.length ? n / u.length * 100 : 0}%"></i></div></td>
+          <td class="r" style="white-space:nowrap"><button class="btn sm" data-ball="${b.id}" ${n === u.length ? "disabled" : ""}>Herkese ver</button>
+            <button class="btn sm danger" data-bnone="${b.id}" ${n ? "" : "disabled"}>Herkesten al</button></td></tr>`; }).join("")}</tbody></table></div>`}
+    <div class="cardBody hint">Panelden verilen rozetler Küp Jeton ödülü vermez.</div></div>`;
+  const each = (id, on) => { users().forEach(x => { const a = x.a; a.badges = { ...(a.badges || {}) }; if (on) a.badges[id] = true; else delete a.badges[id]; putUser(x.uid, a); }); };
+  $("page").querySelectorAll("[data-ball]").forEach(b => b.onclick = () => { const r = BADGES.find(x => x.id === b.dataset.ball); each(r.id, true); logAct(`Rozet herkese verildi: ${r.icon} ${r.name}`); toast(`${r.name} herkese verildi`); render(); });
+  $("page").querySelectorAll("[data-bnone]").forEach(b => b.onclick = () => { const r = BADGES.find(x => x.id === b.dataset.bnone); if (!confirm(`${r.name} rozeti herkesten alınsın mı?`)) return; each(r.id, false); logAct(`Rozet herkesten alındı: ${r.icon} ${r.name}`); toast(`${r.name} herkesten alındı`); render(); });
+}
+
+// ================================================================ İşlem kaydı
+// ================================================================ Sohbetler (moderasyon: son 3000 mesaj; oyuncular admin'in görebildiğini bilir)
+let chatOpen = null, chatQ = "";
+const pname = id => (DB.profiles.find(p => p.id === id) || {}).name || "(silinmiş)";
+function renderChats() {
+  const m = DB.msgs || [], pairs = new Map();
+  for (const x of m) { const k = [x.from_id, x.to_id].sort().join("|"); if (!pairs.has(k)) pairs.set(k, { k, a: [x.from_id, x.to_id].sort(), last: x, n: 0 }); pairs.get(k).n++; }
+  let list = [...pairs.values()];
+  if (chatQ) list = list.filter(c => c.a.some(id => pname(id).toLocaleLowerCase("tr").includes(chatQ)));
+  const msgLine = x => `<div class="rowLine" style="padding:6px 0;align-items:flex-start"><span class="muted num" style="width:110px;flex:none;font-size:12px">${fmtDate(Date.parse(x.created_at))}</span>
+    <div class="grow"><div><b>${esc(pname(x.from_id))}:</b> ${x.game ? `🎮 <i>${esc((GAMES.find(g => g.id === x.game) || {}).title || x.game)} daveti${x.room ? " · oda " + esc(x.room) : ""}</i>` : esc(x.body)}</div></div>
+    <button class="btn sm" data-mdel="${x.id}" title="Mesajı sil">${ic("trash")}</button></div>`;
+  let detay = "";
+  if (chatOpen) {
+    const c = pairs.get(chatOpen);
+    const ms = m.filter(x => [x.from_id, x.to_id].sort().join("|") === chatOpen).slice().reverse();
+    detay = c ? `<div class="card"><div class="cardHead"><h2>${esc(pname(c.a[0]))} ↔ ${esc(pname(c.a[1]))}</h2><span class="sub">${ms.length} mesaj</span>
+      <button class="btn sm right" id="btnChatBack">Kapat</button></div><div class="cardBody">${ms.map(msgLine).join("")}</div></div>` : "";
+  }
+  $("page").innerHTML = detay + `<div class="card"><div class="cardHead"><h2>Sohbetler</h2><span class="sub">${list.length} yazışma · ${m.length} mesaj</span>
+      <input class="field right" id="chatQ" placeholder="Oyuncu ara" value="${esc(chatQ)}" style="max-width:200px"></div>
+    <p class="muted" style="margin:0 16px 8px;font-size:13px">Küfür, link ve telefon numaraları gönderilirken otomatik *** ile gizlenir. Mesajlar 30 gün sonra silinir. Oyuncular sohbet ekranında "admin tarafından görülebilir" uyarısını görür.</p>
+    ${list.length ? `<div class="cardBody">${list.map(c => `<div class="rowLine" style="padding:10px 0;cursor:pointer" data-chat="${c.k}">
+      <div class="grow"><div><b>${esc(pname(c.a[0]))}</b> ↔ <b>${esc(pname(c.a[1]))}</b></div><div class="muted" style="font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(pname(c.last.from_id))}: ${c.last.game ? "🎮 oyun daveti" : esc(c.last.body)}</div></div>
+      <span class="muted num" style="font-size:12px;flex:none">${c.n} mesaj · ${fmtDate(Date.parse(c.last.created_at))}</span></div>`).join("")}</div>`
+      : `<div class="empty"><div class="big">${ic("users")}</div><h3>Henüz sohbet yok</h3><p>Arkadaş olan oyuncular yazışınca burada görünür.</p></div>`}</div>`;
+  const q = $("chatQ"); q.oninput = () => { chatQ = q.value.trim().toLocaleLowerCase("tr"); const pos = q.selectionStart; renderChats(); const n = $("chatQ"); n.focus(); n.setSelectionRange(pos, pos); };
+  if ($("btnChatBack")) $("btnChatBack").onclick = () => { chatOpen = null; renderChats(); };
+}
+$("page").addEventListener("click", async e => {
+  if (page !== "chats") return;
+  const d = e.target.closest("[data-mdel]");
+  if (d) {
+    if (!confirm("Bu mesaj silinsin mi?")) return;
+    const { error } = await sb.from("messages").delete().eq("id", d.dataset.mdel);
+    if (error) { toast("Olmadı: " + error.message, true); return; }
+    DB.msgs = DB.msgs.filter(x => String(x.id) !== d.dataset.mdel); logAct("Sohbetten bir mesaj silindi"); toast("Mesaj silindi"); renderChats(); return;
+  }
+  const c = e.target.closest("[data-chat]");
+  if (c) { chatOpen = c.dataset.chat; renderChats(); scrollTo(0, 0); }
+});
+
+// ================================================================ 🤖 Destek (oyuncuların Destek Asistanı'ndan yöneticiye yazdıkları)
+// Konuşma anahtarı: giriş yapmışsa user_id, girişsizse cihaz anahtarı (token). Cevap = from_admin satırı.
+let supOpen = null;
+const supKey = x => x.user_id ? "u:" + x.user_id : "t:" + x.token;
+function supThreads() {
+  const m = new Map();
+  for (const x of DB.sup || []) {
+    const k = supKey(x);
+    if (!m.has(k)) m.set(k, { k, user_id: x.user_id, token: x.token, name: "", msgs: [] });
+    const t = m.get(k); t.msgs.push(x); if (!x.from_admin && x.name) t.name = x.name;
+  }
+  const l = [...m.values()];
+  for (const t of l) { t.last = t.msgs[t.msgs.length - 1]; t.waiting = !t.last.from_admin && !t.last.closed; }
+  return l.sort((a, b) => (b.waiting - a.waiting) || (b.last.id - a.last.id));
+}
+const supWaiting = () => supThreads().filter(t => t.waiting);
+function renderSupport() {
+  const l = supThreads();
+  if (!DB.supOk) {
+    $("page").innerHTML = `<div class="card"><div class="empty"><div class="big">${ic("megaphone")}</div><h3>Destek henüz kurulmadı</h3><p>Supabase → SQL Editor'da <b>supabase/yama-destek.sql</b> dosyasını bir kez çalıştır. Sonra bu sayfayı yenile.</p></div></div>`;
+    return;
+  }
+  let detay = "";
+  const t = supOpen && l.find(x => x.k === supOpen);
+  if (t) {
+    const p = t.user_id ? DB.profiles.find(x => x.id === t.user_id) : DB.profiles.find(x => x.name.toLocaleLowerCase("tr") === (t.name || "").toLocaleLowerCase("tr"));
+    detay = `<div class="card"><div class="cardHead"><h2>${esc(p ? p.name : t.name || "?")}</h2>
+        <span class="sub">${t.user_id ? "giriş yapmış oyuncu" : "girişsiz yazdı" + (p ? " · bu adda bir hesap var" : " · bu adda hesap bulunamadı")}</span>
+        <span class="right" style="display:flex;gap:6px">${p ? `<button class="btn sm" data-supuser="${p.id}">${ic("users")}Oyuncuyu aç</button>` : ""}<button class="btn sm" id="btnSupBack">Kapat</button></span></div>
+      <div class="cardBody">${t.msgs.map(x => `<div class="rowLine" style="padding:8px 0;align-items:flex-start">
+        <span class="muted num" style="width:110px;flex:none;font-size:12px">${fmtDate(Date.parse(x.created_at))}</span>
+        <div class="grow"><b style="color:${x.from_admin ? "var(--play)" : "inherit"}">${x.from_admin ? "🛠️ Yönetici" : esc(x.name || "Oyuncu")}:</b> <span style="white-space:pre-wrap">${esc(x.body)}</span>
+          ${x.from_admin ? `<span class="muted" style="font-size:12px"> · ${x.read_at ? "✓ okundu" : "okunmadı"}</span>` : ""}</div></div>`).join("")}
+        <div style="display:flex;gap:8px;margin-top:12px"><textarea class="field" id="supReply" rows="3" maxlength="1000" placeholder="Cevabını yaz… (örn. şifreni sıfırladım, yeni şifren: …)" style="flex:1;resize:vertical"></textarea></div>
+        <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap"><button class="btn primary" id="btnSupReply">Cevap gönder</button>
+          ${t.waiting ? `<button class="btn" id="btnSupDone">✓ Cevapsız kapat</button>` : ""}
+          <button class="btn danger right" id="btnSupDel">${ic("trash")}Konuşmayı sil</button></div>
+        ${!t.user_id ? `<p class="muted" style="font-size:12px;margin:8px 0 0">Girişsiz yazan oyuncu cevabı aynı cihazda Destek Asistanı'nı açınca görür. Şifre sıfırlarken önce adın gerçekten bu kişiye ait olduğundan emin ol (örn. hesaptaki seviye, avatar ya da oyunlar hakkında soru sor).</p>` : ""}
+      </div></div>`;
+  }
+  $("page").innerHTML = detay + `<div class="card"><div class="cardHead"><h2>Destek</h2><span class="sub">${l.filter(x => x.waiting).length} cevap bekliyor · ${l.length} konuşma</span></div>
+    <p class="muted" style="margin:0 16px 8px;font-size:13px">Oyuncular Destek Asistanı'nın cevaplayamadığı sorunları buraya yazar (e-posta yerine). Cevabın oyuncunun asistan penceresinde görünür. Mesajlar 90 gün sonra silinir.</p>
+    ${l.length ? `<div class="cardBody">${l.map(x => `<div class="rowLine" style="padding:10px 0;cursor:pointer" data-supt="${esc(x.k)}">
+      <div class="grow"><div>${x.waiting ? "🔴 " : ""}<b>${esc(x.name || "?")}</b>${x.user_id ? "" : ` <span class="muted" style="font-size:12px">(girişsiz)</span>`}</div>
+        <div class="muted" style="font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${x.last.from_admin ? "🛠️ " : ""}${esc(x.last.body)}</div></div>
+      <span class="muted num" style="font-size:12px;flex:none">${x.msgs.length} mesaj · ${fmtDate(Date.parse(x.last.created_at))}</span></div>`).join("")}</div>`
+      : `<div class="empty"><div class="big">${ic("megaphone")}</div><h3>Destek mesajı yok</h3><p>Oyuncular Destek Asistanı'ndan "Yöneticiye yaz" deyince mesajları burada görünür.</p></div>`}</div>`;
+  if ($("btnSupBack")) $("btnSupBack").onclick = () => { supOpen = null; renderSupport(); };
+  if (t) {
+    $("btnSupReply").onclick = async () => {
+      const body = $("supReply").value.trim(); if (!body) return;
+      $("btnSupReply").disabled = true;
+      const { data, error } = await sb.from("support_msgs").insert({ user_id: t.user_id, token: t.user_id ? null : t.token, name: "Yönetici", body, from_admin: true }).select().single();
+      if (error) { toast("Olmadı: " + error.message, true); $("btnSupReply").disabled = false; return; }
+      DB.sup.push(data); logAct(`Destek: ${t.name || "oyuncu"} cevaplandı`); toast("Cevap gönderildi"); render();
+    };
+    if ($("btnSupDone")) $("btnSupDone").onclick = async () => {
+      const { error } = await sb.from("support_msgs").update({ closed: true }).eq("id", t.last.id);
+      if (error) { toast("Olmadı: " + error.message, true); return; }
+      t.last.closed = true; render();
+    };
+    $("btnSupDel").onclick = async () => {
+      if (!confirm("Bu konuşmanın tüm mesajları silinsin mi?")) return;
+      const ids = t.msgs.map(x => x.id);
+      const { error } = await sb.from("support_msgs").delete().in("id", ids);
+      if (error) { toast("Olmadı: " + error.message, true); return; }
+      DB.sup = DB.sup.filter(x => !ids.includes(x.id)); supOpen = null; logAct(`Destek: ${t.name || "oyuncu"} konuşması silindi`); render();
+    };
+  }
+}
+$("page").addEventListener("click", e => {
+  if (page !== "support") return;
+  const u = e.target.closest("[data-supuser]"); if (u) { openDrawer(u.dataset.supuser); return; }
+  const c = e.target.closest("[data-supt]"); if (c) { supOpen = c.dataset.supt; renderSupport(); scrollTo(0, 0); }
+});
+
+// ================================================================ Sohbet şikâyetleri (oyuncuların gönderdiği; son 10 mesajın kopyasıyla)
+function renderReports() {
+  const l = DB.reports, open = l.filter(r => !r.resolved);
+  const banned = id => !!(DB.profiles.find(p => p.id === id)?.data || {}).chatBan;
+  $("page").innerHTML = `<div class="card"><div class="cardHead"><h2>Şikâyetler</h2><span class="sub">${open.length} açık · ${l.length} toplam</span></div>
+    ${l.length ? `<div class="cardBody">${l.map(r => `<div class="rowLine" style="padding:12px 0;align-items:flex-start;${r.resolved ? "opacity:.55" : ""}">
+      <span class="muted num" style="width:110px;flex:none;font-size:13px">${fmtDate(Date.parse(r.created_at))}</span>
+      <div class="grow"><b>${esc(r.reporter_name || "?")}</b> → <b style="color:var(--red)">${esc(r.target_name || "?")}</b>${r.reason ? ` <span class="muted">· ${esc(r.reason)}</span>` : ""}
+        <pre style="white-space:pre-wrap;font:inherit;font-size:13px;background:var(--bg);border-radius:8px;padding:8px;margin:6px 0 0">${esc(r.body || "(mesaj yok)")}</pre></div>
+      <div style="display:flex;flex-direction:column;gap:6px;flex:none">
+        ${r.target ? `<button class="btn sm ${banned(r.target) ? "" : "danger"}" data-rban="${r.target}" data-on="${banned(r.target) ? 0 : 1}">${banned(r.target) ? "Sohbeti aç" : "Sohbetini kapat"}</button>` : ""}
+        <button class="btn sm" data-rdone="${r.id}" data-on="${r.resolved ? 0 : 1}">${r.resolved ? "Tekrar aç" : "✓ Çözüldü"}</button>
+        <button class="btn sm" data-rdel="${r.id}">${ic("trash")}Sil</button></div></div>`).join("")}</div>`
+      : `<div class="empty"><div class="big">${ic("megaphone")}</div><h3>Şikâyet yok</h3><p>Oyuncular sohbette birini şikâyet edince son mesajlarıyla birlikte burada görünür. "Sohbetini kapat" o oyuncunun mesaj göndermesini engeller.</p></div>`}</div>`;
+}
+$("page").addEventListener("click", async e => {
+  const b = e.target.closest("[data-rban],[data-rdone],[data-rdel]"); if (!b || page !== "reports") return;
+  b.disabled = true;
+  if (b.dataset.rban) {
+    const on = b.dataset.on === "1", p = DB.profiles.find(x => x.id === b.dataset.rban);
+    const { error } = await sb.rpc("admin_patch", { p_id: b.dataset.rban, p_jeton: null, p_data: { chatBan: on } });
+    if (error) { toast("Olmadı: " + error.message, true); b.disabled = false; return; }
+    if (p) p.data = { ...(p.data || {}), chatBan: on };
+    logAct(`${p ? p.name : "Oyuncu"}: sohbet ${on ? "kapatıldı" : "açıldı"}`); toast(on ? "Sohbeti kapatıldı" : "Sohbeti açıldı");
+  } else if (b.dataset.rdone) {
+    const on = b.dataset.on === "1";
+    const { error } = await sb.from("reports").update({ resolved: on }).eq("id", b.dataset.rdone);
+    if (error) { toast("Olmadı: " + error.message, true); b.disabled = false; return; }
+    const r = DB.reports.find(x => String(x.id) === b.dataset.rdone); if (r) r.resolved = on;
+  } else {
+    if (!confirm("Şikâyet silinsin mi?")) { b.disabled = false; return; }
+    const { error } = await sb.from("reports").delete().eq("id", b.dataset.rdel);
+    if (error) { toast("Olmadı: " + error.message, true); b.disabled = false; return; }
+    DB.reports = DB.reports.filter(x => String(x.id) !== b.dataset.rdel);
+  }
+  render();
+});
+
+function renderLog() {
+  const l = load(LOG_KEY, []);
+  $("page").innerHTML = `<div class="card"><div class="cardHead"><h2>İşlem kaydı</h2><span class="sub">son ${l.length} işlem</span>
+    <button class="btn sm danger right" id="btnLogClear" ${l.length ? "" : "disabled"}>${ic("trash")}Temizle</button></div>
+    ${l.length ? `<div class="cardBody">${l.map(x => `<div class="rowLine" style="padding:10px 0"><span class="muted num" style="width:110px;flex:none;font-size:13px">${fmtDate(x.at)}</span><div class="grow">${esc(x.text)}</div></div>`).join("")}</div>`
+      : `<div class="empty"><div class="big">${ic("list")}</div><h3>Kayıt yok</h3><p>Panelde yapılan her değişiklik (Küp Jeton, rozet, kod, duyuru…) burada tarihiyle listelenir.</p></div>`}</div>`;
+  $("btnLogClear").onclick = () => { if (!confirm("İşlem kaydı temizlensin mi?")) return; save(LOG_KEY, []); toast("Kayıt temizlendi"); render(); };
+}
+
+// ================================================================ Oyun hediyeleri (oyun içi eşya ve paketler)
+// Bekleyenler kupEvreniHediye.pending'e yazılır; oyuncu o oyunu açınca ana sayfa kup:gift ile oyuna iletir, oyun kup:giftAck döner.
+// Katalog: her oyunun verilebilir eşyaları. key'deki {param} seçilen değerle dolar; own / ownList oyun kaydında sahipliği gösterir.
+// kind: amount = miktar, count = adet, once = kalıcı (tek sefer)
+const GIFT_KEY = "kupEvreniHediye", PACK_KEY = "kupEvreniPaketler";
+const GIFT_CATALOG = {
+  pizza: [
+    { key: "money", name: "Para", icon: "💰", kind: "amount", def: 1000, max: 1000000000 },
+    { key: "upgrade:{id}", name: "Yükseltme", icon: "🛠️", kind: "once", own: "owned.{id}", paramNames: { id: "Yükseltme" },
+      params: { id: [["Oven2", "🔥 2. Fırın"], ["Karisik", "🍕 Karışık Pizza"], ["Tables", "🪑 Masalar (+2 müşteri)"], ["FastOven", "⚡ Hızlı Fırın (2. Fırın gerekir)"]] } },
+    { key: "pass:double", name: "2x Para (kalıcı)", icon: "💰", kind: "once", own: "passes.double" },
+    { key: "pass:chef", name: "Yardımcı Aşçı (kalıcı)", icon: "👨‍🍳", kind: "once", own: "passes.chef" },
+  ],
+  gezegen: [
+    { key: "dust", name: "Yıldız tozu", icon: "💫", kind: "amount", def: 1000, max: 1000000000 },
+    { key: "pet:{sp}:{v}", name: "Hayvan", icon: "🐾", kind: "count", def: 1, max: 10, paramNames: { sp: "Tür", v: "Çeşit" },
+      ownList: { path: "pets", match: { sp: "{sp}", v: "{v}" } },
+      params: {
+        sp: [["tavsan", "🐰 Uzay Tavşanı"], ["fare", "🐭 Krater Faresi"], ["tilki", "🦊 Yıldız Tilkisi"], ["kurt", "🐺 Ay Kurdu"], ["ejder", "🐉 Galaksi Ejderi"],
+          ["akrep", "🦂 Kızıl Akrep"], ["kertenkele", "🦎 Toz Kertenkelesi"], ["kartal", "🦅 Mars Kartalı"], ["golem", "🗿 Lav Golemi"], ["anka", "🔥 Phobos Ankası"],
+          ["penguen", "🐧 Buz Pengueni"], ["kristalTilki", "🦊 Kristal Tilki"], ["baykus", "🦉 Kar Baykuşu"], ["ayi", "🐻 Kuyrukluyıldız Ayısı"], ["nebula", "🐲 Nebula Ejderi"],
+          ["yavruYesil", "🐥 Çimen Yavrusu"], ["yavruMavi", "🐥 Gök Yavrusu"], ["yavruMor", "🐥 Mor Yavru"], ["yavruPembe", "🐥 Şeker Yavrusu"], ["yavruSari", "🐥 Güneş Yavrusu"],
+          ["yavruTuruncu", "🐥 Kor Yavrusu"], ["yavruKirmizi", "🐥 Yakut Yavrusu"], ["yavruTurkuaz", "🐥 Okyanus Yavrusu"], ["yavruGece", "🐥 Gece Yavrusu"], ["yavruKozmik", "🐥 Kozmik Yavru"]],
+        v: [["n", "Normal"], ["g", "Altın"], ["r", "Gökkuşağı"]],
+      } },
+    { key: "planet:{i}", name: "Gezegen kilidi", icon: "🪐", kind: "once", own: "unlocked.{i}", paramNames: { i: "Gezegen" }, params: { i: [["1", "🔴 Mars"], ["2", "❄️ Kriyo"]] } },
+    { key: "pass:double", name: "2x Yıldız Tozu (kalıcı)", icon: "✨", kind: "once", own: "passes.double" },
+    { key: "pass:slots", name: "+2 Hayvan Slotu (kalıcı)", icon: "🐾", kind: "once", own: "passes.slots" },
+    { key: "pass:yavrular", name: "Kanatlı Yavrular Paketi (10 hayvan, 10 boş yer gerekir)", icon: "🐥", kind: "once", own: "passes.yavrular" },
+  ],
+  ada: [
+    { key: "inv:{id}", name: "Malzeme", icon: "🪵", kind: "count", def: 10, max: 999, own: "inv.{id}", paramNames: { id: "Malzeme" },
+      params: { id: [["odun", "🪵 Odun"], ["tas", "🪨 Taş"], ["lif", "🌾 Lif"], ["ip", "🧵 İp"], ["meyve", "🍓 Meyve"], ["cevizi", "🥥 Hindistan Cevizi"], ["ates", "🔥 Kamp Ateşi"], ["barinak", "⛺ Barınak"]] } },
+    { key: "tool:{id}", name: "Alet", icon: "🪓", kind: "once", own: "tools.{id}", paramNames: { id: "Alet" },
+      params: { id: [["balta", "🪓 Taş Balta"], ["kazma", "⛏️ Taş Kazma"], ["mizrak", "🔱 Mızrak"], ["matara", "🫙 Matara"]] } },
+    { key: "flask", name: "Matarayı doldur (matara gerekir)", icon: "🫙", kind: "once" },
+    { key: "heal", name: "Can, açlık ve susuzluğu doldur", icon: "❤️", kind: "once" },
+    { key: "pass:starter", name: "Başlangıç Paketi (10 odun, 6 taş, 4 ip, 5 meyve)", icon: "🎒", kind: "count", def: 1, max: 99 },
+    { key: "pass:gold", name: "Altın Alet Seti (kalıcı)", icon: "🪓", kind: "once", own: "passes.gold" },
+  ],
+  klavye: [
+    { key: "hiz", name: "Hız", icon: "⚡", kind: "amount", def: 1000, max: 1000000000 },
+    { key: "kupa", name: "Kupa", icon: "🏆", kind: "amount", def: 100, max: 1000000000 },
+    { key: "switch:{id}", name: "Switch", icon: "🔊", kind: "once", own: "owned.{id}", paramNames: { id: "Switch" },
+      params: { id: [["kahve", "🟤 Tactile Kahverengi"], ["mavi", "🔵 Clicky Mavi"], ["krema", "🍦 Kremalı Thock"], ["cam", "🫧 Cam Pop"]] } },
+    { key: "trail:{id}", name: "İz", icon: "✨", kind: "once", own: "owned.{id}", paramNames: { id: "İz" },
+      params: { id: [["beyaz", "☁️ Bulut İzi"], ["ates", "🔥 Ateş İzi"], ["neon", "💠 Neon Mavi"], ["altin", "✨ Altın İz"]] } },
+    { key: "pass:x2hiz", name: "2x Hız (kalıcı)", icon: "⚡", kind: "once", own: "passes.x2hiz" },
+    { key: "pass:x2kupa", name: "2x Kupa (kalıcı)", icon: "🏆", kind: "once", own: "passes.x2kupa" },
+    { key: "pass:gokkusagi", name: "Gökkuşağı İzi (kalıcı)", icon: "🌈", kind: "once", own: "owned.gokkusagi" },
+  ],
+  limonata: [
+    { key: "money", name: "Para", icon: "💰", kind: "amount", def: 1000, max: 1000000000 },
+    { key: "lemon", name: "Limon (sepet sınırına kadar)", icon: "🍋", kind: "count", def: 10, max: 20, own: "lemons" },
+    { key: "upgrade:{id}", name: "Yükseltme", icon: "🛠️", kind: "once", own: "owned.{id}", paramNames: { id: "Yükseltme" }, params: { id: [
+      ["basket", "🧺 Büyük Sepet"], ["tree2", "🌳 2. Ağaç Sırası"], ["pitcher", "🫗 Büyük Sürahi"], ["sign", "🪧 Renkli Tabela"],
+      ["ice", "🧊 Buz Makinesi"], ["kiosk", "🏪 Stand: Kiosk"], ["mint", "🌿 Naneli Tarif"], ["tree3", "🌳 3. Ağaç Sırası (2. sıra gerekir)"],
+      ["picker", "🤖 Otomatik Limon Toplayıcı"], ["berry", "🍓 Çilekli Tarif"], ["cafe", "☕ Stand: Kafe (Kiosk gerekir)"]] } },
+    { key: "lv:{id}", name: "Sonsuz yükseltme (seviye)", icon: "♾️", kind: "count", def: 1, max: 100, own: "lv.{id}", paramNames: { id: "Yükseltme" }, params: { id: [
+      ["brand", "💎 Ünlü Marka"], ["tips", "🫙 Bahşiş Kavanozu"], ["ads", "📣 Reklam"], ["fert", "🌱 Gübre"], ["bag", "🧺 Sepet Genişletme"],
+      ["jug", "🫗 Sürahi Ustası"], ["patience", "🪑 Rahat Kuyruk"]] } },
+    { key: "pass:double", name: "2x Para (kalıcı)", icon: "💰", kind: "once", own: "passes.double" },
+    { key: "pass:waiter", name: "Yardımcı Garson (kalıcı)", icon: "🧑‍🍳", kind: "once", own: "passes.waiter" },
+  ],
+  kasaba: [
+    { key: "money", name: "Para (₺)", icon: "💵", kind: "amount", def: 1000, max: 1000000000 },
+    { key: "car:{id}", name: "Araç", icon: "🚗", kind: "once", own: "cars.{id}", paramNames: { id: "Araç" }, params: { id: [["sedan", "🚗 Sedan"], ["kamyonet", "🛻 Kamyonet"]] } },
+    { key: "car:spor", name: "Spor Araba", icon: "🏎️", kind: "once", own: "passes.spor" },
+    { key: "style:{id}", name: "Ev stili", icon: "🏢", kind: "once", own: "styles.{id}", paramNames: { id: "Stil" }, params: { id: [["modern", "🏢 Modern Ev"]] } },
+    { key: "style:villa", name: "Villa", icon: "🏰", kind: "once", own: "passes.villa" },
+    { key: "item:gun", name: "Tabanca", icon: "🔫", kind: "once", own: "gun" },
+  ],
+  fabrika: [
+    { key: "pass:speed", name: "Hız Botları (kalıcı, +%15 hız)", icon: "👟", kind: "once", own: "passes.speed" },
+    { key: "trail:{id}", name: "İz", icon: "✨", kind: "once", own: "giftTrails.{id}", paramNames: { id: "İz" },
+      params: { id: [["blue", "💙 Mavi Kıvılcım"], ["fire", "🔥 Ateş"], ["toxic", "💚 Zehir"], ["rainbow", "🌈 Gökkuşağı"], ["gold", "✨ Altın"]] } },
+    { key: "cosmetic:hardhat", name: "Fabrika Kaskı (kostüm)", icon: "🪖", kind: "once", own: "giftHardhat" },
+  ],
+  arena: [
+    { key: "money", name: "Para", icon: "💰", kind: "amount", def: 1000, max: 1000000000 },
+    { key: "weapon:{id}", name: "Silah", icon: "🔫", kind: "once", own: "owned.{id}", paramNames: { id: "Silah" },
+      params: { id: [["m9", "🔫 Beretta M9 (tabanca)"], ["deagle", "🔫 Desert Eagle (tabanca)"], ["uzi", "💨 UZI"], ["mp5", "💨 MP5"], ["p90", "💨 P90"],
+        ["m4", "🔫 M4A1"], ["scar", "🔫 SCAR-H"], ["m870", "💥 Remington 870 (pompalı)"], ["benelli", "💥 Benelli M4 (pompalı)"],
+        ["m700", "🎯 Remington 700 (keskin nişancı)"], ["barrett", "🎯 Barrett M82 (keskin nişancı)"], ["m249", "🔥 M249"]] } },
+    { key: "pass:double", name: "2x Para (kalıcı)", icon: "💰", kind: "once", own: "passes.double" },
+    { key: "pass:gold", name: "Altın Silahlar (kalıcı)", icon: "✨", kind: "once", own: "passes.gold" },
+  ],
+  parafabrika: [
+    { key: "money", name: "Para", icon: "💰", kind: "amount", def: 10000, max: 1e12 },
+    { key: "pass:double", name: "2x Para (kalıcı)", icon: "💎", kind: "once", own: "passes.double" },
+    { key: "pass:auto", name: "Otomatik Toplama (kalıcı)", icon: "🤖", kind: "once", own: "passes.auto" },
+  ],
+  hayvanat: [
+    { key: "money", name: "Para", icon: "💰", kind: "amount", def: 10000, max: 1000000000000 },
+    { key: "pass:double", name: "2x Gelir (kalıcı)", icon: "💎", kind: "once", own: "passes.double" },
+    { key: "pass:speed", name: "Hızlı Yürüyüş (kalıcı)", icon: "👟", kind: "once", own: "passes.speed" },
+  ],
+  kule: [
+    { key: "gold", name: "Altın", icon: "💰", kind: "amount", def: 100, max: 1000000000 },
+    { key: "theme:{id}", name: "Blok teması", icon: "🎨", kind: "once", own: "owned.{id}", paramNames: { id: "Tema" },
+      params: { id: [["seker", "🍬 Şeker"], ["tas", "🪨 Taş"], ["neon", "💡 Neon"], ["gece", "🌙 Gece"]] } },
+    { key: "pass:altin", name: "Altın Bloklar (kalıcı)", icon: "👑", kind: "once", own: "passes.altin" },
+  ],
+  kopuk: [
+    { key: "money", name: "Para", icon: "💰", kind: "amount", def: 10000, max: 1000000000000000 },
+    { key: "lv:{id}", name: "Yükseltme (seviye)", icon: "🛠️", kind: "count", def: 1, max: 100, own: "lv.{id}", paramNames: { id: "Yükseltme" },
+      params: { id: [["pump", "💪 Pompa Gücü"], ["machine", "⚙️ Köpük Makinesi"], ["duck", "🦆 Lastik Ördek (en çok 25)"], ["magnet", "🧲 Baloncuk Mıknatısı (en çok 6)"]] } },
+    { key: "soap:{id}", name: "Sabun", icon: "🧼", kind: "once", own: "soaps.{id}", paramNames: { id: "Sabun" },
+      params: { id: [["lavanta", "💜 Lavanta ×2"], ["cilek", "🍓 Çilek ×4"], ["nane", "🌿 Nane ×8"], ["gokkusagi", "🌈 Gökkuşağı ×16"], ["altin", "✨ Altın ×40"], ["galaksi", "🌌 Galaksi ×100"]] } },
+    { key: "pass:double", name: "2x Köpük (kalıcı)", icon: "🫧", kind: "once", own: "passes.double" },
+    { key: "pass:autopump", name: "Süper Pompa (kalıcı)", icon: "🤖", kind: "once", own: "passes.autopump" },
+  ],
+  futbol: [
+    { key: "money", name: "Para", icon: "💰", kind: "amount", def: 1000, max: 1000000000 },
+    { key: "upgrade:{id}", name: "Yükseltme (seviye)", icon: "🛠️", kind: "count", def: 1, max: 5, own: "up.{id}", paramNames: { id: "Yükseltme" },
+      params: { id: [["boots", "👟 Krampon (en çok 5)"], ["shot", "💥 Şut Gücü (en çok 5)"], ["stamina", "⚡ Dayanıklılık (en çok 5)"], ["control", "🧲 Top Kontrolü (en çok 3)"]] } },
+    { key: "ball:{id}", name: "Top", icon: "⚽", kind: "once", own: "balls.{id}", paramNames: { id: "Top" },
+      params: { id: [["fire", "🔥 Alev Topu"], ["ice", "🧊 Buz Topu"], ["neon", "🟢 Neon Top"], ["galaxy", "🌌 Galaksi Topu"]] } },
+    { key: "kit:{id}", name: "Forma", icon: "👕", kind: "once", own: "kits.{id}", paramNames: { id: "Forma" },
+      params: { id: [["yellow", "🟡 Sarı"], ["orange", "🟠 Turuncu"], ["purple", "🟣 Mor"], ["pink", "🩷 Pembe"], ["black", "⚫ Siyah"]] } },
+    { key: "pass:double", name: "2x Para (kalıcı)", icon: "💰", kind: "once", own: "passes.double" },
+    { key: "pass:gold", name: "Altın Top (kalıcı)", icon: "🏆", kind: "once", own: "passes.gold" },
+  ],
+  yaris: [
+    { key: "money", name: "Para", icon: "💰", kind: "amount", def: 1000, max: 1000000000 },
+    { key: "car:{id}", name: "Araba", icon: "🚗", kind: "once", own: "owned.{id}", paramNames: { id: "Araba" },
+      params: { id: [["ruzgar", "🚙 Rüzgâr"], ["kaplan", "🛻 Kaplan"], ["simsek", "🏎️ Şimşek GT"], ["formul", "🏁 Formül K"]] } },
+    { key: "upgrade:{id}", name: "Yükseltme (seviye)", icon: "🛠️", kind: "count", def: 1, max: 5, own: "lv.{id}", paramNames: { id: "Yükseltme" },
+      params: { id: [["motor", "⚙️ Motor"], ["turbo", "🌀 Turbo"], ["lastik", "🛞 Yarış Lastiği"], ["nitro", "🚀 Nitro Tüpü"]] } },
+    { key: "track:{id}", name: "Pist kilidi", icon: "🗺️", kind: "once", own: "tracks.{id}", paramNames: { id: "Pist" },
+      params: { id: [["col", "🏜️ Çöl Kanyonu"], ["sehir", "🌃 Gece Şehri"]] } },
+    { key: "pass:double", name: "2x Para (kalıcı)", icon: "💰", kind: "once", own: "passes.double" },
+    { key: "pass:gold", name: "Altın Boya (kalıcı)", icon: "✨", kind: "once", own: "passes.gold" },
+  ],
+};
+const giftStore = () => { const g = load(GIFT_KEY, {}) || {}; return { pending: g.pending || [], done: g.done || [] }; };
+const fillTpl = (tpl, vals) => String(tpl).replace(/\{(\w+)\}/g, (_, k) => vals[k] ?? "");
+const getPath = (obj, p) => p.split(".").reduce((o, k) => o == null ? undefined : o[k], obj);
+// Seçili oyuncunun buluttaki oyun kaydında bu eşyadan kaç tane var (bilinmiyorsa / herkes seçiliyse null)
+function ownedCount(gameId, item, vals, uid) {
+  if (!uid) return null;
+  const sv = (saveOf(uid, gameId) || {}).data;
+  if (!sv) return item.own || item.ownList ? 0 : null;
+  if (item.own) { const v = getPath(sv, fillTpl(item.own, vals)); return typeof v === "number" ? v : v ? 1 : 0; }
+  if (item.ownList) {
+    const arr = getPath(sv, item.ownList.path);
+    if (!Array.isArray(arr)) return 0;
+    return arr.filter(x => x && Object.entries(item.ownList.match).every(([k, t]) => String(x[k]) === fillTpl(t, vals))).length;
+  }
+  return null;
+}
+function itemLabel(item, vals, n) {
+  const ps = Object.keys(item.params || {});
+  const name = ps.length ? ps.map(p => (item.params[p].find(o => o[0] === vals[p]) || [, vals[p]])[1]).join(" · ") : `${item.icon} ${item.name}`;
+  return name + (item.kind === "once" ? "" : ` ×${fmtNum(n)}`);
+}
+let gift = { to: "*", game: null, item: 0, vals: {}, basket: [] };
+function renderGifts() {
+  const u = users(), st = giftStore(), packs = load(PACK_KEY, []);
+  const games = GAMES.filter(g => (GIFT_CATALOG[g.id] || []).length);
+  if (!gift.game || !GIFT_CATALOG[gift.game]) gift.game = games[0]?.id || null;
+  if (gift.to !== "*" && !u.some(x => x.a.name === gift.to)) gift.to = "*";
+  const cat = GIFT_CATALOG[gift.game] || [], item = cat[gift.item] || cat[0];
+  if (item) for (const [p, opts] of Object.entries(item.params || {})) if (!opts.some(o => o[0] === gift.vals[p])) gift.vals[p] = opts[0][0];
+  const own = item && gift.to !== "*" ? ownedCount(gift.game, item, gift.vals, idByName(gift.to)) : null;
+  const key = item ? fillTpl(item.key, gift.vals) : "";
+  const waitingFor = [...new Set(st.pending.filter(p => p.game === gift.game && (gift.to === "*" || p.to === gift.to) && p.items.some(it => it.key === key)).map(p => p.to))];
+  const inBasket = gift.basket.some(b => b.key === key && b.game === gift.game);
+  const ownedOnce = item && item.kind === "once" && own > 0;
+  const status = !item ? "" : ownedOnce ? `<span class="pill green">✅ Zaten verildi</span>` : waitingFor.length ? `<span class="pill gold">⏳ ${esc(waitingFor.join(", "))} için gönderildi, oyunu açması bekleniyor</span>`
+    : own != null && item.kind !== "once" ? `<span class="pill gray">Oyunda şu an: ${fmtNum(own)}</span>` : "";
+  const gName = id => { const g = GAMES.find(x => x.id === id); return g ? `${g.icon} ${esc(g.title)}` : esc(id); };
+  const itemsTxt = (items, skipped = []) => items.map(it => skipped.includes(it.key) ? `<s class="muted" title="Oyuncuda zaten vardı">${esc(it.label)}</s>` : esc(it.label)).join(", ");
+  $("page").innerHTML = `<div class="stack" style="max-width:1000px">
+    <div class="card"><div class="cardHead"><h2>Hediye hazırla</h2><span class="sub right">Birden fazla eşya = paket</span></div><div class="cardBody">
+      ${!games.length ? `<p class="muted" style="margin:0">Oyun kataloğu henüz yok.</p>` : `
+      <div class="formGrid">
+        <div><label class="lbl" for="gTo">Kime</label><select class="field" id="gTo"><option value="*">👥 Herkes (${u.length} hesap)</option>
+          ${u.map(x => `<option value="${esc(x.a.name)}" ${x.a.name === gift.to ? "selected" : ""}>${esc(x.a.name)}</option>`).join("")}</select></div>
+        <div><label class="lbl" for="gGame">Oyun</label><select class="field" id="gGame">${games.map(g => `<option value="${g.id}" ${g.id === gift.game ? "selected" : ""}>${g.icon} ${esc(g.title)}</option>`).join("")}</select></div>
+        <div><label class="lbl" for="gItem">Eşya</label><select class="field" id="gItem">${cat.map((c, i) => `<option value="${i}" ${c === item ? "selected" : ""}>${c.icon} ${esc(c.name)}</option>`).join("")}</select></div>
+        ${Object.entries(item.params || {}).map(([p, opts]) => `<div><label class="lbl" for="gp_${p}">${esc(item.paramNames?.[p] || "Seçim")}</label>
+          <select class="field" id="gp_${p}" data-param="${p}">${opts.map(o => `<option value="${esc(o[0])}" ${o[0] === gift.vals[p] ? "selected" : ""}>${esc(o[1])}</option>`).join("")}</select></div>`).join("")}
+        ${item.kind === "once" ? "" : `<div><label class="lbl" for="gN">${item.kind === "amount" ? "Miktar" : "Adet"}</label>
+          <input class="field num" type="text" inputmode="numeric" data-num id="gN" value="${fmtNum(item.def || 1)}"><div class="hint">en fazla ${fmtNum(item.max || 1000000000)}</div></div>`}
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:16px">
+        <button class="btn" id="gAdd" ${ownedOnce || (inBasket && item.kind === "once") ? "disabled" : ""}>${ic("plus")}Pakete ekle</button>${status}</div>
+      <p class="hint" style="margin-top:10px">"Zaten verildi" bilgisi bu cihazdaki oyun kaydından okunur.</p>`}
+    </div>
+    ${gift.basket.length ? `<div class="cardBody" style="border-top:1px solid var(--line)">
+      <label class="lbl" style="margin-top:0">Paket (${gift.basket.length} eşya)</label>
+      ${gift.basket.map((b, i) => `<div class="rowLine" style="padding:8px 0"><span>${gName(b.game)}</span><div class="grow"><b>${esc(b.label)}</b></div>
+        <button class="btn sm ghost" data-bdel="${i}" aria-label="Çıkar">${ic("x")}</button></div>`).join("")}
+      <div class="formGrid" style="margin-top:6px"><div><label class="lbl" for="gNote">Not (oyuncu görmez, kayıtta durur)</label><input class="field" id="gNote" maxlength="60" placeholder="Örn: Yarışma ödülü"></div>
+        <div><label class="lbl" for="gPackName">Paketi kaydetmek için isim</label><input class="field" id="gPackName" maxlength="30" placeholder="Örn: Başlangıç Paketi"></div></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px"><button class="btn primary" id="gSend">🎁 ${gift.to === "*" ? `Herkese gönder (${u.length})` : `${esc(gift.to)} adlı oyuncuya gönder`}</button>
+        <button class="btn" id="gSavePack">Paketi kaydet</button><button class="btn ghost" id="gClear">Temizle</button></div></div>` : ""}
+    </div>
+    ${packs.length ? `<div class="card"><div class="cardHead"><h2>Kayıtlı paketler</h2></div><div class="cardBody" style="padding-top:6px">
+      ${packs.map((p, i) => `<div class="rowLine"><span class="itemIco">📦</span><div class="grow"><b>${esc(p.name)}</b><small>${p.items.map(b => esc(b.label)).join(", ")}</small></div>
+        <button class="btn sm" data-pload="${i}">Pakete yükle</button><button class="btn sm danger" data-pdel="${i}">${ic("trash")}</button></div>`).join("")}</div></div>` : ""}
+    <div class="card"><div class="cardHead"><h2>Bekleyen hediyeler</h2><span class="sub">${st.pending.length} hediye · oyuncu oyunu açınca teslim edilir</span></div>
+      ${st.pending.length ? `<div class="tableWrap" style="margin-top:10px"><table><thead><tr><th>Kime</th><th>Oyun</th><th>Eşyalar</th><th class="hideSm">Gönderilme</th><th></th></tr></thead>
+        <tbody>${st.pending.map(p => `<tr><td><b>${esc(p.to)}</b></td><td>${gName(p.game)}</td><td style="white-space:normal">${itemsTxt(p.items)}</td>
+          <td class="muted hideSm">${fmtDate(p.at)}</td><td class="r"><button class="btn sm danger" data-gcancel="${esc(p.gid)}">İptal</button></td></tr>`).join("")}</tbody></table></div>`
+        : `<div class="cardBody muted">Bekleyen hediye yok.</div>`}</div>
+    <div class="card"><div class="cardHead"><h2>Teslim edilenler</h2><span class="sub">son ${st.done.length}</span></div>
+      ${st.done.length ? `<div class="tableWrap" style="margin-top:10px"><table><thead><tr><th>Kime</th><th>Oyun</th><th>Eşyalar</th><th>Durum</th><th class="hideSm">Teslim</th></tr></thead>
+        <tbody>${st.done.map(d => `<tr><td><b>${esc(d.to)}</b></td><td>${gName(d.game)}</td><td style="white-space:normal">${itemsTxt(d.items, d.skipped || [])}</td>
+          <td>${(d.skipped || []).length === d.items.length ? `<span class="pill gray">Zaten vardı</span>` : `<span class="pill green">✅ Verildi</span>`}</td>
+          <td class="muted hideSm">${fmtDate(d.got)}</td></tr>`).join("")}</tbody></table></div>`
+        : `<div class="cardBody muted">Henüz teslim edilen hediye yok.</div>`}</div>
+  </div>`;
+  if (!games.length) return;
+  $("gTo").onchange = e => { gift.to = e.target.value; renderGifts(); };
+  $("gGame").onchange = e => { gift.game = e.target.value; gift.item = 0; gift.vals = {}; renderGifts(); };
+  $("gItem").onchange = e => { gift.item = +e.target.value; gift.vals = {}; renderGifts(); };
+  $("page").querySelectorAll("[data-param]").forEach(s => s.onchange = () => { gift.vals[s.dataset.param] = s.value; renderGifts(); });
+  $("gAdd").onclick = () => {
+    let n = 1;
+    if (item.kind !== "once") { n = intVal("gN", 1, item.max || 1000000000); if (n === null) { toast(`1 ile ${fmtNum(item.max || 1000000000)} arası bir sayı yaz`, true); return; } }
+    const same = gift.basket.find(b => b.key === key && b.game === gift.game);
+    if (same && item.kind !== "once") { same.n += n; same.label = itemLabel(item, gift.vals, same.n); }
+    else if (!same) gift.basket.push({ game: gift.game, key, n, label: itemLabel(item, gift.vals, n) });
+    renderGifts();
+  };
+  $("page").querySelectorAll("[data-bdel]").forEach(b => b.onclick = () => { gift.basket.splice(+b.dataset.bdel, 1); renderGifts(); });
+  if ($("gClear")) $("gClear").onclick = () => { gift.basket = []; renderGifts(); };
+  if ($("gSend")) $("gSend").onclick = () => {
+    const targets = gift.to === "*" ? u.map(x => x.a.name) : [gift.to];
+    if (!targets.length) { toast("Gönderilecek hesap yok", true); return; }
+    const note = $("gNote").value.trim(), store = giftStore(), at = Date.now();
+    // Her oyun için ayrı hediye: oyuncu hangi oyunu açarsa o oyunun eşyaları gider
+    const byGame = {};
+    for (const b of gift.basket) (byGame[b.game] = byGame[b.game] || []).push({ key: b.key, n: b.n, label: b.label });
+    for (const to of targets) for (const [game, items] of Object.entries(byGame)) store.pending.push({ gid: "g_" + newId(), to, game, items, note, at });
+    save(GIFT_KEY, store);
+    logAct(`Hediye gönderildi → ${gift.to === "*" ? "herkes" : gift.to}: ${gift.basket.map(b => b.label).join(", ")}${note ? ` (${note})` : ""}`);
+    toast(`🎁 Hediye gönderildi (${targets.length} hesap)`); gift.basket = []; render();
+  };
+  if ($("gSavePack")) $("gSavePack").onclick = () => {
+    const name = $("gPackName").value.trim();
+    if (name.length < 2) { toast("Pakete bir isim ver", true); $("gPackName").focus(); return; }
+    save(PACK_KEY, [{ id: newId(), name, items: gift.basket.map(b => ({ ...b })) }, ...load(PACK_KEY, [])]);
+    logAct(`Paket kaydedildi: ${name}`); toast(`${name} kaydedildi`); renderGifts();
+  };
+  $("page").querySelectorAll("[data-pload]").forEach(b => b.onclick = () => { const p = load(PACK_KEY, [])[+b.dataset.pload]; if (!p) return; gift.basket = p.items.map(x => ({ ...x })); toast(`${p.name} pakete yüklendi`); renderGifts(); });
+  $("page").querySelectorAll("[data-pdel]").forEach(b => b.onclick = () => {
+    const list = load(PACK_KEY, []), p = list[+b.dataset.pdel]; if (!p || !confirm(`${p.name} paketi silinsin mi?`)) return;
+    list.splice(+b.dataset.pdel, 1); save(PACK_KEY, list); logAct(`Paket silindi: ${p.name}`); renderGifts();
+  });
+  $("page").querySelectorAll("[data-gcancel]").forEach(b => b.onclick = () => {
+    const store = giftStore(), p = store.pending.find(x => x.gid === b.dataset.gcancel); if (!p || !confirm(`${p.to} için bekleyen hediye iptal edilsin mi?`)) return;
+    store.pending = store.pending.filter(x => x.gid !== p.gid); save(GIFT_KEY, store);
+    logAct(`Hediye iptal edildi → ${p.to}: ${p.items.map(it => it.label).join(", ")}`); toast("Hediye iptal edildi"); render();
+  });
+}
+
+// ================================================================ Kullanıcı çekmecesi
+let drawerUid = null;
+function openDrawer(uid) { drawerUid = uid; renderDrawer(); $("drawer").classList.add("on"); $("scrim").classList.add("on"); }
+function closeDrawer() { drawerUid = null; $("drawer").classList.remove("on"); $("scrim").classList.remove("on"); }
+
+// Silme onayı: kutuya DELETE yazılmadan buton açılmaz
+let confirmOk = null;
+function askDelete(name, onOk) {
+  confirmOk = onOk;
+  $("cIco").innerHTML = ic("alert");
+  $("cText").innerHTML = `<b style="color:var(--text)">${esc(name)}</b> hesabı kalıcı olarak silinecek: Küp Jeton, avatar, rozetler ve süreler gider. Bu işlem geri alınamaz.<br><br>Onaylamak için kutuya <code>DELETE</code> yaz.`;
+  $("cInput").value = ""; $("cOk").disabled = true;
+  $("confirm").classList.add("on");
+  setTimeout(() => $("cInput").focus(), 30);
+}
+function closeConfirm() { confirmOk = null; $("confirm").classList.remove("on"); }
+$("cInput").addEventListener("input", () => $("cOk").disabled = $("cInput").value.trim() !== "DELETE");
+$("cCancel").onclick = closeConfirm;
+$("confirm").addEventListener("click", e => { if (e.target.id === "confirm") closeConfirm(); });
+$("cForm").onsubmit = e => {
+  e.preventDefault();
+  if ($("cInput").value.trim() !== "DELETE" || !confirmOk) return;
+  const fn = confirmOk; closeConfirm(); fn();
+};
+function renderDrawer() {
+  const x = getUser(drawerUid);
+  if (!x) { closeDrawer(); return; }
+  const a = x.a, buys = (a.purchases || []).slice().sort((p, q) => q.at - p.at);
+  const games = GAMES.filter(g => a.playTime?.[g.id]).sort((p, q) => a.playTime[q.id] - a.playTime[p.id]);
+  $("drawer").innerHTML = `
+    <div class="dHead">${ava(a)}<div><h2>${esc(a.name)}</h2>${x.active ? `<span class="pill green">Çevrimiçi</span>` : `<span class="pill gray">Kayıtlı hesap</span>`}</div>
+      <button class="btn ghost" data-act="close" aria-label="Kapat">${ic("x")}</button></div>
+    <div class="dBody">
+      <div class="sec"><div class="miniStats">
+        <div><b class="num">${fmtTime(playSec(a))}</b><span>Oynama</span></div>
+        <div><b class="num">KJ ${fmtNum(spentOf(a))}</b><span>Harcama</span></div>
+        <div><b>${esc(a.joined || "—")}</b><span>Katılma</span></div></div></div>
+      <div class="sec"><h3>Küp Jeton bakiyesi</h3>
+        <div class="balance"><b class="num">KJ ${fmtNum(a.jeton)}</b></div>
+        <div class="quick">${[100, 500, 1000, 5000].map(n => `<button class="btn sm green" data-act="add" data-n="${n}">+${fmtNum(n)}</button>`).join("")}
+          <button class="btn sm" data-act="add" data-n="-100">−100</button></div>
+        <div class="amountRow"><input class="field num" type="text" inputmode="numeric" data-num id="amt" placeholder="Miktar">
+          <button class="btn" data-act="plus">Ekle</button><button class="btn" data-act="minus">Çıkar</button><button class="btn primary" data-act="set">Ayarla</button></div></div>
+      <div class="sec"><h3>Rozetler · ${BADGES.filter(b => a.badges?.[b.id]).length}/${BADGES.length}</h3>
+        <div class="chips">${BADGES.map(b => `<button class="chip ${a.badges?.[b.id] ? "on" : ""}" data-act="badge" data-b="${b.id}"><span class="e">${b.icon}</span>${b.name}<span class="tick"></span></button>`).join("")}</div>
+        <div style="display:flex;gap:6px;margin-top:8px"><button class="btn sm" data-act="badgesAll">Hepsini ver</button><button class="btn sm" data-act="badgesReset">Sıfırla</button></div></div>
+      <div class="sec"><button class="btn green" data-act="gift" style="width:100%">${ic("gift")}Bu oyuncuya oyun içi hediye gönder</button></div>
+      <div class="sec"><h3>Yetki</h3>
+        <div style="display:flex;align-items:center;gap:10px"><span class="muted" style="flex:1;font-size:13px">${x.admin ? "🛡️ Admin: bu panele girebilir" : "Normal oyuncu"}</span>
+        ${x.uid === adminSession?.user?.id ? `<span class="pill gray">Sensin</span>`
+          : x.admin ? `<button class="btn sm danger" data-act="unadmin">Adminliği kaldır</button>` : `<button class="btn sm" data-act="admin">🛡️ Admin yap</button>`}</div></div>
+      <div class="sec"><h3>Şifre</h3>
+        <div class="amountRow"><input class="field" type="text" id="newPass" maxlength="72" placeholder="Yeni şifre (en az 6)" autocomplete="off">
+          <button class="btn" data-act="pass">Şifreyi sıfırla</button></div>
+        <p class="muted" style="font-size:12px;margin:6px 0 0">Şifresini unutan oyuncu için. Yeni şifreyi oyuncuya sen ilet.</p></div>
+      <div class="sec"><h3>Günlük ödül</h3>
+        <div style="display:flex;align-items:center;gap:10px"><span class="muted" style="flex:1;font-size:13px">${a.lastDaily ? `Son alınma: ${esc(a.lastDaily)}` : "Alınabilir durumda"}</span>
+        <button class="btn sm" data-act="daily" ${a.lastDaily ? "" : "disabled"}>${ic("refresh")}Yenile</button></div></div>
+      <div class="sec"><h3>Oyunlar</h3><div class="list">${games.length ? games.map(g => `<div><span>${g.icon} ${esc(g.title)}</span><span class="muted num">${fmtTime(a.playTime[g.id])}</span></div>`).join("") : `<div><span class="muted">Henüz oynamadı</span></div>`}</div></div>
+      <div class="sec"><h3>Oyun kayıtları</h3><div class="list">${(() => { const sv = DB.saves.filter(s => s.user_id === x.uid); return sv.length ? sv.map(s => { const g = GAMES.find(q => q.id === s.game) || { icon: "🎮", title: s.game };
+        return `<div><span>${g.icon} ${esc(g.title)} <span class="muted">· ${kb(s.data)} · ${fmtDate(Date.parse(s.updated_at))}</span></span><button class="btn sm danger" data-act="saveDel" data-g="${esc(s.game)}" title="Bu oyundaki ilerlemesini sıfırla">${ic("trash")}</button></div>`; }).join("") : `<div><span class="muted">Bulutta oyun kaydı yok</span></div>`; })()}</div></div>
+      <div class="sec"><h3>Satın alımlar</h3><div class="list">${buys.length ? buys.slice(0, 10).map(p => `<div><span>${(GAMES.find(g => g.id === p.game) || {}).icon || "🎮"} ${esc(p.id)} <span class="muted">· ${fmtDate(p.at)}</span></span><span class="robux num">KJ ${fmtNum(p.price)}</span></div>`).join("") : `<div><span class="muted">Satın alım yok</span></div>`}</div></div>
+      <div class="sec"><h3 style="color:var(--red)">Tehlikeli bölge</h3><div class="dangerZone">
+        <p>Hesap kalıcı olarak silinir: Küp Jeton, avatar, rozetler, süreler ve oyun kayıtları gider.</p>
+        <button class="btn danger" data-act="delete">${ic("trash")}Hesabı sil</button></div></div>
+    </div>`;
+}
+$("scrim").onclick = closeDrawer;
+addEventListener("keydown", e => {
+  if (e.key !== "Escape") return;
+  if ($("confirm").classList.contains("on")) closeConfirm(); else if (drawerUid) closeDrawer();
+});
+$("drawer").addEventListener("click", e => {
+  const b = e.target.closest("[data-act]");
+  if (!b || !sessionOk()) { if (b) logout(); return; }
+  const act = b.dataset.act;
+  if (act === "close") { closeDrawer(); return; }
+  if (act === "gift") { const y = getUser(drawerUid); if (y) gift.to = y.a.name; closeDrawer(); go("gifts"); return; }
+  const x = getUser(drawerUid);
+  if (!x) { closeDrawer(); return; }
+  const a = x.a, amt = $("amt") ? numVal($("amt")) : null;
+  const setBal = v => { // sunucuda Küp Jeton en fazla 2 milyar (veritabanı sayı sınırı)
+    const old = a.jeton || 0; a.jeton = Math.min(MAX_ROBUX, Math.max(0, Math.floor(v))); putUser(x.uid, a);
+    logAct(`${a.name}: Küp Jeton KJ ${fmtNum(old)} → KJ ${fmtNum(a.jeton)}`);
+    toast(v > MAX_ROBUX ? `En fazla KJ ${fmtNum(MAX_ROBUX)} olabilir: ${a.name} = KJ ${fmtNum(a.jeton)}` : `${a.name}: KJ ${fmtNum(a.jeton)}`, v > MAX_ROBUX); };
+  if (act === "add") setBal((a.jeton || 0) + +b.dataset.n);
+  else if (act === "plus" || act === "minus" || act === "set") {
+    if (amt === null) { toast("Geçerli bir miktar yaz", true); $("amt").focus(); return; }
+    setBal(act === "set" ? amt : (a.jeton || 0) + (act === "plus" ? amt : -amt));
+  }
+  else if (act === "badge") { a.badges = { ...(a.badges || {}) }; const on = !a.badges[b.dataset.b]; if (on) a.badges[b.dataset.b] = true; else delete a.badges[b.dataset.b]; putUser(x.uid, a);
+    const r = BADGES.find(q => q.id === b.dataset.b); logAct(`${a.name}: ${r.icon} ${r.name} rozeti ${on ? "verildi" : "alındı"}`); }
+  else if (act === "badgesAll") { a.badges = Object.fromEntries(BADGES.map(r => [r.id, true])); putUser(x.uid, a); logAct(`${a.name}: tüm rozetler verildi`); toast("Tüm rozetler verildi (Küp Jeton ödülü yok)"); }
+  else if (act === "badgesReset") { a.badges = { welcome: true }; putUser(x.uid, a); logAct(`${a.name}: rozetler sıfırlandı`); toast("Rozetler sıfırlandı"); }
+  else if (act === "admin" || act === "unadmin") {
+    const on = act === "admin";
+    if (!confirm(on ? `${a.name} admin yapılsın mı?\n\nAdmin olunca bu panele kendi şifresiyle girip herkesin Küp Jetonunu, hesabını ve ayarları değiştirebilir.` : `${a.name} adlı oyuncunun admin yetkisi kaldırılsın mı?`)) return;
+    (async () => {
+      const { error } = await sb.rpc("admin_set_admin", { p_id: x.uid, p_on: on });
+      if (error) { toast("Olmadı: " + error.message, true); return; }
+      const p = DB.profiles.find(q => q.id === x.uid); if (p) p.is_admin = on;
+      logAct(`${a.name}: ${on ? "admin yapıldı" : "admin yetkisi kaldırıldı"}`);
+      toast(on ? `🛡️ ${a.name} artık admin` : `${a.name} artık normal oyuncu`); render();
+    })();
+    return;
+  }
+  else if (act === "saveDel") {
+    const g = GAMES.find(q => q.id === b.dataset.g) || { title: b.dataset.g };
+    if (!confirm(`${a.name} adlı oyuncunun ${g.title} ilerlemesi silinsin mi? Oyuncu bu oyuna sıfırdan başlar.`)) return;
+    DB.saves = DB.saves.filter(s => !(s.user_id === x.uid && s.game === b.dataset.g));
+    bg(sb.from("game_saves").delete().eq("user_id", x.uid).eq("game", b.dataset.g), "Oyun kaydı");
+    logAct(`${a.name}: ${g.title} oyun kaydı silindi`); toast("Oyun kaydı silindi");
+  }
+  else if (act === "pass") {
+    const np = $("newPass").value;
+    if (np.length < 6) { toast("Şifre en az 6 karakter olmalı", true); return; }
+    if (!confirm(`${a.name} adlı oyuncunun şifresi "${np}" olarak değiştirilsin mi?`)) return;
+    (async () => {
+      const { error } = await sb.rpc("admin_set_password", { p_id: x.uid, p_new: np });
+      if (error) { toast("Olmadı: " + error.message, true); return; }
+      $("newPass").value = ""; logAct(`${a.name}: şifre sıfırlandı`); toast(`🔒 ${a.name} artık yeni şifreyle girebilir`);
+    })();
+    return;
+  }
+  else if (act === "daily") { a.lastDaily = ""; putUser(x.uid, a); logAct(`${a.name}: günlük ödül yenilendi`); toast("Günlük ödül tekrar alınabilir"); }
+  else if (act === "delete") {
+    askDelete(a.name, async () => {
+      // Hesap sunucudan silinir (satın alımları ve hediyeleri de gider)
+      const { error } = await sb.rpc("admin_delete_user", { p_id: x.uid });
+      if (error) { toast("Silinemedi: " + error.message, true); return; }
+      DB.profiles = DB.profiles.filter(p => p.id !== x.uid);
+      DB.gifts = DB.gifts.filter(g => g.to_id !== x.uid);
+      DB.purchases = DB.purchases.filter(p => p.user_id !== x.uid); delete DB.buysBy[x.uid];
+      logAct(`Hesap silindi: ${a.name}`); closeDrawer(); toast("Hesap silindi"); render();
+    });
+    return;
+  }
+  render();
+});
+
+// Sayfa geneli tıklamalar: kullanıcı satırı, "Tümü" bağlantıları
+$("page").addEventListener("click", e => {
+  if (!sessionOk()) { logout(); return; }
+  const u = e.target.closest("[data-user]"), to = e.target.closest("[data-goto]");
+  if (to) go(to.dataset.goto);
+  else if (u) openDrawer(u.dataset.user);
+});
+
+// Grafik ipucu (çubuklar)
+$("page").addEventListener("mousemove", e => {
+  const r = e.target.closest("[data-tip]"), t = $("tip");
+  if (!r) { t.style.display = "none"; return; }
+  t.innerHTML = r.dataset.tip; t.style.display = "block";
+  t.style.left = Math.min(e.clientX + 14, innerWidth - t.offsetWidth - 8) + "px"; t.style.top = (e.clientY + 14) + "px";
+});
+$("page").addEventListener("mouseleave", () => $("tip").style.display = "none");
+
+// ================================================================ Başlat
+// Kayıtlı admin oturumu varsa (sayfa yenilendi) şifre sormadan aç
+(async () => {
+  if (!sb) { $("loginErr").textContent = "Sunucu kütüphanesi yüklenemedi. İnterneti kontrol edip sayfayı yenile."; return; }
+  const { data } = await sb.auth.getSession();
+  if (!data.session) return;
+  const name = await checkAdmin(data.session.user);
+  if (!name) { await sb.auth.signOut(); return; }
+  adminSession = data.session; adminName = name;
+  enterApp();
+})();
+sb && sb.auth.onAuthStateChange((ev, s) => { if (adminSession && s) adminSession = s; if (ev === "SIGNED_OUT" && adminSession) logout(); });
+</script>
+</body>
+</html>

@@ -1,0 +1,1978 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Küp Evreni</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#0d0e12">
+<!--
+  Küp Evreni: tüm oyunların tek yerden oynandığı platform (Roblox benzeri).
+  - Ana sayfa: oyun kartları, devam et, günlük Küp Jeton ödülü
+  - Avatar: renk, yüz ve aksesuar (oyunlara aktarılır)
+  - Profil: oyun süreleri, istatistikler, rozetler
+  - Oyunlar iframe içinde açılır. Platform ↔ oyun iletişimi postMessage ile (protokol INDEX.md'de).
+-->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/dist/umd/supabase.min.js"></script>
+<style>
+  :root {
+    --bg: #111216;
+    --surface: #1b1d23;
+    --surface2: #23262e;
+    --line: rgba(255, 255, 255, 0.09);
+    --text: #f2f3f5;
+    --muted: #9da1ab;
+    --accent: #00a2ff;
+    --play: #00b06f;
+    --gold: #ffd166;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: "Trebuchet MS", system-ui, sans-serif; }
+  button { font: inherit; color: inherit; }
+  a { color: var(--accent); }
+
+  /* Uygulama hissi: tarayıcı davranışlarını kapat */
+  html, body { overscroll-behavior: none; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none;
+    -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+  body { -webkit-user-select: none; user-select: none; }
+  input, textarea, select, [contenteditable] { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
+  img, canvas { -webkit-user-drag: none; }
+  button, a, [onclick], .game, .tile, label { touch-action: manipulation; }
+  button:focus:not(:focus-visible) { outline: none; }
+  @media (pointer: coarse) {
+    * { scrollbar-width: none; }
+    *::-webkit-scrollbar { display: none; }
+    button:not(:disabled), .game { transition: transform 0.08s, filter 0.08s; }
+    button:not(:disabled):active { transform: scale(0.95); filter: brightness(0.9); }
+    .game:active .thumb { transform: scale(0.96); filter: brightness(0.9); }
+  }
+
+  /* Üst çubuk */
+  #top { position: fixed; top: 0; left: 0; right: 0; height: 56px; display: flex; align-items: center; gap: 14px;
+    padding: 0 16px; background: var(--surface); border-bottom: 1px solid var(--line); z-index: 5; }
+  #logo { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 19px; letter-spacing: 0.02em; cursor: pointer; }
+  #logo i { width: 26px; height: 26px; background: var(--text); transform: rotate(14deg); border-radius: 4px; display: grid; place-items: center; }
+  #logo i::after { content: ""; width: 9px; height: 9px; background: var(--surface); }
+  #search { flex: 1; max-width: 420px; height: 36px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg);
+    color: var(--text); padding: 0 12px; font: inherit; }
+  #topRight { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+  #indirKutu { position: relative; }
+  #btnIndir { background: #00a2ff; color: #fff; font-weight: 700; font-size: 14px; padding: 8px 14px; border-radius: 10px; border: 0; cursor: pointer; white-space: nowrap; font-family: inherit; }
+  #btnIndir:hover { background: #33b5ff; }
+  #indirMenu { display: none; position: absolute; right: 0; top: calc(100% + 8px); min-width: 270px; background: #1b1d24; border: 1px solid #2c2f3a; border-radius: 14px; padding: 6px; box-shadow: 0 14px 40px rgba(0,0,0,0.45); z-index: 60; }
+  #indirKutu.acik #indirMenu { display: block; }
+  #indirMenu a { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px; color: #fff; text-decoration: none; }
+  #indirMenu a:hover { background: #262935; }
+  #indirMenu a > span:first-child { font-size: 24px; }
+  #indirMenu b { display: block; font-size: 15px; }
+  #indirMenu small { display: block; color: #9aa0ad; font-size: 12px; margin-top: 2px; white-space: nowrap; }
+  #jeton { background: var(--surface2); padding: 6px 12px; border-radius: 10px; font-weight: 700; color: var(--gold); white-space: nowrap;
+    border: 0; cursor: pointer; font: inherit; font-weight: 700; color: var(--gold); }
+  .earn { display: grid; grid-template-columns: 44px 1fr auto; gap: 12px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--line); }
+  .earn .ico { font-size: 30px; text-align: center; }
+  .earn .amt { color: var(--gold); font-weight: 700; white-space: nowrap; }
+  .pbar { height: 8px; background: var(--surface2); border-radius: 6px; overflow: hidden; margin-top: 6px; }
+  .pbar i { display: block; height: 100%; background: var(--play); }
+  #me { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+  #meFace { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-size: 18px; }
+
+  /* Gezinme */
+  #nav { position: fixed; top: 56px; bottom: 0; left: 0; width: 200px; padding: 14px 10px; background: var(--surface);
+    border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; z-index: 4; }
+  #nav button { text-align: left; background: none; border: 0; padding: 10px 12px; border-radius: 10px; cursor: pointer; font-size: 16px; }
+  #nav button.on { background: var(--surface2); }
+  @media (hover: hover) { #nav button:hover { background: var(--surface2); } }
+  main { margin: 56px 0 0 200px; padding: 22px 26px 60px; }
+  .page { display: none; max-width: 1180px; }
+  .page.on { display: block; }
+  h1 { font-size: 28px; margin: 4px 0 16px; }
+  h2 { font-size: 19px; margin: 26px 0 12px; }
+  .muted { color: var(--muted); }
+
+  /* Karşılama */
+  #hello { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+  #helloAvatar { width: 92px; height: 92px; border-radius: 50%; background: var(--surface2); overflow: hidden; }
+  #helloAvatar canvas { width: 100%; height: 100%; display: block; }
+  #daily { margin-left: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px 16px;
+    display: flex; align-items: center; gap: 12px; }
+  .btn { border: 0; border-radius: 10px; padding: 10px 16px; cursor: pointer; font-weight: 700; background: var(--surface2); }
+  .btn.play { background: var(--play); color: #fff; }
+  .btn.blue { background: var(--accent); color: #fff; }
+  .btn.red { background: #e63946; color: #fff; }
+  .btn:disabled { opacity: 0.45; cursor: default; }
+
+  /* Oyun kartları */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 16px; }
+  .row { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(190px, 220px); gap: 16px; overflow-x: auto; padding-bottom: 6px; }
+  .game { background: none; border: 0; padding: 0; text-align: left; cursor: pointer; }
+  .thumb { aspect-ratio: 1; border-radius: 14px; position: relative; overflow: hidden; display: grid; place-items: center; font-size: 74px;
+    box-shadow: inset 0 0 0 1px var(--line); transition: transform 0.12s; }
+  @media (hover: hover) { .game:hover .thumb { transform: translateY(-3px); } }
+  .thumb .tag { position: absolute; left: 8px; top: 8px; background: rgba(0,0,0,0.55); font-size: 12px; padding: 3px 8px; border-radius: 8px; }
+  .thumb .gift { position: absolute; left: 8px; bottom: 8px; background: #ffb703; color: #1b1b1b; font-size: 12px; font-weight: 700; padding: 3px 8px; border-radius: 8px; }
+  .thumb .mp { position: absolute; right: 8px; bottom: 8px; background: #4a5ad8; color: #fff; font-size: 12px; font-weight: 700; padding: 3px 8px; border-radius: 8px; }
+  .thumb .new { position: absolute; right: 8px; top: 8px; background: #ff3b5c; color: #fff; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 8px; letter-spacing: 0.04em; }
+  .banner { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 14px; margin-bottom: 14px; font-weight: 700; line-height: 1.4;
+    border: 1px solid rgba(255,255,255,0.12); }
+  .banner .bi { font-size: 22px; }
+  .banner .bx { margin-left: auto; flex: none; width: 32px; height: 32px; border-radius: 8px; border: 0; background: rgba(255,255,255,0.08); cursor: pointer; font-size: 15px; opacity: 0.8; }
+  @media (hover: hover) { .banner .bx:hover { background: rgba(255,255,255,0.18); opacity: 1; } }
+  .banner.info { background: linear-gradient(90deg, rgba(0,162,255,0.22), rgba(0,162,255,0.08)); }
+  .banner.success { background: linear-gradient(90deg, rgba(0,176,111,0.24), rgba(0,176,111,0.08)); }
+  .banner.warn { background: linear-gradient(90deg, rgba(255,209,102,0.24), rgba(255,209,102,0.08)); }
+  .banner.event { background: linear-gradient(90deg, rgba(167,112,255,0.3), rgba(255,94,170,0.14)); }
+  .setRow { display: flex; align-items: center; gap: 14px; justify-content: space-between; max-width: 560px; background: var(--surface);
+    border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; }
+  .switch { flex: none; width: 52px; height: 30px; border-radius: 15px; border: 0; background: var(--surface2); position: relative; cursor: pointer; padding: 0; }
+  .switch::after { content: ""; position: absolute; left: 3px; top: 3px; width: 24px; height: 24px; border-radius: 50%; background: #c9ccd3; transition: left 0.15s, background 0.15s; }
+  .switch.on { background: var(--play); }
+  #lvBox { display: flex; align-items: center; gap: 10px; margin-top: 8px; max-width: 420px; }
+  #lvNum { flex: none; background: #3a2f0b; color: var(--gold); border: 1px solid #6b5a1e; border-radius: 10px; padding: 2px 10px; font-weight: 800; font-size: 14px; }
+  .lvBar { flex: 1; height: 8px; border-radius: 4px; background: var(--surface2); overflow: hidden; }
+  .lvBar i { display: block; height: 100%; background: var(--gold); border-radius: 4px; }
+  #lvTxt { flex: none; font-size: 12px; }
+  .setRow + .setRow { margin-top: 8px; }
+  .rng { flex: 1; max-width: 260px; accent-color: var(--accent); margin: 0; }
+  .rngV { min-width: 52px; text-align: right; font-size: 14px; }
+  .navBadge { display: inline-block; min-width: 20px; padding: 0 6px; border-radius: 10px; background: #e63946; color: #fff; font-size: 12px; line-height: 20px; text-align: center; margin-left: 4px; }
+  .seg { display: inline-flex; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 3px; gap: 3px; }
+  .seg button { border: 0; background: none; color: var(--muted); font: inherit; font-size: 14px; padding: 8px 12px; border-radius: 9px; cursor: pointer; }
+  .seg button.on { background: var(--surface2); color: var(--text); font-weight: 700; }
+  .lrow { display: flex; align-items: center; gap: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; margin-top: 8px; max-width: 640px; }
+  .lrow.me { border-color: var(--accent); background: #10263a; }
+  .lrow .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lrow .rk { width: 44px; text-align: center; font-weight: 700; color: var(--muted); }
+  .lrow .val { font-weight: 700; color: var(--gold); white-space: nowrap; }
+  .lrow .sub { font-size: 13px; color: var(--muted); }
+  .lrow .on { color: #7ed957; }
+  #chatSheet { max-width: 520px; height: min(640px, 90vh); display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+  #chatHead { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  #chatWho { flex: 1; display: flex; align-items: center; gap: 10px; min-width: 0; font-weight: 700; }
+  #chatList { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+  #chatBar { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--line); }
+  #chatInput { flex: 1; min-width: 0; height: 44px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--text); padding: 0 12px; font: inherit; }
+  .msg { max-width: 78%; padding: 8px 12px; border-radius: 14px; background: var(--surface2); align-self: flex-start; word-wrap: break-word; }
+  .msg.me { align-self: flex-end; background: #0b5ea8; }
+  .msg .t { font-size: 11px; opacity: 0.6; text-align: right; margin-top: 2px; }
+  .msg.inv { min-width: 220px; }
+  #supSheet { max-width: 520px; height: min(640px, 90vh); display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+  #supHead { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--line); font-weight: 700; }
+  #supList { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+  #supList .msg.adm { background: #1d5e3a; }
+  #supList .msg .who { font-size: 11px; font-weight: 700; opacity: .75; margin-bottom: 2px; }
+  #supChips { display: flex; gap: 6px; flex-wrap: wrap; padding: 0 10px 8px; }
+  #supChips button { border: 1px solid var(--line); background: var(--bg); color: var(--text); border-radius: 999px; padding: 6px 11px; font: inherit; font-size: 13px; cursor: pointer; }
+  #supChips button:hover { background: var(--surface2); }
+  #supBar { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--line); }
+  #supInput { flex: 1; min-width: 0; height: 44px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--text); padding: 0 12px; font: inherit; }
+  #supMode { font-size: 12px; text-align: center; padding: 6px 10px 0; }
+  #supMode.adm { color: #6fdc9a; }
+  .unread { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 9px; background: #e63946; color: #fff; font-size: 12px; line-height: 18px; text-align: center; }
+  .circ { flex: none; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; color: #fff; }
+  .switch.on::after { left: 25px; background: #fff; }
+  .banner.fresh { background: linear-gradient(90deg, rgba(255,59,92,0.28), rgba(255,122,69,0.1)); }
+  .price { font-size: 12px; color: var(--gold); font-weight: 700; margin-left: 4px; }
+  /* Günlük görevler */
+  #quests { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
+  .quest { display: grid; grid-template-columns: 40px 1fr auto; gap: 10px; align-items: center; background: var(--surface); border: 1px solid var(--line);
+    border-radius: 14px; padding: 12px 14px; }
+  .quest .qi { font-size: 28px; text-align: center; }
+  .quest b { display: block; font-size: 15px; }
+  .quest .qp { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .quest .pbar { margin-top: 6px; }
+  .quest .qr { color: var(--gold); font-weight: 700; white-space: nowrap; font-size: 14px; }
+  .quest.ready { border-color: var(--play); box-shadow: 0 0 0 1px var(--play) inset; }
+  .quest.done { opacity: 0.55; }
+  .quest .btn { padding: 8px 12px; font-size: 14px; white-space: nowrap; }
+  .thumb .soon { position: absolute; inset: 0; background: rgba(10,10,14,0.6); display: grid; place-items: center; font-size: 16px; font-weight: 700; }
+  .game b { display: block; margin-top: 8px; font-size: 16px; }
+  .game span { display: block; font-size: 13px; color: var(--muted); }
+
+  /* Modallar */
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: none; align-items: center; justify-content: center; padding: 16px; z-index: 20; }
+  .modal.on { display: flex; }
+  .sheet { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; width: 100%; max-width: 640px; max-height: 92vh; overflow: auto; }
+  .sheet .hero { height: 170px; display: grid; place-items: center; font-size: 96px; border-radius: 18px 18px 0 0; }
+  .sheet .body { padding: 18px 22px 22px; line-height: 1.5; }
+  .sheet h1 { margin: 0 0 4px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin: 14px 0; }
+  .stat { background: var(--surface2); border-radius: 12px; padding: 10px 12px; }
+  .stat b { display: block; font-size: 18px; }
+  .stat span { font-size: 12px; color: var(--muted); }
+  #nameSheet input, #profile input:not([type=range]), #friends input, #leaders select { width: 100%; height: 44px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg);
+    color: var(--text); padding: 0 12px; font: inherit; font-size: 17px; margin: 10px 0; }
+  #buySheet { max-width: 380px; text-align: center; }
+  #buyModal { z-index: 50; } /* oyun ekranının (#player) üstünde açılmalı */
+
+  /* Avatar */
+  #avatarWrap { display: grid; grid-template-columns: minmax(260px, 380px) 1fr; gap: 22px; align-items: start; }
+  #avatarView { aspect-ratio: 3 / 4; background: radial-gradient(circle at 50% 30%, #2c3140, #15171c); border-radius: 18px; overflow: hidden; touch-action: none; }
+  #avatarView canvas { width: 100%; height: 100%; display: block; }
+  .swatches { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 14px; }
+  .sw { width: 38px; height: 38px; border-radius: 10px; border: 3px solid transparent; cursor: pointer; }
+  .sw.on { border-color: #fff; }
+  .chip { padding: 8px 12px; border-radius: 10px; border: 2px solid var(--line); background: var(--surface2); cursor: pointer; }
+  .chip.on { border-color: var(--accent); }
+
+  /* Rozetler */
+  .badges { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .badge { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px; text-align: center; }
+  .badge div { font-size: 34px; }
+  .badge.off { opacity: 0.35; filter: grayscale(1); }
+
+  /* Oyun ekranı */
+  #player { position: fixed; inset: 0; background: #000; display: none; z-index: 30; }
+  #player.on { display: block; }
+  #playerBar { position: absolute; top: 0; left: 0; right: 0; height: 40px; display: flex; align-items: center; gap: 10px; padding: 0 10px;
+    background: rgba(17,18,22,0.92); border-bottom: 1px solid var(--line); z-index: 2; }
+  #playerBar .btn { padding: 6px 12px; font-size: 14px; }
+  #frame { position: absolute; top: 40px; left: 0; width: 100%; height: calc(100% - 40px); border: 0; display: block; background: #000; }
+  #toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #fff; color: #111; padding: 10px 16px; border-radius: 12px;
+    font-weight: 700; display: none; z-index: 40; }
+
+  /* Açılış ekranı (hesap yokken) */
+  #landing { position: fixed; inset: 0; z-index: 15; background: var(--bg); overflow-y: auto; display: none; }
+  #landing.on { display: block; }
+  #lHero { position: relative; min-height: 70vh; display: flex; align-items: center; padding: 90px 60px 60px; overflow: hidden;
+    background: linear-gradient(180deg, rgba(17,18,22,0) 55%, var(--bg) 100%), radial-gradient(circle at 70% 40%, #ffe9a8 0, #f4b860 18%, #6a8fb8 48%, #1d2b44 100%); }
+  #lTop { position: absolute; top: 0; left: 0; right: 0; display: flex; align-items: center; padding: 22px 60px; z-index: 2; }
+  #lTop #lLogo { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 22px; letter-spacing: 0.04em; }
+  #lTop #lLogo i { width: 26px; height: 26px; background: #fff; transform: rotate(14deg); border-radius: 4px; display: grid; place-items: center; }
+  #lTop #lLogo i::after { content: ""; width: 9px; height: 9px; background: #1d2b44; }
+  #btnLogin { margin-left: auto; background: rgba(255,255,255,0.18); backdrop-filter: blur(6px); color: #fff; padding: 12px 22px; }
+  #lText { position: relative; z-index: 2; max-width: 620px; text-shadow: 0 2px 18px rgba(0,0,0,0.45); }
+  #lText h1 { font-size: clamp(40px, 7vw, 76px); line-height: 1.05; margin: 0 0 18px; font-weight: 800; letter-spacing: -0.02em; }
+  #lText p { font-size: 18px; line-height: 1.5; margin: 0 0 26px; max-width: 520px; }
+  #lText .btn { padding: 14px 18px; font-size: 18px; }
+  #lAvatar { position: absolute; right: 8%; bottom: 0; width: min(42vw, 460px); height: 90%; }
+  #lAvatar canvas { width: 100%; height: 100%; display: block; }
+  .cube { position: absolute; border-radius: 6px; background: rgba(255,255,255,0.22); animation: float 7s ease-in-out infinite; }
+  @keyframes float { 50% { transform: translateY(-22px) rotate(25deg); } }
+  #lGames { padding: 10px 60px 60px; }
+  #lVideo { padding: 44px 60px 26px; }
+  #lVideo video { display: block; width: 100%; max-width: 980px; aspect-ratio: 16 / 9; margin-top: 14px; border-radius: 18px; background: #000; border: 1px solid #2a2d38; box-shadow: 0 18px 50px rgba(0,0,0,0.45); }
+  #lGames .row { grid-auto-columns: minmax(240px, 1fr); }
+  #lGames .thumb { aspect-ratio: 16 / 9; }
+  #lCta { position: relative; min-height: 78vh; display: grid; place-items: center; text-align: center; overflow: hidden;
+    background: linear-gradient(180deg, #0d0e11, #141519); }
+  #lCta .gridBg { position: absolute; inset: -20%; pointer-events: none;
+    background-image: linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px);
+    background-size: 52px 52px; transform: perspective(900px) rotateX(18deg) scale(1.15); animation: gridWave 14s ease-in-out infinite;
+    -webkit-mask-image: radial-gradient(ellipse at center, transparent 8%, #000 45%, transparent 80%); mask-image: radial-gradient(ellipse at center, transparent 8%, #000 45%, transparent 80%); }
+  @keyframes gridWave { 50% { transform: perspective(900px) rotateX(10deg) rotateZ(2deg) scale(1.2); } }
+  #lCta h1 { position: relative; font-size: clamp(34px, 4.5vw, 52px); line-height: 1.15; font-weight: 800; margin: 0 0 30px; }
+  #lCta .btn { position: relative; padding: 16px 0; width: 250px; font-size: 18px; background: #335fff; }
+  .accRow { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px; margin: 6px 0; border-radius: 12px; border: 1px solid var(--line);
+    background: var(--surface2); cursor: pointer; text-align: left; }
+  @media (hover: hover) { .accRow:hover { border-color: var(--accent); } }
+  .accRow .face { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; font-size: 22px; }
+
+  @media (max-width: 760px) {
+    #lHero { padding: 90px 16px 40px; min-height: 80vh; align-items: flex-end; }
+    #lTop { padding: 16px; }
+    #lGames { padding: 10px 16px 40px; }
+    #lVideo { padding: 30px 16px 16px; }
+    #lAvatar { right: -10%; width: 70vw; height: 60%; top: 60px; bottom: auto; opacity: 0.85; }
+    #nav { top: auto; bottom: 0; width: 100%; height: 62px; flex-direction: row; justify-content: space-around; padding: 6px; border-right: 0; border-top: 1px solid var(--line); }
+    #nav button { text-align: center; font-size: 13px; padding: 6px 4px; flex: 1; }
+    main { margin: 56px 0 0; padding: 16px 16px 90px; }
+    #search { display: none; }
+    #meName { display: none; }
+    #avatarWrap { grid-template-columns: 1fr; }
+    #avatarView { max-height: 52vh; aspect-ratio: auto; height: 52vh; }
+    #daily { margin-left: 0; width: 100%; }
+    .grid { grid-template-columns: repeat(2, 1fr); gap: 12px; }
+  }
+</style>
+</head>
+<body>
+<header id="top">
+  <div id="logo"><i></i>KÜP EVRENİ</div>
+  <input id="search" placeholder="🔍 Oyun ara">
+  <div id="topRight">
+    <div id="indirKutu" style="display:none">
+      <button id="btnIndir" title="Küp Evreni'yi bilgisayarına indir">⬇️ İndir ▾</button>
+      <div id="indirMenu">
+        <a href="https://mahmutaykac.itch.io/kup-evreni" target="_blank" rel="noopener"><span>🕹️</span><span><b>itch.io'da da varız</b><small>Android, Windows ve Mac</small></span></a>
+      </div>
+    </div>
+    <button id="jeton" title="Küp Jeton: platform parası. Nasıl kazanılır?">KJ 0</button>
+    <div id="me"><span id="meFace"></span><span id="meName"></span></div>
+  </div>
+</header>
+<nav id="nav">
+  <button data-page="home" class="on">🏠 Ana Sayfa</button>
+  <button data-page="avatar">🧍 Avatar</button>
+  <button data-page="friends">👥 Arkadaşlar <span id="frBadge" class="navBadge" style="display:none"></span></button>
+  <button data-page="leaders">🏆 Sıralama</button>
+  <button data-page="profile">👤 Profil</button>
+  <button data-destek>🤖 Destek</button>
+</nav>
+<main>
+  <section id="home" class="page on">
+    <div id="banners"></div>
+    <div id="hello">
+      <div id="helloAvatar"></div>
+      <div><h1 id="helloTitle" style="margin:0">Merhaba!</h1><div class="muted" id="helloSub"></div>
+        <div id="lvBox" title="Oyun oynadıkça XP kazanırsın (dakikada 10 XP). Seviye atlayınca Küp Jeton ödülü!"><span id="lvNum"></span><div class="lvBar"><i id="lvFill"></i></div><span class="muted" id="lvTxt"></span></div></div>
+      <div id="daily"><span style="font-size:28px">🎁</span><div><b>Günlük ödül</b><div class="muted" id="dailyTxt"></div></div>
+        <button class="btn blue" id="btnDaily">Al</button></div>
+    </div>
+    <div id="questWrap" style="display:none"><h2>📋 Günlük Görevler <span class="muted" id="questSub" style="font-size:14px;font-weight:400"></span></h2><div id="quests"></div></div>
+    <div id="recentWrap"><h2>Devam Et</h2><div class="row" id="recent"></div></div>
+    <h2>Tüm Oyunlar</h2>
+    <div class="grid" id="games"></div>
+  </section>
+
+  <section id="avatar" class="page">
+    <h1>Avatar</h1>
+    <div id="avatarWrap">
+      <div id="avatarView"></div>
+      <div id="avatarOpts"></div>
+    </div>
+  </section>
+
+  <section id="friends" class="page">
+    <h1>Arkadaşlar</h1>
+    <div style="display:flex;gap:10px;max-width:460px"><input id="frName" maxlength="20" placeholder="Kullanıcı adı" style="margin:0"><button class="btn blue" id="btnFrAdd">Ekle</button></div>
+    <p class="muted" style="font-size:13px;margin:8px 0 0">Arkadaşın isteği kabul edince listende görünür; çevrimiçiyse hangi oyunda olduğunu görürsün.</p>
+    <div id="frList"></div>
+  </section>
+
+  <section id="leaders" class="page">
+    <h1>Sıralama</h1>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <select id="lbGame" style="max-width:420px;margin:0"></select>
+      <div class="seg"><button data-fr="0" class="on">🌍 Herkes</button><button data-fr="1">👥 Arkadaşlarım</button></div>
+    </div>
+    <div id="lbList"></div>
+  </section>
+
+  <section id="profile" class="page">
+    <h1>Profil</h1>
+    <div class="stats" id="profStats"></div>
+    <h2>Kullanıcı adı</h2>
+    <div style="display:flex;gap:10px;max-width:420px"><input id="profName" maxlength="20"><button class="btn blue" id="btnProfName">Kaydet</button></div>
+    <h2>Şifre</h2>
+    <form id="passForm" onsubmit="return false" style="display:flex;flex-direction:column;gap:10px;max-width:420px">
+      <input id="passOld" style="margin:0" type="password" maxlength="72" placeholder="Mevcut şifre" autocomplete="current-password">
+      <input id="passNew" style="margin:0" type="password" maxlength="72" placeholder="Yeni şifre (en az 6 karakter)" autocomplete="new-password">
+      <input id="passNew2" style="margin:0" type="password" maxlength="72" placeholder="Yeni şifre (tekrar)" autocomplete="new-password">
+      <button class="btn blue" id="btnPass">Şifreyi değiştir</button>
+      <div class="muted" style="font-size:13px">Şifreni unutursan admin sıfırlayabilir.</div>
+    </form>
+    <h2>⭐ Seviye ödülleri <span class="muted" id="lvRwSub" style="font-size:14px;font-weight:400"></span></h2>
+    <div class="badges" id="lvRewards"></div>
+    <p class="muted" style="font-size:13px">Açılan ödüller Avatar sayfasında Yüz ve Aksesuar bölümünde. Her seviye atlayışta ayrıca Küp Jeton kazanırsın.</p>
+    <h2>Rozetler</h2>
+    <div class="badges" id="badges"></div>
+    <h2>Oyun istatistikleri</h2>
+    <div id="gameStats"></div>
+    <h2>Ses ve müzik</h2>
+    <div class="setRow"><div><b>🔊 Ana ses</b></div><input type="range" min="0" max="100" step="5" id="sesAna" class="rng"><span class="muted rngV" id="sesAnaV"></span></div>
+    <div class="setRow"><div><b>🎮 Oyun sesleri</b></div><input type="range" min="0" max="100" step="5" id="sesEfekt" class="rng"><span class="muted rngV" id="sesEfektV"></span></div>
+    <div class="setRow"><div><b>🎵 Müzik</b><div class="muted" style="font-size:13px;font-weight:400;margin-top:2px">Ana sayfada çalar</div></div><input type="range" min="0" max="100" step="5" id="sesMuzik" class="rng"><span class="muted rngV" id="sesMuzikV"></span></div>
+    <div class="setRow"><div><b>Oyun oynarken de müzik çal</b></div><button class="switch" id="swOyunMuzik" role="switch" aria-label="Oyun oynarken de müzik çal"></button></div>
+    <h2>Grafik modu</h2>
+    <div class="setRow"><div><b>🖥️ Grafik modu</b><div class="muted" id="grfInfo" style="font-size:13px;font-weight:400;margin-top:2px"></div></div>
+      <div class="seg" id="grfSeg"><button data-g="performans">⚡ Performans</button><button data-g="dengeli">⚖️ Dengeli</button><button data-g="yuksek">✨ Yüksek</button></div></div>
+    <h2>Uygulama</h2>
+    <div class="setRow"><div><b>🔄 Otomatik güncelleme</b><div class="muted" id="updInfo" style="font-size:13px;font-weight:400;margin-top:2px"></div></div>
+      <button class="switch" id="swAuto" role="switch" aria-label="Otomatik güncelleme"></button></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:10px">
+      <button class="btn" id="btnCheckUpd">🔍 Güncellemeleri denetle</button><span class="muted" id="updState" style="font-size:13px"></span></div>
+    <h2>Hesap</h2>
+    <div id="accounts" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center"></div>
+    <p class="muted" style="margin-top:18px"><a href="gizlilik.html">📄 Gizlilik ve Kullanım Koşulları</a> · <a href="#destek" data-destek>🤖 Destek Asistanı</a></p>
+    <p class="muted" style="margin-top:12px">☁️ Hesabın bulutta saklanır: başka bir cihazda kullanıcı adın ve şifrenle giriş yapınca Küp Jetonun, avatarın, rozetlerin ve oyunlardaki ilerlemen seninle gelir.</p>
+  </section>
+</main>
+
+<div class="modal" id="gameModal"><div class="sheet" id="gameSheet"></div></div>
+<div class="modal" id="chatModal"><div class="sheet" id="chatSheet">
+  <div id="chatHead"><span id="chatWho"></span><button class="btn sm" id="btnChatReport">Şikâyet</button><button class="btn sm" id="btnChatBlock">Engelle</button><button class="btn sm" id="btnChatClose">✕</button></div>
+  <div class="muted" style="font-size:11px;text-align:center;padding:6px 10px 0">🔒 Sadece arkadaşlarınla yazışırsın. Kötü sözler gizlenir; sohbetler güvenlik için admin tarafından görülebilir.</div>
+  <div id="chatList"></div>
+  <div id="chatBar"><button class="btn sm" id="btnChatInvite" title="Oyuna davet et">🎮</button><input id="chatInput" maxlength="200" placeholder="Mesaj yaz…" autocomplete="off"><button class="btn blue" id="btnChatSend">Gönder</button></div>
+</div></div>
+<div class="modal" id="pickModal"><div class="sheet" style="max-width:420px"><div class="body"><h2 id="pickTitle" style="margin-top:0"></h2><div id="pickList"></div>
+  <button class="btn" id="btnPickClose" style="width:100%;margin-top:10px">Vazgeç</button></div></div></div>
+<div id="landing">
+  <section id="lHero">
+    <div id="lTop"><div id="lLogo"><i></i>KÜP EVRENİ</div><button class="btn" id="btnLogin">Giriş yap</button></div>
+    <span class="cube" style="width:46px;height:46px;left:58%;top:18%"></span>
+    <span class="cube" style="width:22px;height:22px;left:48%;top:62%;animation-delay:-2s"></span>
+    <span class="cube" style="width:34px;height:34px;left:88%;top:26%;animation-delay:-4s"></span>
+    <div id="lAvatar"></div>
+    <div id="lText">
+      <h1>Tek platform.<br>Sonsuz macera.</h1>
+      <p>Pizza dükkânı işlet, uzayda evcil hayvan topla, adada hayatta kal. Avatarını tasarla, Küp Jeton kazan ve tüm oyunları tarayıcında oyna.</p>
+      <button class="btn blue" id="btnSignup">Hesap oluştur</button>
+    </div>
+  </section>
+  <section id="lVideo">
+    <h2 style="margin-bottom:2px">Küp Evreni'ni tanı</h2>
+    <div class="muted">45 saniyelik tanıtım</div>
+    <video src="medya/tanitim.mp4" poster="medya/tanitim.jpg" controls muted autoplay loop playsinline preload="metadata"></video>
+  </section>
+  <section id="lGames">
+    <h2 style="margin-bottom:2px">Başlamanı sağlayacak oyunlar</h2>
+    <div class="muted" style="margin-bottom:14px">Basit kontroller, bol eğlence</div>
+    <div class="row" id="lGameRow"></div>
+  </section>
+  <section id="lCta">
+    <div class="gridBg"></div>
+    <div><h1>Küp Evreni'ne<br>bugün başla</h1><button class="btn blue" id="btnSignup2">Hesap oluştur</button></div>
+  </section>
+  <footer style="text-align:center;padding:18px 16px 28px;font-size:14px" class="muted"><a href="gizlilik.html">Gizlilik ve Kullanım Koşulları</a> · <a href="#destek" data-destek>🤖 Destek</a> · <a href="https://mahmutaykac.itch.io/kup-evreni" target="_blank" rel="noopener">🕹️ itch.io'da da varız</a> · Reklam yok, gerçek parayla satın alma yok.</footer>
+</div>
+<div class="modal" id="supModal"><div class="sheet" id="supSheet">
+  <div id="supHead"><span style="font-size:26px">🤖</span><span style="flex:1">Destek Asistanı<br><span class="muted" style="font-size:12px;font-weight:400">Sorunu yaz, hemen cevaplayayım</span></span><button class="btn sm" id="btnSupClose">✕</button></div>
+  <div class="muted" id="supMode"></div>
+  <div id="supList"></div>
+  <div id="supChips"></div>
+  <div id="supBar"><input id="supInput" maxlength="500" placeholder="Sorunu yaz…" autocomplete="off"><button class="btn blue" id="btnSupSend">Gönder</button></div>
+</div></div>
+<div class="modal" id="nameModal"><div class="sheet" id="nameSheet" style="max-width:420px"><div class="body">
+  <h1 id="authTitle">👋 Hesap oluştur</h1>
+  <p class="muted" id="authSub"></p>
+  <form id="authForm" autocomplete="on" onsubmit="return false">
+    <input id="nameInput" maxlength="20" placeholder="Kullanıcı adı" autocomplete="username">
+    <input id="passInput" type="password" maxlength="72" placeholder="Şifre (en az 6 karakter)" autocomplete="new-password">
+    <div id="authErr" style="color:#ff6b6b;min-height:20px;font-size:14px;margin-bottom:6px"></div>
+    <button class="btn play" id="btnName" style="width:100%">Başla</button>
+  </form>
+  <button class="btn" id="btnAuthSwitch" style="width:100%;margin-top:10px"></button>
+  <p class="muted" style="font-size:13px;margin:10px 0 0;text-align:center">Şifreni mi unuttun? <a href="#destek" data-destek>🤖 Destek Asistanı</a>'na yaz.</p>
+  <p class="muted" style="font-size:12px;margin:10px 0 0;text-align:center">Devam ederek <a href="gizlilik.html" target="_blank">Kullanım Koşulları ve Gizlilik Politikası</a>'nı kabul etmiş olursun. 13 yaşından küçüksen önce velinden izin al.</p>
+  <div id="oldAccs"></div>
+</div></div></div>
+<div class="modal" id="earnModal"><div class="sheet" style="max-width:480px"><div class="body">
+  <h1>💎 Küp Jeton nasıl kazanılır?</h1>
+  <div class="muted" id="earnBal"></div>
+  <div id="earnList"></div>
+  <p class="muted">Küp Jeton ile oyunların içindeki KJ mağazalarından (2x Para, özel arabalar, altın top, kalıcı güçlendirmeler…) satın alım yapabilirsin.</p>
+  <button class="btn blue" style="width:100%" id="btnEarnClose">Tamam</button>
+</div></div></div>
+<div class="modal" id="buyModal"><div class="sheet" id="buySheet"><div class="body">
+  <div style="font-size:54px" id="buyIcon">🛒</div>
+  <h1 id="buyTitle" style="font-size:22px">Satın al</h1>
+  <p class="muted" id="buyGame"></p>
+  <p style="font-size:22px;font-weight:700;color:var(--gold)" id="buyPrice"></p>
+  <p class="muted" id="buyAfter"></p>
+  <div style="display:flex;gap:10px"><button class="btn" id="btnBuyNo" style="flex:1">Vazgeç</button><button class="btn play" id="btnBuyYes" style="flex:1">Satın al</button></div>
+</div></div></div>
+
+<div id="player">
+  <div id="playerBar">
+    <button class="btn" id="btnExit">← Ana sayfa</button>
+    <b id="playerTitle"></b>
+    <span style="margin-left:auto" id="playerJeton" class="muted"></span>
+    <button class="btn" id="btnFull" title="Tam ekran">⛶</button>
+  </div>
+  <iframe id="frame" allow="fullscreen; autoplay" allowfullscreen></iframe>
+</div>
+<div id="toast"></div>
+
+<script>
+"use strict";
+// Uygulama hissi: basılı tutunca tarayıcı menüsü açılmasın (metin kutuları hariç)
+addEventListener("contextmenu", e => { if (!e.target.closest("input, textarea, [contenteditable]")) e.preventDefault(); });
+const $ = id => document.getElementById(id);
+// Masaüstü sitesi (uygulamanın içi değil): oyunlar burada oynanmaz, uygulama indirilir
+const MASAUSTU = matchMedia("(pointer: fine)").matches && !/Android|iPhone|iPad/i.test(navigator.userAgent) && !/KupEvreniApp|; wv\)/.test(navigator.userAgent);
+
+// ================================================================ Oyun kataloğu
+const GAMES = [
+  { id: "pizza", title: "Pizza Kulesi Tycoon", icon: "🍕", genre: "Tycoon", url: "pizza-kulesi-tycoon/web/index.html",
+    bg: "linear-gradient(135deg,#ff7a45,#ffb703)", saveKey: "pizzaKulesi",
+    desc: "Küçük bir pizza dükkânıyla başla. Hamur aç, malzeme ekle, fırınla ve müşterilere teslim et. Kazandığın parayla fırın, menü ve masa al.",
+    controls: "Fare ile bak · WASD yürü · Shift koş · E / F etkileşim · Dokunmatik: joystick + butonlar" },
+  { id: "gezegen", title: "Evcil Hayvan Simülatörü: Gezegenler", icon: "🐾", genre: "Simülatör", url: "evcil-hayvan-gezegenler/web/index.html",
+    bg: "linear-gradient(135deg,#0b1d51,#2bb5ff)", saveKey: "evcilGezegenler",
+    desc: "Kristalleri kır, yıldız tozu topla, yumurta aç! Uzay hayvanlarını birleştirip Altın ve Gökkuşağı yap, yeni gezegenlerin kapısını aç, takas yap.",
+    controls: "Kristale tıkla · WASD yürü · sürükleyerek kamerayı çevir · E etkileşim · Dokunmatik: joystick + dokun" },
+  { id: "fabrika", title: "Kaçış Parkuru: Çılgın Fabrika", icon: "🏭", genre: "Obby", url: "cilgin-fabrika/web/index.html",
+    bg: "linear-gradient(135deg,#3a3a3a,#ff5a1f)", saveKey: "cilginFabrika",
+    desc: "10 bölümlük fabrika parkuru: bantlar, testereler, presler, lav, kaybolan zeminler ve lazerler. 10. bölümde patron Dev Öğütücü seni bekliyor! Süreni sıralamaya sok, iz ve kostüm kazan.",
+    controls: "WASD yürü · Space zıpla · sürükle: kamera · R: checkpoint'e dön · Dokunmatik: joystick + ⤒" },
+  { id: "ada", title: "Ada Hayatta Kalma: Tekne Kazası", icon: "🏝️", genre: "Hayatta Kalma", url: "tekne-kazasi/web/index.html",
+    bg: "linear-gradient(135deg,#0f7a5a,#7ad7f0)", saveKey: "tekneKazasi",
+    desc: "Teknen battı, ıssız bir adadasın! Odun, taş ve yiyecek topla, alet üret, kamp ateşi ve barınak kur. Gece kıyıdan yengeçler çıkar. Tekneyi bitir ve adadan kaç!",
+    controls: "WASD yürü · E topla · F saldır · C üretim · 1-3 ye/iç · Dokunmatik: joystick + butonlar" },
+  { id: "klavye", title: "Klavye Koşusu: +1 Hız", icon: "⌨️", genre: "Koşu", url: "asmr-klavye/web/index.html",
+    bg: "linear-gradient(135deg,#2a1f3d,#ff9ec7)", saveKey: "klavyeKosusu",
+    desc: "Dev klavye tuşlarından yapılmış yolda koş! Bastığın her tuş tatlı bir tık sesi çıkarır ve +Hız verir. 8 bölgenin duvarlarını kırıp Kupa topla, switch ve iz al, Yeniden Doğ ve daha da hızlan!",
+    controls: "WASD / oklar koş · Space zıpla · R otomatik koş · tekerlek: yakınlaş · Dokunmatik: joystick + ⤒" },
+  { id: "kasaba", title: "Kasaba Hayatı RP", icon: "🏘️", genre: "Rol Yapma", url: "kasaba-hayati/web/index.html",
+    bg: "linear-gradient(135deg,#3a86ff,#8ce99a)", saveKey: "kasabaHayati",
+    desc: "Kasabaya taşın, kendi hayatını kur! Arsaya ev yap, duvar rengini seç. Polis, Doktor, Kurye, Kafe Çalışanı ya da Öğrenci ol, görev yap, maaş al. Bisikletten spor arabaya araç sür, gece kasabayı gez. Rol adın başının üstünde!",
+    controls: "WASD yürü/sür · Space zıpla/fren · E etkileşim · F araca bin/in · H korna · P telefon · Dokunmatik: joystick + butonlar" },
+  { id: "limonata", title: "Limonata Standı", icon: "🍋", genre: "Tycoon", url: "limonata-standi/web/index.html",
+    bg: "linear-gradient(135deg,#ffe259,#ffa751)", saveKey: "limonataStandi",
+    desc: "Limon topla, sıkacakta limonata yap ve kuyruktaki müşterilere sat! Fiyatı havaya göre ayarla: güneşli günlerde herkes limonata ister. Kazandığın parayla buz makinesi, çilekli ve naneli tarifler al, standını tezgâhtan kafeye büyüt.",
+    controls: "WASD yürü · Shift koş · E etkileşim · Q/R fiyat −/+ · U yükseltmeler · sürükle: kamera · Dokunmatik: joystick + butonlar" },
+  { id: "arena", mp: true, title: "Küp Arena", icon: "🔫", genre: "Atış", url: "kup-arena/web/index.html",
+    bg: "linear-gradient(135deg,#1f2430,#e85d04)", saveKey: "kupArena",
+    desc: "Depoda 7 rakibe karşı herkes herkese ya da 🧟 Zombi Dalgaları! 14 gerçek silah: Desert Eagle, MP5, AK-47, M4A1, pompalılar, Barrett M82, M249… 3 dakikalık maçlarda kafadan vur, seri yap, parayla yeni silah al. Vurulan küp parçalarına ayrılır!",
+    controls: "Fare bak · sol tık ateş · sağ tık nişan · WASD yürü · Shift koş · Space zıpla · C çömel · R doldur · 1/2 silah · Dokunmatik: joystick + butonlar" },
+  { id: "kopuk", title: "Daha Fazla Köpük!", icon: "🫧", genre: "Simülatör", url: "kopuk-patlamasi/web/index.html",
+    bg: "linear-gradient(135deg,#3aa6e8,#d8f3ff)", saveKey: "kopukPatlamasi",
+    desc: "Küvetten köpük pompala! Köpük büyüdükçe banyoyu, evi, apartmanı, mahalleyi, şehri patlatır… sonra uzaya taşar. Pompa gücü, köpük makinesi, lastik ördekler ve renkli sabunlarla köpüğünü katla, Yeniden Köpür!",
+    controls: "Tıkla / Space pompala · WASD yürü · sürükle: kamera · U yükseltmeler · Dokunmatik: 🫧 düğmesine basılı tut + joystick" },
+  { id: "futbol", mp: true, title: "Küp Futbol", icon: "⚽", genre: "Spor", url: "kup-futbol/web/index.html",
+    bg: "linear-gradient(135deg,#1b7a3a,#7ed957)", saveKey: "kupFutbol",
+    desc: "Halı sahada 3'e 3! İki takım arkadaşınla rakip kaleye gol at. Basılı tutup güçlü şut çek, pas ver, kayarak topu kap. Top duvardan seker, berabere biterse altın gol! Kupa modunda 5 takımı sırayla yen, parayla krampon, alev ve galaksi topu al. 👥 Arkadaşlarınla 6 kişiye kadar aynı maçta oyna!",
+    controls: "WASD yürü · Shift koş · Space / sol tık şut (basılı tut = güç) · E pas · Q müdahale · sürükle: kamera · Dokunmatik: joystick + butonlar" },
+  { id: "yaris", mp: true, title: "Küp Yarışı", icon: "🏎️", genre: "Yarış", url: "kup-yarisi/web/index.html",
+    bg: "linear-gradient(135deg,#c1121f,#ffb703)", saveKey: "kupYarisi",
+    desc: "5 rakibe karşı 3 turluk araba yarışı! Virajlarda drift at, nitroyu doldur, sarı oklarla hızlan. İlk 3'e girince yeni pist açılır: Yeşil Vadi, Çöl Kanyonu, Gece Şehri. Garajda Formül K'ya kadar 5 araba, motor ve turbo yükseltmeleri. 👥 Arkadaşlarınla 6 kişiye kadar aynı pistte yarış!",
+    controls: "W/↑ gaz · S/↓ fren · A D / ← → direksiyon · Space drift · Shift nitro · R piste dön · Dokunmatik: ◀ ▶ + 🚀 💨 ▼ (gaz otomatik)" },
+  { id: "kule", title: "Kule Ustası", icon: "🧱", genre: "Beceri", url: "kule-ustasi/web/index.html",
+    bg: "linear-gradient(135deg,#2b9de8,#ff8fc7)", saveKey: "kuleUstasi",
+    desc: "Kayan bloğu tam zamanında bırak, kuleyi gökyüzüne yükselt! Taşan parça kesilip düşer, blok küçülür. Tam üstüne bırakırsan Mükemmel: seri yaparsan blok yeniden büyür. Yükseldikçe hızlanır! Altınla Neon, Şeker, Taş ve Gece blok temalarını aç. 🏆 Sıralamada en yüksek kuleyi yap!",
+    controls: "Dokun / tıkla / Space bırak · Esc / P duraklat" },
+  { id: "hayvanat", title: "Hayvanat Bahçesi Tycoon", icon: "🦁", genre: "Tycoon", url: "hayvanat-bahcesi/web/index.html",
+    bg: "linear-gradient(135deg,#2bb673,#ffd23f)", saveKey: "hayvanatBahcesi",
+    desc: "Boş bir arsada kendi hayvanat bahçeni kur! Parlayan karelere basarak yollar, çitler, tavşandan file 8 tür hayvan ve kafeler inşa et, ziyaretçilerden bilet parası topla. Bahçe tamamlanınca Yeniden Doğuş ile kalıcı gelir çarpanı kazan!",
+    controls: "WASD / oklar yürü · fareyle sürükle: kamera · tekerlek yakınlaş · E / Space yem ver · U yükseltmeler · Dokunmatik: joystick + sürükle-bak" },
+  { id: "parafabrika", title: "Para Fabrikası Tycoon", icon: "🏭", genre: "Tycoon", url: "para-fabrikasi/web/index.html",
+    bg: "linear-gradient(135deg,#19b3a6,#ff8a3d)", saveKey: "paraFabrikasi",
+    desc: "Boş arsada kendi para fabrikanı kur! Damlatıcılar banda parlak küpler bırakır, küpler fırına düşüp paraya dönüşür; kemerlerle değerini katla, ikinci katı aç, her şeyi alınca Yeniden Doğuş ile kalıcı gelir kazan!",
+    controls: "WASD / oklar yürü · fareyle sürükle: kamera · tekerlek yakınlaş · yeşil karelere basarak satın al · Esc / P menü · Dokunmatik: joystick + sürükle-bak" },
+];
+
+const BADGES = [
+  { id: "welcome", icon: "👋", name: "Hoş geldin", desc: "Küp Evreni'ne katıl" },
+  { id: "firstGame", icon: "🎮", name: "İlk oyun", desc: "Herhangi bir oyunu oyna" },
+  { id: "explorer", icon: "🧭", name: "Kâşif", desc: "Tüm hazır oyunları dene" },
+  { id: "stylish", icon: "🧢", name: "Tarz sahibi", desc: "Avatarını değiştir" },
+  { id: "hour", icon: "⏱️", name: "Bir saat", desc: "Toplam 1 saat oyna" },
+  { id: "shopper", icon: "🛍️", name: "Alışverişçi", desc: "Oyun içinde Küp Jeton ile bir şey al" },
+];
+
+// Seviyeye özel avatar ödülleri (uygulamadaki SEVIYE_ODULLERI ile aynı): seviyeye ulaşınca açılır
+const LEVEL_ITEMS = [
+  { level: 3, id: "lv3", tur: "face", emoji: "🤩", name: "Yıldız Gözler" },
+  { level: 5, id: "lv5", tur: "hat", name: "Bronz Taç", shape: "crown", color: "#cd7f32" },
+  { level: 8, id: "lv8", tur: "hat", name: "Altın Kulaklık", shape: "headphones", color: "#ffd166" },
+  { level: 10, id: "lv10", tur: "hat", name: "Gümüş Taç", shape: "crown", color: "#c0c0c0" },
+  { level: 15, id: "lv15", tur: "face", emoji: "😇", name: "Melek" },
+  { level: 20, id: "lv20", tur: "hat", name: "Altın Taç", shape: "crown", color: "#ffd700" },
+  { level: 30, id: "lv30", tur: "hat", name: "Neon Kask", shape: "helmet", color: "#00e5ff" },
+  { level: 50, id: "lv50", tur: "hat", name: "Efsane Taç", shape: "crown", color: "#b5179e" },
+];
+let SKINS = ["#ffdbac", "#f1c27d", "#e0ac69", "#c68642", "#8d5524", "#5c3a21"];
+let COLORS = ["#e63946", "#ff7a45", "#ffd166", "#06d6a0", "#118ab2", "#3a0ca3", "#7b2cbf", "#f72585", "#f2f3f5", "#2b2d42", "#6c757d", "#1b4332"];
+let HATS = [["none", "Yok"], ["cap", "Şapka"], ["crown", "Taç"], ["headphones", "Kulaklık"], ["helmet", "Uzay kaskı"]];
+let FACES = [["smile", "🙂"], ["cool", "😎"], ["wow", "😮"], ["grin", "😁"]];
+
+// ================================================================ Admin ayarları (admin/ panelinden yazılır: kupEvreniAyar)
+// eco: ödüller ve 2x etkinlik · duyuru: ana sayfa şeridi · games: gizli / bakımda / yeni · codes: promo kodlar · avatar: eklenen renk, yüz, aksesuar
+const CFG_KEY = "kupEvreniAyar";
+const BASE_AVATAR = { SKINS: [...SKINS], COLORS: [...COLORS], FACES: [...FACES], HATS: [...HATS] };
+let CFG = {};
+function loadCfg() {
+  try { CFG = JSON.parse(localStorage.getItem(CFG_KEY) || "{}") || {}; } catch (e) { CFG = {}; }
+  const av = CFG.avatar || {};
+  SKINS = [...BASE_AVATAR.SKINS, ...(av.skins || [])];
+  COLORS = [...BASE_AVATAR.COLORS, ...(av.colors || [])];
+  FACES = [...BASE_AVATAR.FACES, ...(av.faces || []).map(f => [f.id, f.emoji]), ...LEVEL_ITEMS.filter(x => x.tur === "face").map(x => [x.id, x.emoji])];
+  HATS = [...BASE_AVATAR.HATS, ...(av.hats || []).map(h => [h.id, h.name]), ...LEVEL_ITEMS.filter(x => x.tur === "hat").map(x => [x.id, x.name])];
+}
+loadCfg();
+const eco = () => ({ daily: 100, play: 15, badge: 25, start: 200, double: false, ...(CFG.eco || {}) });
+const mult = () => eco().double ? 2 : 1;
+const gameCfg = id => (CFG.games || {})[id] || {};
+const visibleGames = () => GAMES.filter(g => !gameCfg(g.id).hidden);
+const playable = g => !g.soon && !gameCfg(g.id).maint;
+const customItem = id => LEVEL_ITEMS.find(x => x.id === id) || [...(CFG.avatar?.faces || []), ...(CFG.avatar?.hats || [])].find(x => x.id === id);
+const faceEmoji = id => (FACES.find(f => f[0] === id) || FACES[0])[1];
+
+// ================================================================ Bulut (Supabase): hesaplar, Küp Jeton, hediyeler, ayarlar
+// Küp Jeton sadece sunucudaki fonksiyonlarla değişir (supabase/kurulum.sql). Tarayıcıdaki kopya sadece hızlı açılış için önbellektir.
+const SB_URL = "https://hpgfimktdcuoikgbbggk.supabase.co", SB_KEY = "sb_publishable_o212R-fxvBvUaX7RCTIVUg__NjphVnk";
+const sb = window.supabase ? window.supabase.createClient(SB_URL, SB_KEY) : null;
+let session = null;
+async function rpc(fn, args = {}) {
+  if (!sb) throw new Error("Sunucuya bağlanılamadı");
+  const { data, error } = await sb.rpc(fn, args);
+  if (error) throw new Error(String(error.message || "Sunucu hatası").replace("Rob" + "ux", "Küp Jeton")); // sunucudaki eski hata metni
+  return data;
+}
+const errMsg = e => /fetch|network|load failed/i.test(String(e && e.message)) ? "İnternet bağlantısı yok, tekrar dene" : (e && e.message) || "Hata";
+const escH = s => String(s ?? "").replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
+// Kullanıcı adı → giriş e-postası (e-posta hiç gönderilmez, sadece Supabase'in kimlik alanı)
+const TRMAP = { ç: "c", ğ: "g", ı: "i", ö: "o", ş: "s", ü: "u" };
+const slug = n => n.toLocaleLowerCase("tr").replace(/[çğıöşü]/g, c => TRMAP[c]).normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+const emailFor = n => `u.${slug(n)}@kupevreni.app`;
+
+// ================================================================ Profil (sunucudan; localStorage = önbellek)
+const KEY = "kupEvreni";
+const DEFAULT = { name: "", jeton: 0, lastDaily: "", joined: "", recent: [], playTime: {},
+  badges: { welcome: true }, purchases: [], gameStats: {},
+  avatar: { skin: SKINS[0], shirt: "#118ab2", pants: "#2b2d42", hat: "cap", hatColor: "#e63946", face: "smile" } };
+// Eski (buluttan önceki) cihaz hesapları: taşınana kadar kupEvreniHesaplar'da durur
+const ACC_KEY = "kupEvreniHesaplar";
+const readJSON = (k, fb) => { try { return JSON.parse(localStorage.getItem(k) || "null") ?? fb; } catch (e) { return fb; } };
+const writeJSON = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
+(function moveOldSlot() { // aktif eski hesap da listeye geçer, KEY artık sadece bulut önbelleği
+  const a = readJSON(KEY, null);
+  if (a && a.name && !a.cloud) { writeJSON(ACC_KEY, [a, ...readJSON(ACC_KEY, [])]); try { localStorage.removeItem(KEY); } catch (e) {} }
+})();
+const oldAccounts = () => (readJSON(ACC_KEY, []) || []).filter(a => a && a.name && !a.cloud);
+function forgetOld(name) { // taşınan hesap listeden çıkar; ne olur ne olmaz diye yedeği kalır
+  const all = readJSON(ACC_KEY, []), gone = all.filter(a => a && a.name === name);
+  writeJSON("kupEvreniEskiYedek", [...readJSON("kupEvreniEskiYedek", []), ...gone]);
+  writeJSON(ACC_KEY, all.filter(a => !(a && a.name === name)));
+}
+let profile;
+{ const c = readJSON(KEY, null); profile = c && c.cloud ? { ...DEFAULT, ...c, avatar: { ...DEFAULT.avatar, ...(c.avatar || {}) } } : structuredClone(DEFAULT); }
+function cache() { writeJSON(KEY, profile); }
+// Avatar, son oyunlar, istatistikler sunucuya biraz bekleyip toplu gider
+// (Adı pushSave olmasın: aşağıdaki oyun kaydı fonksiyonu aynı adı taşıyor ve bunu ezer, avatar sunucuya hiç gitmez.)
+function persist() { cache(); persist.n++; clearTimeout(persist.h); persist.h = setTimeout(pushProfile, 1500); }
+persist.n = 0; // her değişiklikte / gönderimde artar: o sırada gelen eski sunucu cevabı yeni avatarın üstüne yazılmasın
+async function pushProfile(keep) { // keep = sayfa kapanıyor, istek arkada tamamlansın
+  clearTimeout(persist.h); persist.h = null;
+  if (!session) return;
+  const body = { p_avatar: profile.avatar, p_recent: profile.recent, p_stats: profile.gameStats };
+  if (keep) {
+    try {
+      fetch(SB_URL + "/rest/v1/rpc/kup_save", { method: "POST", keepalive: true,
+        headers: { apikey: SB_KEY, Authorization: "Bearer " + session.access_token, "Content-Type": "application/json" },
+        body: JSON.stringify(body) });
+    } catch (e) {}
+    return;
+  }
+  persist.busy = (persist.busy || 0) + 1;
+  try { await rpc("kup_save", body); } catch (e) {}
+  persist.busy--; persist.n++;
+}
+function applyRow(r) {
+  const d = r.data || {};
+  profile = { ...structuredClone(DEFAULT), ...d, avatar: { ...DEFAULT.avatar, ...(d.avatar || {}) },
+    name: r.name, jeton: r.jeton, cloud: true, uid: session.user.id, purchases: [] };
+  cache();
+}
+async function refreshProfile() {
+  if (!sb || !session) return false;
+  const n = persist.n;
+  const { data, error } = await sb.from("profiles").select("name,jeton,data").eq("id", session.user.id).maybeSingle();
+  if (error) return false; // internet yoksa önbellekle devam
+  if (!data) { await logout(); return false; } // hesap silinmiş
+  if (persist.h || persist.busy || persist.n !== n) return true; // gönderilmemiş / gönderilmekte olan avatar değişikliği varsa üstüne yazma
+  applyRow(data);
+  return true;
+}
+async function logout() {
+  try { await sb.auth.signOut(); } catch (e) {}
+  try { localStorage.removeItem(KEY); } catch (e) {}
+  location.reload();
+}
+function setJeton(j) {
+  if (typeof j !== "number") return;
+  const changed = j !== profile.jeton;
+  profile.jeton = j; cache(); renderTop();
+  if (changed && current) sendProfile(); // açık oyundaki bakiye de güncellensin
+}
+
+function toast(msg) {
+  const t = $("toast");
+  t.textContent = msg; t.style.display = "block";
+  clearTimeout(toast.h); toast.h = setTimeout(() => t.style.display = "none", 2600);
+}
+// Küp Jeton kazanma kuralları (hepsi platformda; oyunlar Küp Jeton veremez)
+// Miktarlar admin panelinden değişebilir (eco), 2x etkinlikte iki katı
+const PLAY_REWARD_SEC = 300;   // her 5 dk oyun
+const dailyR = () => eco().daily * mult(), playR = () => eco().play * mult(), badgeR = () => eco().badge * mult();
+function badgeToast(id, amt) {
+  const b = BADGES.find(x => x.id === id);
+  profile.badges[id] = true; cache();
+  if (b && amt) toast(`${b.icon} Rozet kazandın: ${b.name} (+KJ ${amt})`);
+}
+// Rozeti sunucu verir ve Küp Jetonu ekler (Bir saat ve Alışverişçi sunucuda otomatik)
+async function award(id) {
+  if (profile.badges[id] || !session) return;
+  profile.badges[id] = true; cache();
+  try { const r = await rpc("kup_award", { p_badge: id }); setJeton(r.jeton); if (r.amount) badgeToast(id, r.amount); }
+  catch (e) { delete profile.badges[id]; cache(); }
+}
+async function claimDaily() {
+  if (profile.lastDaily === today() || !session) return;
+  $("btnDaily").disabled = true;
+  try { const r = await rpc("kup_daily"); profile.lastDaily = r.lastDaily; setJeton(r.jeton); toast(`🎁 +KJ ${r.amount}!`); }
+  catch (e) { if (/zaten/.test(e.message)) profile.lastDaily = today(); toast(errMsg(e)); }
+  renderHome();
+}
+function renderEarn() {
+  const canDaily = profile.lastDaily !== today();
+  const sec = profile.earnSec || 0;
+  const got = BADGES.filter(b => profile.badges[b.id]).length;
+  $("earnBal").textContent = `Bakiyen: KJ ${profile.jeton}`;
+  $("earnList").innerHTML = `
+    <div class="earn"><div class="ico">🎁</div><div><b>Günlük ödül</b><div class="muted">Her gün ana sayfadan al</div></div>
+      ${canDaily ? `<button class="btn blue" id="btnEarnDaily">+KJ ${dailyR()} al</button>` : `<span class="muted">Yarın tekrar ✓</span>`}</div>
+    <div class="earn"><div class="ico">⏱️</div><div><b>Oyun oyna</b><div class="muted">Her ${PLAY_REWARD_SEC / 60} dakika oyunda: sıradakine ${Math.ceil((PLAY_REWARD_SEC - sec) / 60)} dk</div>
+      <div class="pbar"><i style="width:${sec / PLAY_REWARD_SEC * 100}%"></i></div></div><span class="amt">+KJ ${playR()}</span></div>
+    <div class="earn"><div class="ico">🏅</div><div><b>Rozet kazan</b><div class="muted">${got}/${BADGES.length} rozet. Profil sayfasından hangilerinin kaldığını gör</div></div>
+      <span class="amt">+KJ ${badgeR()} her biri</span></div>
+    ${quests ? `<div class="earn"><div class="ico">📋</div><div><b>Günlük görevler</b><div class="muted">Ana sayfadaki görevleri bitir, her gün yenilenir</div></div>
+      <span class="amt">${questsLeft()}</span></div>` : ""}
+    <div class="earn"><div class="ico">🎟️</div><div><b>Promo kod</b><div style="display:flex;gap:8px;margin-top:6px">
+      <input id="promoInput" maxlength="20" placeholder="KOD" style="flex:1;min-width:0;height:38px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text);padding:0 10px;font:inherit;text-transform:uppercase">
+      <button class="btn blue" id="btnPromo">Kullan</button></div></div><span></span></div>`;
+  $("btnPromo").onclick = () => redeem($("promoInput").value);
+  $("promoInput").onkeydown = e => { if (e.key === "Enter") $("btnPromo").click(); };
+  const d = $("btnEarnDaily");
+  if (d) d.onclick = async () => { await claimDaily(); renderEarn(); };
+}
+// Promo kodlar sunucuda (oyuncular kod listesini göremez)
+async function redeem(raw) {
+  const code = String(raw || "").trim().toLocaleUpperCase("tr");
+  if (!code) return;
+  try { const r = await rpc("kup_redeem", { p_code: code }); setJeton(r.jeton); toast(`🎟️ ${code}: +KJ ${r.amount}!`); renderEarn(); }
+  catch (e) { toast(errMsg(e)); }
+}
+const fmtTime = s => s < 60 ? `${Math.round(s)} sn` : s < 3600 ? `${Math.floor(s / 60)} dk` : `${(s / 3600).toFixed(1).replace(".", ",")} sa`;
+// Gün Türkiye saatine göre döner (sunucuyla aynı)
+const today = () => new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Istanbul" });
+
+// ================================================================ Günlük görevler (sunucu: kup_quests, kup_quest_claim; ilerlemeyi kup_tick sayar)
+// quests = { d: gün, sec: { oyun: bugünkü saniye }, got: [ödülü alınanlar], defs: [{ id, target, reward }] }
+// Hedefleri ve ödülleri sunucu belirler (güne göre değişir). "Günün oyunu" tarayıcıda güne göre seçilir.
+let quests = null;
+const questNotified = new Set();
+const dayNo = d => Math.round((Date.parse(d + "T00:00:00Z") - Date.parse("2026-01-01T00:00:00Z")) / 864e5);
+function questOfDay(q) {
+  const list = visibleGames().filter(playable);
+  return list.length ? list[dayNo(q.d) % list.length] : null;
+}
+// Her görevin ilerlemesi [şu an, hedef]
+function questProgress(q, def) {
+  const sec = q.sec || {}, vals = Object.values(sec).map(Number);
+  if (def.id === "time") return [vals.reduce((s, v) => s + v, 0), def.target];
+  if (def.id === "games") return [vals.filter(v => v >= 60).length, def.target];
+  if (def.id === "game") { const g = questOfDay(q); return [g ? Number(sec[g.id] || 0) : 0, def.target]; }
+  return [["time", "games", "game"].filter(id => q.got.includes(id)).length, 3];
+}
+function questText(q, def) {
+  if (def.id === "time") return ["⏱️", `Bugün ${def.target / 60} dakika oyna`];
+  if (def.id === "games") return ["🎮", `${def.target} farklı oyun oyna (her biri en az 1 dk)`];
+  if (def.id === "game") { const g = questOfDay(q); return [g ? g.icon : "⭐", `Günün oyunu: ${g ? g.title : "—"} (5 dk oyna)`]; }
+  return ["🏅", "Üç görevin hepsini bitir"];
+}
+const questReady = (q, def) => { const [a, b] = questProgress(q, def); return !q.got.includes(def.id) && a >= b; };
+function questsLeft() {
+  if (!quests) return "";
+  const left = quests.defs.filter(d => !quests.got.includes(d.id)).reduce((s, d) => s + d.reward, 0);
+  return left ? `+KJ ${left} kaldı` : "Bugün bitti ✓";
+}
+async function loadQuests() {
+  if (!session) return;
+  try { setQuests(await rpc("kup_quests")); } catch (e) {} // sunucuda görevler yoksa bölüm gizli kalır
+}
+function setQuests(q, fromTick) {
+  if (!q || !Array.isArray(q.defs)) return;
+  const newDay = quests && quests.d !== q.d;
+  quests = { ...q, got: Array.isArray(q.got) ? q.got : [] };
+  if (newDay) questNotified.clear();
+  // Oyun oynarken görev bitince bir kez haber ver (ödül ana sayfadan alınır)
+  if (fromTick) for (const def of quests.defs) if (questReady(quests, def) && !questNotified.has(def.id)) {
+    questNotified.add(def.id); toast(`✅ Görev tamamlandı: ${questText(quests, def)[1]}. Ödülünü ana sayfadan al!`);
+  }
+  if (!current && $("home").classList.contains("on")) renderQuests();
+}
+function renderQuests() {
+  const wrap = $("questWrap");
+  if (!quests || quests.d !== today()) { wrap.style.display = "none"; if (quests && session) { quests = null; loadQuests(); } return; }
+  wrap.style.display = "block";
+  const done = quests.got.length, all = quests.defs.length;
+  $("questSub").textContent = `· ${done}/${all} · her gün yenilenir`;
+  $("quests").innerHTML = quests.defs.map(def => {
+    const [a, b] = questProgress(quests, def), [ic, txt] = questText(quests, def), got = quests.got.includes(def.id), ready = questReady(quests, def);
+    const shown = def.id === "time" || def.id === "game" ? `${Math.min(Math.floor(a / 60), b / 60)} / ${b / 60} dk` : `${Math.min(a, b)} / ${b}`;
+    const g = def.id === "game" ? questOfDay(quests) : null;
+    const act = got ? `<span class="muted">✓ Alındı</span>`
+      : ready ? `<button class="btn play" data-quest="${def.id}">+KJ ${def.reward} al</button>`
+      : g ? `<button class="btn blue" data-qplay="${g.id}">▶ Oyna</button>` : `<span class="qr">+KJ ${def.reward}</span>`;
+    return `<div class="quest ${got ? "done" : ready ? "ready" : ""}"><div class="qi">${ic}</div>
+      <div><b>${escH(txt)}</b><div class="qp">${shown}${g && !got && !ready ? ` · ödül KJ ${def.reward}` : ""}</div><div class="pbar"><i style="width:${Math.min(100, a / b * 100)}%"></i></div></div>${act}</div>`;
+  }).join("");
+}
+$("quests").addEventListener("click", async e => {
+  const p = e.target.closest("[data-qplay]");
+  if (p) { openGameSheet(p.dataset.qplay); return; }
+  const b = e.target.closest("[data-quest]");
+  if (!b || b.disabled) return;
+  b.disabled = true;
+  const id = b.dataset.quest, g = id === "game" ? questOfDay(quests) : null;
+  try {
+    const r = await rpc("kup_quest_claim", { p_quest: id, p_game: g ? g.id : null });
+    setJeton(r.jeton); setQuests(r.q);
+    toast(`📋 Görev ödülü: +KJ ${r.amount}!`);
+  } catch (err) { toast(errMsg(err)); loadQuests(); }
+});
+
+// ================================================================ Blok avatar (three.js)
+function hasWebGL() { try { return !!document.createElement("canvas").getContext("webgl"); } catch (e) { return false; } }
+const GL = hasWebGL();
+
+// Oyunların da kullandığı avatar modeli: ön yüzü +Z
+function buildAvatar(a) {
+  const g = new THREE.Group();
+  const m = c => new THREE.MeshLambertMaterial({ color: c });
+  const part = (w, h, d, c, x, y, z) => { const p = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m(c)); p.position.set(x, y, z); g.add(p); return p; };
+  const legs = [part(0.9, 2, 1, a.pants, -0.5, 1, 0), part(0.9, 2, 1, a.pants, 0.5, 1, 0)];
+  part(2, 2, 1, a.shirt, 0, 3, 0);
+  const arms = [part(0.9, 2, 1, a.skin, -1.45, 3, 0), part(0.9, 2, 1, a.skin, 1.45, 3, 0)];
+  const head = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.62, 1.2, 20), m(a.skin));
+  head.position.set(0, 4.6, 0); g.add(head);
+  const faceTex = new THREE.CanvasTexture(drawFace(a.face));
+  const face = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.9), new THREE.MeshBasicMaterial({ map: faceTex, transparent: true }));
+  face.position.set(0, 4.6, 0.63); g.add(face);
+  let hat = a.hat, hc = a.hatColor || "#e63946";
+  const ch = customItem(hat);
+  if (ch) { hat = ch.shape; hc = ch.color || hc; } // admin panelinden eklenen aksesuar
+  if (hat === "cap") {
+    const c = new THREE.Mesh(new THREE.CylinderGeometry(0.66, 0.66, 0.35, 20), m(hc)); c.position.set(0, 5.3, 0); g.add(c);
+    part(1.1, 0.08, 0.6, hc, 0, 5.15, 0.75);
+  } else if (hat === "crown") { // hazır taç altın; admin mağazasındaki taç kendi renginde
+    const cc = ch ? hc : "#ffd166";
+    const c = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.55, 0.4, 8, 1, true), new THREE.MeshLambertMaterial({ color: cc, side: THREE.DoubleSide }));
+    c.position.set(0, 5.4, 0); g.add(c);
+    for (let i = 0; i < 6; i++) { const s = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.3, 4), m(cc)); const an = i / 6 * Math.PI * 2; s.position.set(Math.cos(an) * 0.55, 5.7, Math.sin(an) * 0.55); g.add(s); }
+  } else if (hat === "headphones") {
+    const band = new THREE.Mesh(new THREE.TorusGeometry(0.7, 0.07, 8, 20, Math.PI), m(hc)); band.position.set(0, 4.75, 0); band.rotation.z = 0; g.add(band);
+    part(0.25, 0.5, 0.5, hc, -0.7, 4.6, 0); part(0.25, 0.5, 0.5, hc, 0.7, 4.6, 0);
+  } else if (hat === "helmet") {
+    const h = new THREE.Mesh(new THREE.SphereGeometry(0.95, 20, 14), new THREE.MeshLambertMaterial({ color: "#cfe8ff", transparent: true, opacity: 0.35, depthWrite: false }));
+    h.position.set(0, 4.65, 0); g.add(h);
+  } else if (hat === "tophat") {
+    const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 0.95, 0.06, 24), m(hc)); brim.position.set(0, 5.22, 0); g.add(brim);
+    const top = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 0.9, 24), m(hc)); top.position.set(0, 5.68, 0); g.add(top);
+  } else if (hat === "halo") {
+    const r = new THREE.Mesh(new THREE.TorusGeometry(0.55, 0.07, 10, 28), new THREE.MeshBasicMaterial({ color: hc })); r.rotation.x = Math.PI / 2; r.position.set(0, 5.75, 0); g.add(r);
+  } else if (hat === "horns") {
+    [-1, 1].forEach(sd => { const c = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.55, 10), m(hc)); c.position.set(sd * 0.4, 5.35, 0); c.rotation.z = -sd * 0.45; g.add(c); });
+  } else if (hat === "beanie") {
+    const b = new THREE.Mesh(new THREE.SphereGeometry(0.68, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2), m(hc)); b.position.set(0, 5.0, 0); b.scale.y = 0.9; g.add(b);
+    const p = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 8), m("#ffffff")); p.position.set(0, 5.66, 0); g.add(p);
+  }
+  g.userData = { legs, arms };
+  return g;
+}
+function drawFace(kind) {
+  const c = document.createElement("canvas"); c.width = c.height = 128;
+  const x = c.getContext("2d");
+  const cf = customItem(kind);
+  if (cf && cf.emoji) { x.font = "100px serif"; x.textAlign = "center"; x.textBaseline = "middle"; x.fillText(cf.emoji, 64, 70); return c; } // admin yüzü
+  x.fillStyle = "#1b1b1b"; x.strokeStyle = "#1b1b1b"; x.lineWidth = 7; x.lineCap = "round";
+  if (kind === "cool") { x.fillRect(22, 40, 36, 18); x.fillRect(70, 40, 36, 18); x.fillRect(56, 44, 16, 5); }
+  else { x.beginPath(); x.ellipse(44, 50, 7, kind === "wow" ? 12 : 10, 0, 0, 7); x.ellipse(84, 50, 7, kind === "wow" ? 12 : 10, 0, 0, 7); x.fill(); }
+  x.beginPath();
+  if (kind === "wow") { x.ellipse(64, 92, 10, 13, 0, 0, 7); x.fill(); }
+  else if (kind === "grin") { x.moveTo(36, 82); x.quadraticCurveTo(64, 116, 92, 82); x.closePath(); x.fill(); }
+  else { x.arc(64, 74, 26, 0.25 * Math.PI, 0.75 * Math.PI); x.stroke(); }
+  return c;
+}
+
+// Avatar sahnesi (önizleme): canvas'a bağlı küçük renderer
+function avatarStage(container, { spin = true, zoom = 1 } = {}) {
+  if (!GL) { container.innerHTML = `<div style="display:grid;place-items:center;height:100%;font-size:48px">🧍</div>`; return { update() {} }; }
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  container.innerHTML = ""; container.appendChild(renderer.domElement);
+  const scene = new THREE.Scene();
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x445566, 0.9));
+  const d = new THREE.DirectionalLight(0xffffff, 0.6); d.position.set(3, 6, 5); scene.add(d);
+  const cam = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
+  let model = null, yaw = 0.5, drag = null;
+  const st = {
+    update() {
+      if (model) scene.remove(model);
+      model = buildAvatar(profile.avatar); model.position.y = -3; scene.add(model);
+    },
+    render() {
+      const w = container.clientWidth, h = container.clientHeight;
+      if (!w || !h) return;
+      if (renderer.domElement.width !== Math.round(w * devicePixelRatio)) {
+        renderer.setPixelRatio(Math.min(2, devicePixelRatio)); renderer.setSize(w, h, false); cam.aspect = w / h; cam.updateProjectionMatrix();
+      }
+      if (spin && !drag) yaw += 0.006;
+      const dist = 13 / zoom;
+      cam.position.set(Math.sin(yaw) * dist, zoom > 1.5 ? 1.6 : 0.4, Math.cos(yaw) * dist);
+      cam.lookAt(0, zoom > 1.5 ? 1.6 : -0.2, 0);
+      renderer.render(scene, cam);
+    },
+  };
+  // Telefonda: yukarı/aşağı kaydırma sayfayı kaydırsın (pan-y), yana sürükleme avatarı döndürsün.
+  // Tarayıcı hareketi kaydırma sayınca pointercancel gelir: sürüklemeyi bırak, yoksa avatar parmağı takip etmeye devam eder.
+  renderer.domElement.style.touchAction = container.id === "avatarView" ? "none" : "pan-y";
+  container.addEventListener("pointerdown", e => { drag = e.clientX; });
+  addEventListener("pointermove", e => { if (drag !== null) { yaw -= (e.clientX - drag) * 0.01; drag = e.clientX; } });
+  addEventListener("pointerup", () => { drag = null; });
+  addEventListener("pointercancel", () => { drag = null; });
+  st.update();
+  stages.push(st);
+  return st;
+}
+const stages = [];
+(function loop() { if (!$("player").classList.contains("on")) stages.forEach(s => s.render && s.render()); requestAnimationFrame(loop); })();
+
+// ================================================================ Arayüz
+function renderTop() {
+  $("jeton").textContent = "KJ " + profile.jeton;
+  $("meName").textContent = profile.name;
+  $("meFace").style.background = profile.avatar.skin;
+  $("meFace").textContent = faceEmoji(profile.avatar.face);
+  $("playerJeton").textContent = "KJ " + profile.jeton;
+}
+
+function gameCard(g) {
+  const t = profile.playTime[g.id] || 0, gc = gameCfg(g.id), gifts = myGifts(g.id).length;
+  return `<button class="game" data-game="${g.id}">
+    <div class="thumb" style="background:${g.bg}"><span class="tag">${g.genre}</span>${gc.isNew ? '<span class="new">YENİ</span>' : ""}${gifts ? `<span class="gift">🎁 Hediye${gifts > 1 ? " ×" + gifts : ""}</span>` : ""}${g.mp ? `<span class="mp">👥 Çok oyunculu</span>` : ""}${g.icon}${g.soon ? '<div class="soon">Yakında</div>' : gc.maint ? '<div class="soon">🛠️ Bakımda</div>' : ""}</div>
+    <b>${g.title}</b><span>${g.soon ? "Geliştiriliyor" : t ? "Oynadın: " + fmtTime(t) : g.mp ? "Tek kişi ya da arkadaşlarla" : MASAUSTU ? "Uygulamada · Tek oyunculu" : "Tarayıcıda · Tek oyunculu"}</span></button>`;
+}
+// Seviye: XP = toplam oyun süresi (sn) / 6; seviye n için toplam 50·n·(n−1) XP (sunucudaki _level ile aynı)
+const nfmt = n => Math.floor(n).toLocaleString("tr-TR");
+function levelInfo() {
+  const xp = Math.floor(Object.values(profile.playTime || {}).reduce((s, v) => s + (+v || 0), 0) / 6);
+  const lv = Math.max(1, Math.min(100, Math.floor((1 + Math.sqrt(1 + 4 * xp / 50)) / 2)));
+  const cur = 50 * lv * (lv - 1), next = 50 * (lv + 1) * lv;
+  return { lv, xp, cur, next, pct: lv >= 100 ? 1 : Math.max(0, Math.min(1, (xp - cur) / (next - cur))) };
+}
+function renderHome() {
+  $("helloTitle").textContent = `Merhaba, ${profile.name || "oyuncu"}!`;
+  const total = Object.values(profile.playTime).reduce((s, v) => s + v, 0);
+  $("helloSub").textContent = total ? `Toplam oyun süren: ${fmtTime(total)}` : "Bir oyun seç ve başla!";
+  const lv = levelInfo();
+  $("lvNum").textContent = `⭐ ${lv.lv}`; $("lvFill").style.width = (lv.pct * 100).toFixed(1) + "%";
+  $("lvTxt").textContent = lv.lv >= 100 ? "En yüksek seviye" : `${nfmt(lv.xp - lv.cur)} / ${nfmt(lv.next - lv.cur)} XP`;
+  const can = profile.lastDaily !== today();
+  $("dailyTxt").textContent = can ? `+KJ ${dailyR()} seni bekliyor` : "Yarın yine gel!";
+  $("btnDaily").disabled = !can;
+  const q = $("search").value.trim().toLocaleLowerCase("tr");
+  renderBanners();
+  renderQuests();
+  const list = visibleGames().filter(g => !q || g.title.toLocaleLowerCase("tr").includes(q) || g.genre.toLocaleLowerCase("tr").includes(q));
+  $("games").innerHTML = list.map(gameCard).join("") || `<p class="muted">“${q}” için oyun bulunamadı.</p>`;
+  const recent = profile.recent.map(id => visibleGames().find(g => g.id === id)).filter(Boolean);
+  $("recentWrap").style.display = recent.length && !q ? "block" : "none";
+  $("recent").innerHTML = recent.map(gameCard).join("");
+}
+
+// ================================================================ Güncelleme (uygulama açıkken yeni sürüm)
+// Ana sayfanın sunucudaki kopyası açılıştakiyle karşılaştırılır. Fark varsa: otomatik güncelleme açıksa oyun
+// oynanmıyorken sayfa yenilenir (oyun açıksa oyun kapanınca), kapalıysa "Yeni sürüm hazır" şeridi çıkar.
+// Ayar cihazda: localStorage.kupOtoGuncelle ("0" = kapalı, varsayılan açık). Oyunlar zaten her açılışta güncel iner.
+const AUTO_UPD_KEY = "kupOtoGuncelle";
+const upd = { base: null, ready: false, busy: false, last: 0 };
+function autoUpd() { try { return localStorage.getItem(AUTO_UPD_KEY) !== "0"; } catch (e) { return true; } }
+function setAutoUpd(on) { try { localStorage.setItem(AUTO_UPD_KEY, on ? "1" : "0"); } catch (e) {} }
+function verHash(t) { let h = 2166136261; for (let i = 0; i < t.length; i++) { h ^= t.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36); }
+async function checkUpdate(manual) {
+  if (upd.busy || !location.protocol.startsWith("http")) return;
+  upd.busy = true; if (manual) renderUpd("Denetleniyor…");
+  try {
+    const r = await fetch(new URL("./", location.href).href, { cache: "no-store" });
+    if (!r.ok) throw new Error(r.status);
+    const h = verHash(await r.text());
+    upd.last = Date.now();
+    if (!upd.base) upd.base = h;
+    else if (h !== upd.base && !upd.ready) { upd.ready = true; renderBanners(); }
+    if (upd.ready) maybeApplyUpdate();
+    renderUpd(manual ? (upd.ready ? "🆕 Yeni sürüm bulundu" : "✅ En güncel sürümü kullanıyorsun") : "");
+  } catch (e) { renderUpd(manual ? "⚠️ Denetlenemedi (internet yok mu?)" : ""); }
+  upd.busy = false;
+}
+// Oyun, satın alma ya da yazı yazma sırasında yenileme yapılmaz
+function updateSafe() { const a = document.activeElement; return !current && !pendingBuy && !(a && /^(INPUT|TEXTAREA)$/.test(a.tagName)); }
+function maybeApplyUpdate() { if (upd.ready && autoUpd() && updateSafe()) applyUpdate(); }
+async function applyUpdate() {
+  toast("🔄 Yeni sürüme güncelleniyor…");
+  try { const reg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration(); if (reg) await reg.update(); } catch (e) {}
+  setTimeout(() => location.reload(), 600);
+}
+function renderUpd(state) {
+  if (!$("swAuto")) return;
+  const on = autoUpd();
+  $("swAuto").classList.toggle("on", on); $("swAuto").setAttribute("aria-checked", on);
+  $("updInfo").textContent = on ? "Açık: yeni sürüm çıkınca uygulama kendini yeniler (oyun oynarken araya girmez, oyun kapanınca güncellenir)."
+    : "Kapalı: yeni sürüm çıkınca ana sayfada \"Güncelle\" şeridi çıkar, ne zaman güncelleyeceğine sen karar verirsin.";
+  if (state !== undefined) $("updState").textContent = state || (upd.ready ? "🆕 Yeni sürüm hazır" : upd.last ? "Son denetim: " + new Date(upd.last).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : "");
+}
+setTimeout(() => checkUpdate(false), 3000);
+setInterval(() => checkUpdate(false), 10 * 60 * 1000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden && Date.now() - upd.last > 60000) checkUpdate(false); });
+
+// Android uygulaması indirme şeridi: sadece Android tarayıcıda, uygulamanın içinde değilken, kapatılmamışsa
+function showApk() {
+  if (!/Android/i.test(navigator.userAgent)) return false;
+  // Uygulamanın içindeyken (Android WebView: "; wv)") indirme şeridi çıkmasın
+  if (document.referrer.startsWith("android-app://") || /; wv\)/.test(navigator.userAgent) || matchMedia("(display-mode: standalone)").matches) return false;
+  try { return !localStorage.getItem("kupApkKapali"); } catch (e) { return true; }
+}
+// Masaüstü sitesinde sağ üstte "İndir" düğmesi: basınca Windows ve macOS seçenekleri açılır
+(() => {
+  const kutu = document.getElementById("indirKutu"), b = document.getElementById("btnIndir");
+  if (!kutu || !MASAUSTU) return;
+  kutu.style.display = "block";
+  b.onclick = e => { e.stopPropagation(); kutu.classList.toggle("acik"); };
+  document.addEventListener("click", e => { if (!kutu.contains(e.target)) kutu.classList.remove("acik"); });
+  document.addEventListener("keydown", e => { if (e.key === "Escape") kutu.classList.remove("acik"); });
+  kutu.querySelectorAll("#indirMenu a").forEach(a => a.addEventListener("click", () => kutu.classList.remove("acik")));
+})();
+// Windows bilgisayarda: Küp Evreni'nin Windows uygulaması (Godot sürümü, indir/Kup-Evreni-Kurulum.exe)
+function showWin() {
+  if (!/Windows NT/i.test(navigator.userAgent) || /KupEvreniApp/.test(navigator.userAgent)) return false;
+  try { return !localStorage.getItem("kupWinKapali"); } catch (e) { return true; }
+}
+function renderBanners() {
+  const d = CFG.duyuru, ic = { info: "📢", success: "✅", warn: "⚠️", event: "🎉", fresh: "🆕" };
+  const esc = s => String(s).replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
+  const gg = [...new Set(myGifts().map(x => x.game))].map(id => GAMES.find(g => g.id === id)).filter(Boolean);
+  $("banners").innerHTML = (upd.ready ? `<div class="banner fresh"><span class="bi">🆕</span><span>Yeni sürüm hazır!</span>
+      <button class="btn blue" id="btnUpdNow" style="margin-left:auto">🔄 Güncelle</button></div>` : "") + (gg.length ? `<div class="banner success"><span class="bi">🎁</span><span>Sana hediye var! ${gg.map(g => g.icon + " " + g.title).join(", ")} oyununu açınca eşyaların eklenecek.</span></div>` : "") +
+    (eco().double ? `<div class="banner event"><span class="bi">💎</span>2x Küp Jeton etkinliği! Günlük ödül, oyun ödülü ve rozet ödülleri iki katı.</div>` : "") +
+    (d && d.on && d.text && !annClosed(d) ? `<div class="banner ${ic[d.type] ? d.type : "info"}"><span class="bi">${ic[d.type] || "📢"}</span><span>${esc(d.text)}</span>
+      <button class="bx" id="btnAnnClose" title="Kapat" aria-label="Duyuruyu kapat">✕</button></div>` : "") +
+    (showApk() ? `<div class="banner info"><span class="bi">📱</span><span>Küp Evreni artık Android uygulaması! <a class="btn blue" href="indir/kup-evreni.apk" download style="text-decoration:none;display:inline-block;margin-left:6px">İndir (APK)</a></span>
+      <button class="bx" id="btnApkClose" title="Kapat" aria-label="Kapat">✕</button></div>` : "") +
+    (showWin() ? `<div class="banner info"><span class="bi">💻</span><span>Küp Evreni artık Windows uygulaması! <a class="btn blue" href="indir/Kup-Evreni-Kurulum.exe" download style="text-decoration:none;display:inline-block;margin-left:6px">İndir (Windows)</a></span>
+      <button class="bx" id="btnWinClose" title="Kapat" aria-label="Kapat">✕</button></div>` : "");
+  const ux = $("btnUpdNow");
+  if (ux) ux.onclick = applyUpdate;
+  const wx = $("btnWinClose");
+  if (wx) wx.onclick = () => { try { localStorage.setItem("kupWinKapali", "1"); } catch (e) {} renderBanners(); };
+  const ax = $("btnApkClose");
+  if (ax) ax.onclick = () => { try { localStorage.setItem("kupApkKapali", "1"); } catch (e) {} renderBanners(); };
+  const x = $("btnAnnClose");
+  if (x) x.onclick = () => { try { localStorage.setItem(ANN_CLOSED_KEY, String(d.at || d.text)); } catch (e) {} renderBanners(); };
+}
+// Oyuncunun kapattığı duyuru (yayın zamanıyla) hatırlanır; admin yeni duyuru yayınlayınca tekrar görünür
+const ANN_CLOSED_KEY = "kupEvreniDuyuruKapali";
+function annClosed(d) { try { return localStorage.getItem(ANN_CLOSED_KEY) === String(d.at || d.text); } catch (e) { return false; } }
+function statsFor(g) {
+  // Oyunun kendi bildirdiği özet (postMessage) yoksa localStorage'dan okumayı dene (aynı köken ise)
+  let s = profile.gameStats[g.id];
+  const owner = syncMeta()[g.saveKey];
+  if (!s && g.saveKey && (!owner || (session && owner.uid === session.user.id))) { // cihazdaki kayıt başka hesabınsa gösterme
+    try {
+      const raw = JSON.parse(localStorage.getItem(g.saveKey) || "null");
+      if (raw && g.id === "pizza") s = { "💰 Para": raw.money, "📅 Gün": raw.day };
+      if (raw && g.id === "gezegen") s = { "💫 Yıldız tozu": Math.floor(raw.dust || 0), "🐾 Hayvan": (raw.pets || []).length };
+      if (raw && g.id === "ada") s = { "📅 Gün": raw.day, "🏆 En uzun": raw.bestDay, "🏝️ Kaçış": raw.escapes };
+      if (raw && g.id === "fabrika") s = { "🏭 Bölüm": (raw.cp || 0) + 1, "💀 Ölüm": raw.deaths, "🏆 Bitirme": raw.finishes };
+    } catch (e) {}
+  }
+  return s || null;
+}
+function openGameSheet(id) {
+  const g = GAMES.find(x => x.id === id);
+  const s = statsFor(g);
+  const statHtml = s ? `<div class="stats">${Object.entries(s).map(([k, v]) => `<div class="stat"><b>${v ?? "—"}</b><span>${k}</span></div>`).join("")}</div>` : "";
+  $("gameSheet").innerHTML = `<div class="hero" style="background:${g.bg}">${g.icon}</div><div class="body">
+    <h1>${g.title}</h1><div class="muted">${g.genre} · ${g.soon ? "Yakında" : MASAUSTU ? "Bilgisayar uygulamasında oynanır" : "Tarayıcıda oynanır"}${profile.playTime[g.id] ? " · Oynadın: " + fmtTime(profile.playTime[g.id]) : ""}</div>
+    <p>${g.desc}</p>${statHtml}
+    ${g.controls ? `<p class="muted">🎮 ${g.controls}</p>` : ""}
+    <div style="display:flex;gap:10px;margin-top:14px"><button class="btn" id="btnSheetClose">Kapat</button>
+    <button class="btn play" id="btnPlay" style="flex:1;font-size:20px" ${playable(g) ? "" : "disabled"}>${g.soon ? "Yakında" : gameCfg(g.id).maint ? "🛠️ Bakımda" : MASAUSTU ? "⬇️ Oynamak için indir" : "▶ Oyna"}</button></div>
+    ${MASAUSTU && playable(g) ? `<div id="sheetIndir" style="display:none;margin-top:12px">
+      <p class="muted" style="margin:0 0 8px">${g.title} ve tüm Küp Evreni oyunları bilgisayar uygulamasında oynanır. Sistemini seç:</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <a class="btn blue" href="indir/Kup-Evreni-Kurulum.exe" download style="flex:1;text-decoration:none;text-align:center">🪟 Windows</a>
+        <a class="btn blue" href="https://github.com/MahmutAykac/kup-evreni/releases/download/mac/Kup-Evreni.dmg" style="flex:1;text-decoration:none;text-align:center">🍎 macOS</a>
+      </div></div>` : ""}</div>`;
+  $("gameModal").classList.add("on");
+  $("btnSheetClose").onclick = () => $("gameModal").classList.remove("on");
+  if (playable(g)) $("btnPlay").onclick = MASAUSTU ? () => { const k = $("sheetIndir"); k.style.display = "block"; k.scrollIntoView({ block: "nearest" }); }
+    : () => { $("gameModal").classList.remove("on"); launch(g.id); };
+}
+
+// ---------------------------------------------------------------- Avatar sayfası
+let avatarPreview = null;
+const owns = id => { const it = customItem(id); if (it && it.level) return levelInfo().lv >= it.level; return !it || !(it.price > 0) || (profile.owned || []).includes(id); };
+const priceTag = id => owns(id) ? "" : customItem(id).level ? `<span class="price">🔒 Sv ${customItem(id).level}</span>` : `<span class="price">KJ ${customItem(id).price}</span>`;
+function renderAvatarOpts() {
+  // Mağazadan silinmiş bir öğe takılıysa seçili olarak "Yok" / varsayılan yüz görünsün
+  const a = { ...profile.avatar };
+  if (!HATS.some(h => h[0] === a.hat)) a.hat = "none";
+  if (!FACES.some(f => f[0] === a.face)) a.face = "smile";
+  const sw = (key, list) => `<div class="swatches">${list.map(c => `<button class="sw ${a[key] === c ? "on" : ""}" data-k="${key}" data-v="${c}" style="background:${c}"></button>`).join("")}</div>`;
+  $("avatarOpts").innerHTML = `
+    <b>Ten rengi</b>${sw("skin", SKINS)}
+    <b>Tişört</b>${sw("shirt", COLORS)}
+    <b>Pantolon</b>${sw("pants", COLORS)}
+    <b>Yüz</b><div class="swatches">${FACES.map(([id, e]) => `<button class="chip ${a.face === id ? "on" : ""}" data-k="face" data-v="${id}" style="font-size:22px">${e}${priceTag(id)}</button>`).join("")}</div>
+    <b>Aksesuar</b><div class="swatches">${HATS.map(([id, n]) => `<button class="chip ${a.hat === id ? "on" : ""}" data-k="hat" data-v="${id}">${n}${priceTag(id)}</button>`).join("")}</div>
+    <b>Aksesuar rengi</b>${sw("hatColor", COLORS)}
+    <p class="muted">Avatarın oyunlara da taşınır (ör. Evcil Hayvan Simülatörü'nde karakterin, Pizza'da tabelan).</p>`;
+}
+$("avatarOpts").addEventListener("click", async e => {
+  const b = e.target.closest("[data-k]");
+  if (!b) return;
+  const it = customItem(b.dataset.v);
+  if (it && it.level && !owns(it.id)) { toast(`🔒 ${it.name}, Seviye ${it.level}'de açılır`); return; }
+  if (it && !owns(it.id)) { // admin mağazasından fiyatlı öğe: fiyatı sunucu kontrol eder
+    if (profile.jeton < it.price) { toast(`Yetersiz Küp Jeton: ${it.name} KJ ${it.price}`); return; }
+    if (!confirm(`${it.name} KJ ${it.price} karşılığında satın alınsın mı?`)) return;
+    try {
+      const r = await rpc("kup_buy_avatar", { p_item: it.id });
+      profile.owned = r.owned || [...(profile.owned || []), it.id];
+      setJeton(r.jeton);
+      if (r.badge) badgeToast("shopper", r.badge);
+      toast(`🛍️ ${it.name} senin!`);
+    } catch (err) { toast(errMsg(err)); return; }
+  }
+  profile.avatar[b.dataset.k] = b.dataset.v;
+  persist(); award("stylish");
+  renderAvatarOpts(); renderTop();
+  stages.forEach(s => s.update());
+});
+
+// ---------------------------------------------------------------- Profil sayfası
+function renderProfile() {
+  const total = Object.values(profile.playTime).reduce((s, v) => s + v, 0);
+  const played = GAMES.filter(g => profile.playTime[g.id]).length;
+  $("profStats").innerHTML = [
+    ["👤", profile.name, "Kullanıcı adı"], ["⭐", "Seviye " + levelInfo().lv, nfmt(levelInfo().xp) + " XP"], ["💎", "KJ " + profile.jeton, "Küp Jeton"], ["⏱️", fmtTime(total), "Toplam süre"],
+    ["🎮", `${played}/${GAMES.filter(g => !g.soon).length}`, "Oynanan oyun"], ["📅", profile.joined, "Katılma"],
+  ].map(([i, v, k]) => `<div class="stat"><b>${i} ${v}</b><span>${k}</span></div>`).join("");
+  $("profName").value = profile.name;
+  const lvNow = levelInfo().lv;
+  $("lvRwSub").textContent = `· Seviye ${lvNow}`;
+  $("lvRewards").innerHTML = LEVEL_ITEMS.map(x => `<div class="badge ${lvNow >= x.level ? "on" : ""}" style="${lvNow >= x.level ? "" : "opacity:.5"}">
+    <div style="font-size:30px;${x.tur === "hat" ? `color:${x.color}` : ""}">${x.tur === "face" ? x.emoji : "👑"}</div><b>${x.name}</b>
+    <span class="muted" style="font-size:12px">${lvNow >= x.level ? "✓ Açıldı" : "🔒 Seviye " + x.level}</span></div>`).join("");
+  renderUpd("");
+  $("accounts").innerHTML = `<span class="btn blue" style="cursor:default">👤 ${escH(profile.name)}</span>` +
+    `<button class="btn" id="btnLogout">🚪 Çıkış yap / hesap değiştir</button><button class="btn red" id="btnCloseAcc">🗑️ Hesabı kapat</button>`;
+  $("badges").innerHTML = BADGES.map(b => `<div class="badge ${profile.badges[b.id] ? "" : "off"}"><div>${b.icon}</div><b>${b.name}</b><div class="muted" style="font-size:12px">${b.desc}</div></div>`).join("");
+  $("gameStats").innerHTML = GAMES.filter(g => !g.soon).map(g => {
+    const s = statsFor(g);
+    return `<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-bottom:10px">
+      <b>${g.icon} ${g.title}</b> <span class="muted">· ${profile.playTime[g.id] ? fmtTime(profile.playTime[g.id]) : "henüz oynanmadı"}</span>
+      ${s ? `<div class="stats" style="margin:10px 0 0">${Object.entries(s).map(([k, v]) => `<div class="stat"><b>${v ?? "—"}</b><span>${k}</span></div>`).join("")}</div>` : ""}</div>`;
+  }).join("");
+}
+
+function showPage(id) {
+  document.querySelectorAll(".page").forEach(p => p.classList.toggle("on", p.id === id));
+  document.querySelectorAll("#nav button").forEach(b => b.classList.toggle("on", b.dataset.page === id));
+  if (id === "home") renderHome();
+  if (id === "avatar") { renderAvatarOpts(); if (!avatarPreview) avatarPreview = avatarStage($("avatarView"), { spin: true }); }
+  if (id === "profile") { renderProfile(); renderSes(); renderGrafik(); }
+  if (id === "friends") renderFriends(true);
+  if (id === "leaders") renderLeaders();
+  scrollTo(0, 0);
+}
+
+// ================================================================ Oyun kayıtları (bulut: game_saves tablosu)
+// Oyunlar ilerlemeyi kendi localStorage anahtarına yazar (g.saveKey) ve açılırken oradan okur. Platform oyunu açmadan önce
+// hesabın buluttaki kaydını o anahtara koyar; oynarken 20 sn'de bir, çıkışta ve sekme gizlenince değişeni geri gönderir.
+// SYNC_KEY = { saveKey: { uid, h: son eşitlenen metnin özeti, at: sunucudaki kayıt zamanı } } → bu cihazdaki kayıt kimin, gönderildi mi.
+const SYNC_KEY = "kupOyunSenk", SAVE_BACKUP = "kupOyunYedek";
+const hashStr = s => { let h = 5381; for (let i = 0; i < s.length; i++) h = (Math.imul(h, 33) ^ s.charCodeAt(i)) | 0; return (h >>> 0).toString(36) + ":" + s.length; };
+const syncMeta = () => readJSON(SYNC_KEY, {});
+const setMeta = (k, v) => { const m = syncMeta(); if (v) m[k] = v; else delete m[k]; writeJSON(SYNC_KEY, m); };
+const lsGet = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+const lsSet = (k, v) => { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} };
+// Silinmek üzere olan ama buluta gitmemiş olabilecek yerel kayıt: oyun başına son kopya saklanır (kurtarmak için)
+function backupLocal(g, txt, owner) {
+  if (!txt) return;
+  const b = readJSON(SAVE_BACKUP, {}); b[g.saveKey] = { owner: owner || "eski", at: Date.now(), txt }; writeJSON(SAVE_BACKUP, b);
+}
+// Oyun açılmadan önce: bu hesabın kaydını oyunun anahtarına yerleştir
+async function prepareSave(g) {
+  if (!g.saveKey || !sb || !session) return;
+  const uid = session.user.id, key = g.saveKey, local = lsGet(key), m = syncMeta()[key];
+  const mine = !!m && m.uid === uid;
+  const dirty = local != null ? !m || m.h !== hashStr(local) : !!(m && m.h); // gönderilmemiş değişiklik (silme dahil)
+  let row;
+  try {
+    const q = sb.from("game_saves").select("data,updated_at").eq("user_id", uid).eq("game", g.id).maybeSingle();
+    const r = await Promise.race([q, new Promise((_, no) => setTimeout(() => no(new Error("zaman aşımı")), 6000))]);
+    if (r.error) throw r.error;
+    row = r.data;
+  } catch (e) {
+    // Sunucuya ulaşılamadı: kayıt bu hesabınsa/sahipsizse yerelle oyna, başka hesabınsa boş başla
+    if (m && !mine && local != null) { backupLocal(g, local, m.uid); lsSet(key, null); setMeta(key, null); }
+    toast("⚠️ Oyun kaydı buluttan alınamadı, bu cihazdaki kayıtla açılıyor");
+    return;
+  }
+  if (mine && dirty && (!row || m.at === row.updated_at)) { await pushSave(g); return; } // bulut değişmemiş, bu cihaz daha yeni
+  if (!m && local != null && !row) { await pushSave(g); return; }                       // bulut öncesi eski kayıt → bu hesaba taşı
+  if (row) {
+    const txt = JSON.stringify(row.data);
+    if (local != null && local !== txt && (!mine || dirty)) backupLocal(g, local, m ? m.uid : null);
+    lsSet(key, txt); setMeta(key, { uid, h: hashStr(txt), at: row.updated_at });
+  } else { // bu hesabın bu oyunda kaydı yok → sıfırdan başlar (cihazdaki başka hesabın kaydı yedeklenir)
+    if (local != null && !mine) backupLocal(g, local, m ? m.uid : null);
+    lsSet(key, null); setMeta(key, { uid, h: "", at: null });
+  }
+}
+// Yerel kayıt değiştiyse buluta gönder (keep = sayfa kapanıyor, istek arkada tamamlansın)
+const pushing = {};
+async function pushSave(g, keep) {
+  if (!g || !g.saveKey || !sb || !session) return;
+  const uid = session.user.id, key = g.saveKey, local = lsGet(key), m = syncMeta()[key];
+  if (m && m.uid !== uid) return;            // başka hesabın kaydı: dokunma
+  if (!m && local == null) return;
+  const h = local == null ? "" : hashStr(local);
+  if (m && m.h === h) return;                // değişmemiş
+  let data = null;
+  if (local != null) { try { data = JSON.parse(local); } catch (e) { return; } }
+  if (keep) {
+    try {
+      fetch(SB_URL + "/rest/v1/rpc/kup_game_save", { method: "POST", keepalive: true,
+        headers: { apikey: SB_KEY, Authorization: "Bearer " + session.access_token, "Content-Type": "application/json" },
+        body: JSON.stringify({ p_game: g.id, p_data: data }) });
+    } catch (e) {}
+    return;
+  }
+  if (pushing[key]) return;
+  pushing[key] = true;
+  try { const at = await rpc("kup_game_save", { p_game: g.id, p_data: data }); setMeta(key, { uid, h, at }); }
+  catch (e) {} finally { pushing[key] = false; }
+}
+// Açık oyuna "hemen kaydet" de (oyunlar aynı kökende; fonksiyonları üst seviyede: persist(force) ya da pizza'da save())
+function flushGame() {
+  try {
+    const w = $("frame").contentWindow;
+    if (typeof w.persist === "function") w.persist(true); else if (typeof w.save === "function") w.save();
+  } catch (e) {}
+}
+document.addEventListener("visibilitychange", () => { if (document.hidden && current) { flushGame(); pushSave(current); } if (document.hidden && persist.h) pushProfile(); });
+addEventListener("pagehide", () => { if (current) { flushGame(); pushSave(current, true); } if (persist.h) pushProfile(true); }); // bekleyen avatar değişikliği yenilemede kaybolmasın
+
+// ================================================================ Oyun başlatma + köprü (postMessage)
+let current = null, playTimer = null, saveTimer = null;
+async function launch(id) {
+  const g = GAMES.find(x => x.id === id);
+  if (!playable(g)) { toast("🛠️ Bu oyun şu an bakımda"); return; }
+  current = g;
+  muzikGuncelle();
+  profile.recent = [id, ...profile.recent.filter(x => x !== id)].slice(0, 6);
+  award("firstGame");
+  if (visibleGames().filter(playable).every(x => profile.recent.includes(x.id))) award("explorer");
+  persist();
+  $("playerTitle").textContent = `${g.icon} ${g.title}`;
+  $("frame").src = "about:blank";
+  $("player").classList.add("on");
+  // Telefonda Roblox gibi: tam ekran + yatay (tarayıcı izin vermezse sessizce geç)
+  // Tüm sayfa tam ekran olmalı: yalnız #player olursa satın alma penceresi (#buyModal) görünmez
+  if (matchMedia("(pointer: coarse)").matches && document.documentElement.requestFullscreen) {
+    document.documentElement.requestFullscreen().then(() => screen.orientation && screen.orientation.lock && screen.orientation.lock("landscape")).catch(() => {});
+  }
+  document.body.style.overflow = "hidden";
+  renderTop();
+  fetchGifts(); // oyun kup:ready gönderene kadar en güncel hediyeler gelsin
+  clearInterval(playTimer);
+  // Süre ve 5 dk ödülü sunucuda sayılır (en az 8 sn arayla)
+  playTimer = setInterval(async () => {
+    if (document.hidden || !session) return;
+    try {
+      const r = await rpc("kup_tick", { p_game: id });
+      if (r.playTime) profile.playTime = r.playTime;
+      profile.earnSec = r.earnSec || 0;
+      if (r.reward) toast(`⏱️ ${PLAY_REWARD_SEC / 60} dakika oynadın: +KJ ${r.reward}`);
+      if (r.badge) badgeToast("hour", r.badge);
+      if (r.levelUp) {
+        toast(`🎉 Seviye ${r.levelUp} oldun! +KJ ${r.levelReward || 0}`);
+        const yeni = LEVEL_ITEMS.find(x => x.level === r.levelUp);
+        if (yeni) setTimeout(() => toast(`🎁 Yeni avatar ödülü açıldı: ${yeni.emoji || "👑"} ${yeni.name}`), 2500);
+      }
+      setJeton(r.jeton);
+      if (r.q) setQuests(r.q, true);
+    } catch (e) {}
+  }, 10000);
+  // Oyun açılmadan önce bu hesabın buluttaki kaydı yerleşir (tam ekran isteği tıklamaya yakın kalsın diye en sonda)
+  await prepareSave(g);
+  if (current !== g) return; // bu arada oyundan çıkıldı
+  // Önbellekteki eski oyun sürümü açılmasın (site oyunları 10 dk önbellekte tutuyor; eski sürüm yeni mesajları, ör. hediyeleri, tanımaz)
+  const dv = pendingInvite && pendingInvite.game === g.id ? pendingInvite.room : ""; pendingInvite = null;
+  $("frame").src = g.url + "?v=" + Date.now() + (dv ? "&davet=" + dv : "");
+  clearInterval(saveTimer);
+  saveTimer = setInterval(() => { if (current === g) pushSave(g); }, 20000);
+}
+// ================================================================ Ses ve müzik (bu cihazda saklanır; oyunlar "kupSes"i okuyup seslerini ayarlar)
+const SES_KEY = "kupSes";
+let sesAyar = { ana: 1, efekt: 1, muzik: 0, oyunda: false };
+try { Object.assign(sesAyar, JSON.parse(localStorage.getItem(SES_KEY) || "{}")); } catch (e) {}
+const muzikEl = new Audio("medya/muzik.m4a"); muzikEl.loop = true; muzikEl.preload = "none";
+let sesEtkilesim = false;
+function muzikGuncelle() {
+  muzikEl.volume = Math.max(0, Math.min(1, sesAyar.ana * sesAyar.muzik));
+  const calsin = sesEtkilesim && muzikEl.volume > 0.005 && !document.hidden && (!current || sesAyar.oyunda);
+  if (calsin && muzikEl.paused) muzikEl.play().catch(() => {});
+  else if (!calsin && !muzikEl.paused) muzikEl.pause();
+}
+function sesKaydet() { try { localStorage.setItem(SES_KEY, JSON.stringify(sesAyar)); } catch (e) {} muzikGuncelle(); }
+addEventListener("pointerdown", () => { if (!sesEtkilesim) { sesEtkilesim = true; muzikGuncelle(); } }, true);
+document.addEventListener("visibilitychange", muzikGuncelle);
+function renderSes() {
+  for (const [id, k] of [["sesAna", "ana"], ["sesEfekt", "efekt"], ["sesMuzik", "muzik"]]) {
+    const el = $(id), v = Math.round(sesAyar[k] * 100);
+    el.value = v; $(id + "V").textContent = v ? v + "%" : "Kapalı";
+    el.oninput = () => { sesAyar[k] = el.value / 100; $(id + "V").textContent = +el.value ? el.value + "%" : "Kapalı"; sesKaydet(); };
+  }
+  $("swOyunMuzik").classList.toggle("on", !!sesAyar.oyunda);
+  $("swOyunMuzik").setAttribute("aria-checked", String(!!sesAyar.oyunda));
+}
+// Grafik modu: oyunlar açılırken "kupGrafik"i okur (çözünürlük, gölgeler, kenar yumuşatma)
+const GRF_INFO = { performans: "Daha düşük çözünürlük, gölgeler kapalı. Kasan telefonlar için.", dengeli: "Varsayılan: iyi görüntü ve akıcılık.", yuksek: "En keskin görüntü, kenar yumuşatma açık. Güçlü cihazlar için." };
+function grfMode() { try { const m = JSON.parse(localStorage.getItem("kupGrafik") || '"dengeli"'); return GRF_INFO[m] ? m : "dengeli"; } catch (e) { return "dengeli"; } }
+function renderGrafik() {
+  const m = grfMode();
+  document.querySelectorAll("#grfSeg button").forEach(b => b.classList.toggle("on", b.dataset.g === m));
+  $("grfInfo").textContent = GRF_INFO[m] + " Bir sonraki açılan oyunda uygulanır.";
+}
+document.querySelectorAll("#grfSeg button").forEach(b => b.onclick = () => { try { localStorage.setItem("kupGrafik", JSON.stringify(b.dataset.g)); } catch (e) {} renderGrafik(); });
+$("swOyunMuzik").onclick = () => { sesAyar.oyunda = !sesAyar.oyunda; sesKaydet(); renderSes(); };
+
+// ================================================================ Arkadaşlar
+let friends = [], unreadTotal = -1, chatWith = null, chatLast = 0, chatTimer = null;
+const circ = (name, color) => `<span class="circ" style="background:${escH(color || "#3a86ff")}">${escH((name || "?").slice(0, 1).toLocaleUpperCase("tr"))}</span>`;
+function seenTxt(t) {
+  if (!t) return "Henüz oynamadı";
+  const d = (Date.now() - Date.parse(t)) / 1000;
+  return d < 3600 ? `${Math.max(1, Math.floor(d / 60))} dk önce görüldü` : d < 86400 ? `${Math.floor(d / 3600)} saat önce görüldü` : `${Math.floor(d / 86400)} gün önce görüldü`;
+}
+async function loadFriends() {
+  if (!session) return;
+  try { const r = await rpc("kup_friends"); friends = Array.isArray(r) ? r : []; } catch (e) {}
+  const prevUnread = unreadTotal;
+  unreadTotal = friends.reduce((t, f) => t + (+f.unread || 0), 0);
+  if (unreadTotal > prevUnread && prevUnread >= 0 && !(chatWith && $("chatModal").classList.contains("on")))
+    toast("💬 Yeni mesaj: " + friends.filter(f => f.unread).slice(0, 3).map(f => f.name).join(", "));
+  const n = friends.filter(f => f.state === "incoming").length + unreadTotal;
+  $("frBadge").style.display = n ? "inline-block" : "none"; $("frBadge").textContent = n;
+}
+async function renderFriends(reload) {
+  if (reload) { $("frList").innerHTML = `<p class="muted">Yükleniyor…</p>`; await loadFriends(); }
+  const grp = [["incoming", "Gelen istekler"], ["friend", "Arkadaşlarım"], ["outgoing", "Gönderilen istekler"]];
+  let html = "";
+  for (const [st, title] of grp) {
+    const l = friends.filter(f => f.state === st);
+    if (!l.length) continue;
+    const on = l.filter(f => f.online).length;
+    html += `<h2>${title} <span class="muted" style="font-size:14px;font-weight:400">· ${st === "friend" && on ? on + " çevrimiçi" : l.length}</span></h2>`;
+    for (const f of l) {
+      const g = GAMES.find(x => x.id === f.game);
+      const sub = st === "incoming" ? "Seni arkadaş olarak eklemek istiyor" : st === "outgoing" ? "İstek gönderildi, cevap bekleniyor"
+        : (f.last ? `<span style="${f.unread ? "color:var(--text);font-weight:700" : ""}">${f.last.mine ? "Sen: " : ""}${f.last.game ? "🎮 Oyun daveti" : escH(f.last.body)}</span><br>` : "")
+          + (f.online ? `<span class="on">🟢 ${g ? `Oynuyor: ${g.icon} ${escH(g.title)}` : "Çevrimiçi"}</span>` : seenTxt(f.seen));
+      const btns = st === "incoming" ? `<button class="btn blue sm" data-fa="yes" data-id="${f.id}">Kabul</button><button class="btn sm" data-fa="no" data-id="${f.id}">Reddet</button>`
+        : (st === "friend" ? `<button class="btn sm ${f.unread ? "blue" : ""}" data-fa="chat" data-id="${f.id}">💬${f.unread ? " " + f.unread : ""}</button>` : "")
+          + `<button class="btn sm" data-fa="del" data-id="${f.id}">${st === "outgoing" ? "Geri çek" : "Çıkar"}</button>`;
+      html += `<div class="lrow">${circ(f.name, f.avatar && f.avatar.shirt)}<div class="nm"><b>${escH(f.name)}</b><div class="sub">${sub}</div></div>${btns}</div>`;
+    }
+  }
+  $("frList").innerHTML = (html || `<p class="muted" style="margin-top:18px">Henüz arkadaşın yok. Yukarıdan kullanıcı adıyla ekleyebilirsin.</p>`) + `<div id="blockList"></div>`;
+  if (reload) rpc("kup_blocked").then(l => { if (!Array.isArray(l) || !l.length) return;
+    $("blockList").innerHTML = `<h2 style="font-size:16px" class="muted">Engellenenler · ${l.length}</h2>` + l.map(x => `<div class="lrow"><span class="nm">🚫 ${escH(x.name)}</span><button class="btn sm" data-unblock="${x.id}">Engeli kaldır</button></div>`).join("");
+  }).catch(() => {});
+}
+async function addFriend() {
+  const n = $("frName").value.trim();
+  if (!n) { toast("Kullanıcı adını yaz"); return; }
+  try { const r = await rpc("kup_friend_add", { p_name: n }); $("frName").value = ""; toast(r === "accepted" ? "🤝 Artık arkadaşsınız!" : "📨 İstek gönderildi"); }
+  catch (e) { toast(errMsg(e)); return; }
+  renderFriends(true);
+}
+// Gelen istek sayısı menüde görünsün: açılışta ve dakikada bir
+setTimeout(() => loadFriends(), 2500);
+setInterval(() => { if (session && !document.hidden && !current) loadFriends(); }, 60000);
+$("btnFrAdd").onclick = addFriend;
+$("frName").addEventListener("keydown", e => { if (e.key === "Enter") addFriend(); });
+$("frList").addEventListener("click", async e => {
+  const b = e.target.closest("[data-fa]"); if (!b) return;
+  if (b.dataset.fa === "chat") { openChat(friends.find(f => f.id === b.dataset.id)); return; }
+  b.disabled = true;
+  try {
+    if (b.dataset.fa === "del") await rpc("kup_friend_remove", { p_id: b.dataset.id });
+    else { await rpc("kup_friend_answer", { p_id: b.dataset.id, p_accept: b.dataset.fa === "yes" }); if (b.dataset.fa === "yes") toast("🤝 Artık arkadaşsınız!"); }
+  } catch (err) { toast(errMsg(err)); }
+  renderFriends(true);
+});
+
+// ================================================================ Sohbet (sadece arkadaşlarla; küfür ve kişisel bilgi sunucuda maskelenir)
+function msgHtml(m) {
+  const tm = new Date(m.at).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) + (m.mine ? (m.read ? " ✓✓" : " ✓") : "");
+  if (m.game) {
+    const g = GAMES.find(x => x.id === m.game), old = Date.now() - Date.parse(m.at) > 30 * 60e3 && m.room;
+    const can = g && !m.mine && !old && playable(g) && !MASAUSTU;
+    return `<div class="msg inv ${m.mine ? "me" : ""}"><b>🎮 ${g ? g.icon + " " + escH(g.title) : escH(m.game)}</b>
+      <div style="font-size:13px;opacity:.85">${m.mine ? "Oyununa davet gönderdin" : "Seni oyuna çağırıyor"}${m.room ? " · Oda " + escH(m.room) : ""}</div>
+      ${!m.mine ? (old ? `<div class="muted" style="font-size:12px">Davetin süresi doldu</div>` : can ? `<button class="btn play sm" style="margin-top:6px;width:100%" data-join="${escH(m.game)}" data-room="${escH(m.room || "")}">▶ ${m.room ? "Katıl" : "Oyna"}</button>`
+        : MASAUSTU ? `<div class="muted" style="font-size:12px">Katılmak için uygulamayı indir</div>` : "") : ""}
+      <div class="t">${tm}</div></div>`;
+  }
+  return `<div class="msg ${m.mine ? "me" : ""}">${escH(m.body)}<div class="t">${tm}</div></div>`;
+}
+async function chatLoad() {
+  if (!chatWith) return;
+  const w = chatWith;
+  let l = [];
+  try { l = await rpc("kup_msgs", { p_with: w.id, p_after: chatLast }); } catch (e) { return; }
+  if (w !== chatWith || !Array.isArray(l)) return;
+  const box = $("chatList");
+  if (!chatLast) box.innerHTML = l.length ? "" : `<p class="muted" id="chatEmpty">Henüz mesaj yok. Selam ver ya da 🎮 ile oyuna davet et!</p>`;
+  else if (l.length && $("chatEmpty")) $("chatEmpty").remove();
+  for (const m of l) { chatLast = Math.max(chatLast, m.id); box.insertAdjacentHTML("beforeend", msgHtml(m)); }
+  if (l.length) box.scrollTop = box.scrollHeight;
+}
+function openChat(f) {
+  if (!f) return;
+  chatWith = f; chatLast = 0;
+  $("chatWho").innerHTML = `${circ(f.name, f.avatar && f.avatar.shirt)}<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escH(f.name)}<br><span class="muted" style="font-size:12px;font-weight:400">${f.online ? "🟢 Çevrimiçi" : "⭐ Seviye " + (f.level || 1)}</span></span>`;
+  $("chatList").innerHTML = `<p class="muted">Yükleniyor…</p>`;
+  $("chatModal").classList.add("on");
+  chatLoad(); clearInterval(chatTimer); chatTimer = setInterval(() => { if (!document.hidden) chatLoad(); }, 4000);
+  setTimeout(() => $("chatInput").focus(), 50);
+}
+function closeChat() { $("chatModal").classList.remove("on"); clearInterval(chatTimer); chatWith = null; loadFriends().then(() => { if ($("friends").classList.contains("on")) renderFriends(false); }); }
+async function chatSend() {
+  const t = $("chatInput").value.trim(); if (!t || !chatWith) return;
+  $("btnChatSend").disabled = true;
+  try { await rpc("kup_msg_send", { p_to: chatWith.id, p_body: t }); $("chatInput").value = ""; await chatLoad(); } catch (e) { toast(errMsg(e)); }
+  $("btnChatSend").disabled = false;
+}
+// Arkadaş / oyun seçici (davet için)
+let pickCb = null;
+function openPick(title, items, cb) { $("pickTitle").textContent = title; $("pickList").innerHTML = items; pickCb = cb; $("pickModal").classList.add("on"); }
+$("btnPickClose").onclick = () => $("pickModal").classList.remove("on");
+$("pickList").addEventListener("click", e => { const b = e.target.closest("[data-pick]"); if (b && pickCb) pickCb(b.dataset.pick, b); });
+$("btnChatClose").onclick = closeChat;
+$("btnChatSend").onclick = chatSend;
+$("chatInput").addEventListener("keydown", e => { if (e.key === "Enter") chatSend(); });
+$("btnChatInvite").onclick = () => {
+  const w = chatWith;
+  openPick("Hangi oyuna çağıralım?", `<p class="muted" style="font-size:13px">Çok oyunculu oyunlarda aynı odaya çağırmak için oyunda Arkadaşlarla Oyna → Oda Kur → 👥 Arkadaşını davet et.</p>` +
+    visibleGames().filter(playable).map(g => `<button class="btn" data-pick="${g.id}" style="width:100%;margin-top:6px;text-align:left">${g.icon} ${escH(g.title)}</button>`).join(""),
+    async id => { $("pickModal").classList.remove("on");
+      try { await rpc("kup_msg_send", { p_to: w.id, p_body: "", p_game: id }); if (chatWith === w) chatLoad(); toast("📨 Davet gönderildi"); } catch (e) { toast(errMsg(e)); } });
+};
+$("chatList").addEventListener("click", e => {
+  const b = e.target.closest("[data-join]"); if (!b) return;
+  pendingInvite = b.dataset.room ? { game: b.dataset.join, room: b.dataset.room } : null;
+  closeChat(); launch(b.dataset.join);
+});
+$("btnChatReport").onclick = async () => {
+  const w = chatWith; if (!w) return;
+  const r = prompt(`${w.name} adlı oyuncuyu şikâyet et. Son mesajlarınız admin'e gönderilir ve oyuncu engellenir.\n\nNe oldu? (isteğe bağlı)`);
+  if (r === null) return;
+  try { await rpc("kup_report", { p_id: w.id, p_reason: r }); await rpc("kup_block", { p_id: w.id, p_on: true }); toast("Teşekkürler, şikâyetin admin'e iletildi."); closeChat(); renderFriends(true); }
+  catch (e) { toast(errMsg(e)); }
+};
+$("btnChatBlock").onclick = async () => {
+  const w = chatWith; if (!w) return;
+  if (!confirm(`${w.name} engellensin mi?\n\nArkadaşlığınız biter, sana mesaj ve arkadaş isteği gönderemez. Engeli Arkadaşlar sayfasının altından kaldırabilirsin.`)) return;
+  try { await rpc("kup_block", { p_id: w.id, p_on: true }); toast(`${w.name} engellendi.`); closeChat(); renderFriends(true); } catch (e) { toast(errMsg(e)); }
+};
+document.addEventListener("click", async e => {
+  const b = e.target.closest("[data-unblock]"); if (!b) return;
+  try { await rpc("kup_block", { p_id: b.dataset.unblock, p_on: false }); toast("Engel kaldırıldı"); renderFriends(true); } catch (err) { toast(errMsg(err)); }
+});
+// Oyundaki lobiden "Arkadaşını davet et" (kup:invite) → arkadaş seçici
+let pendingInvite = null;
+function inviteFromGame(room) {
+  const g = current; if (!g) return;
+  loadFriends().then(() => {
+    const l = friends.filter(f => f.state === "friend").sort((a, b) => (b.online ? 1 : 0) - (a.online ? 1 : 0));
+    openPick(`👥 ${g.title}: arkadaşını davet et`, l.length ? l.map(f => `<button class="btn" data-pick="${f.id}" style="width:100%;margin-top:6px;text-align:left">${f.online ? "🟢" : "⚪"} ${escH(f.name)}</button>`).join("")
+      : `<p class="muted">Henüz arkadaşın yok. Ana sayfadaki 👥 Arkadaşlar'dan ekleyebilirsin.</p>`,
+      async (id, b) => { b.disabled = true;
+        try { await rpc("kup_msg_send", { p_to: id, p_body: "", p_game: g.id, p_room: /^\d{4}$/.test(room) ? room : null }); b.textContent += "  ✓ Gönderildi"; } catch (e) { toast(errMsg(e)); b.disabled = false; } });
+  });
+}
+
+// ================================================================ Sıralama tabloları (sunucu: kup_leaderboard)
+const LB = { time: ["⏱️ Toplam oyun süresi", "sure"], jeton: ["💎 Küp Jeton", "sayi"],
+  pizza: ["💰 Para", "sayi"], gezegen: ["💫 Toplanan yıldız tozu", "sayi"], fabrika: ["🏁 En iyi süre", "saniye"],
+  ada: ["🏆 En uzun hayatta kalma", "gun"], klavye: ["📏 En uzak mesafe", "metre"], kasaba: ["💵 Para", "sayi"],
+  limonata: ["🍋 Satılan bardak", "sayi"], kopuk: ["🫧 Toplam köpük", "sayi"], arena: ["💀 Toplam vuruş", "sayi"],
+  futbol: ["⚽ Gol", "sayi"], yaris: ["🏆 Birincilik", "sayi"], kule: ["🏆 En yüksek kule", "blok"], hayvanat: ["💰 Toplam kazanç", "sayi"], parafabrika: ["💰 Toplam kazanç", "sayi"] };
+let lbGame = "time", lbFriends = false;
+const nf = n => Math.floor(n).toLocaleString("tr-TR");
+function lbVal(g, v) {
+  const b = (LB[g] || [])[1];
+  if (b === "sure") return fmtTime(v);
+  if (b === "saniye") { const m = Math.floor(v / 60), s = v - m * 60; return `${String(m).padStart(2, "0")}:${s.toFixed(1).padStart(4, "0").replace(".", ",")}`; }
+  if (b === "metre") return nf(v) + " m";
+  if (b === "gun") return nf(v) + " gün";
+  if (b === "blok") return nf(v) + " blok";
+  return nf(v);
+}
+async function renderLeaders() {
+  const keys = ["time", "jeton", ...visibleGames().filter(g => LB[g.id]).map(g => g.id)];
+  if (!keys.includes(lbGame)) lbGame = "time";
+  $("lbGame").innerHTML = keys.map(k => { const g = GAMES.find(x => x.id === k);
+    return `<option value="${k}" ${k === lbGame ? "selected" : ""}>${g ? `${g.icon} ${escH(g.title)} · ${LB[k][0]}` : "Genel: " + LB[k][0]}</option>`; }).join("");
+  document.querySelectorAll("#leaders .seg button").forEach(b => b.classList.toggle("on", (b.dataset.fr === "1") === lbFriends));
+  $("lbList").innerHTML = `<p class="muted">Yükleniyor…</p>`;
+  const want = lbGame + lbFriends;
+  let r;
+  try { r = await rpc("kup_leaderboard", { p_game: lbGame, p_friends: lbFriends }); }
+  catch (e) { if (want === lbGame + lbFriends) $("lbList").innerHTML = `<p style="color:#ff6b6b">${escH(errMsg(e))}</p>`; return; }
+  if (want !== lbGame + lbFriends) return;
+  const list = (r && r.list) || [], me = r && r.me;
+  const row = x => `<div class="lrow ${x.me ? "me" : ""}"><span class="rk" style="${x.rank <= 3 ? "font-size:22px" : ""}">${["🥇", "🥈", "🥉"][x.rank - 1] || "#" + x.rank}</span>
+    <span class="nm">${x.me ? "<b>" : ""}${escH(x.name)}${x.me ? "</b> <span class='muted'>(sen)</span>" : ""}</span><span class="val">${lbVal(lbGame, +x.value)}</span></div>`;
+  if (!list.length) { $("lbList").innerHTML = `<p class="muted" style="margin-top:14px">${lbFriends ? "Arkadaşların henüz bu oyunda puan almamış." : "Henüz kimse yok. İlk sen ol!"}</p>`; return; }
+  $("lbList").innerHTML = list.map(row).join("") + (me && !list.some(x => x.me) ? `<div class="muted" style="margin:8px 0 0 18px">⋯</div>` + row(me) : "")
+    + (!me ? `<p class="muted" style="font-size:14px">Sen bu listede henüz yoksun: oyna ve sıralamaya gir!</p>` : "");
+}
+$("lbGame").onchange = () => { lbGame = $("lbGame").value; renderLeaders(); };
+document.querySelectorAll("#leaders .seg button").forEach(b => b.onclick = () => { lbFriends = b.dataset.fr === "1"; renderLeaders(); });
+
+function exitGame() {
+  clearInterval(playTimer); clearInterval(saveTimer);
+  const g = current;
+  flushGame();
+  $("frame").src = "about:blank";
+  if (g) pushSave(g);
+  $("player").classList.remove("on");
+  document.body.style.overflow = "";
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  current = null;
+  muzikGuncelle();
+  renderTop(); renderHome();
+  maybeApplyUpdate();
+}
+// ================================================================ Oyun içi hediyeler (admin panelinden, sunucudaki gifts tablosu)
+// Oyun açılıp kup:ready gönderince o oyunun bekleyen hediyeleri kup:gift ile gider; oyun uygulayınca kup:giftAck döner.
+let gifts = []; // bekleyen hediyelerim: [{ gid, game, items: [{ key, n, label }] }]
+async function fetchGifts() {
+  if (!sb || !session) return;
+  const { data, error } = await sb.from("gifts").select("gid,game,items").is("got", null).eq("to_id", session.user.id);
+  if (error) return;
+  const before = gifts.length;
+  gifts = data || [];
+  if (!current && (before || gifts.length) && $("home").classList.contains("on")) renderHome();
+}
+const myGifts = game => gifts.filter(g => !game || g.game === game);
+function sendGifts() {
+  const w = $("frame").contentWindow, list = current ? myGifts(current.id) : [];
+  if (w && list.length) w.postMessage({ type: "kup:gift", gifts: list.map(g => ({ gid: g.gid, items: g.items.map(({ key, n }) => ({ key, n })) })) }, "*");
+}
+function sendProfile() {
+  const w = $("frame").contentWindow;
+  const av = { ...profile.avatar }, ch = customItem(av.hat);
+  if (ch) { av.hat = ["cap", "crown", "headphones", "helmet"].includes(ch.shape) ? ch.shape : "none"; av.hatColor = ch.color || av.hatColor; if (ch.shape === "crown" && ch.color) av.crownColor = ch.color; }
+  if (customItem(av.face)) av.face = "smile";
+  if (w) w.postMessage({ type: "kup:profile", name: profile.name, avatar: av, jeton: profile.jeton }, "*");
+}
+
+// Oyun → platform mesajları
+let pendingBuy = null;
+addEventListener("message", e => {
+  if (!current || e.source !== $("frame").contentWindow) return; // sadece açık oyundan gelenler
+  const m = e.data || {};
+  if (m.type === "kup:ready") { sendProfile(); sendGifts(); }
+  else if (m.type === "kup:exit") exitGame();
+  else if (m.type === "kup:invite") inviteFromGame(String(m.room || ""));
+  else if (m.type === "kup:giftAck" && m.gid) {
+    const g = gifts.find(x => x.gid === m.gid && x.game === current.id);
+    if (!g) return;
+    const skipped = Array.isArray(m.skipped) ? m.skipped.map(String).slice(0, 20) : [];
+    gifts = gifts.filter(x => x !== g);
+    // Gönderilemese bile sorun yok: oyun aynı gid'i iki kez uygulamaz, sonraki açılışta tekrar onaylanır
+    rpc("kup_gift_ack", { p_gid: g.gid, p_skipped: skipped }).catch(() => {});
+    const ok = g.items.filter(it => !skipped.includes(it.key));
+    if (ok.length) toast(`🎁 Hediye geldi: ${ok.map(it => it.label || it.key).join(", ")}`);
+  }
+  else if (m.type === "kup:stats" && m.stats && typeof m.stats === "object") {
+    profile.gameStats[current.id] = Object.fromEntries(Object.entries(m.stats).slice(0, 6).map(([k, v]) => [String(k).slice(0, 30), String(v).slice(0, 20)]));
+    persist();
+  } else if (m.type === "kup:purchase") {
+    const price = Math.floor(Number(m.price));
+    if (!(price > 0) || price > 100000) return;
+    pendingBuy = { reqId: m.reqId, id: String(m.id).slice(0, 40), name: String(m.name).slice(0, 40), price, icon: Array.from(String(m.icon || "🛒")).slice(0, 4).join("") }; // emoji'yi ortadan bölme
+    $("buyIcon").textContent = pendingBuy.icon;
+    $("buyTitle").textContent = pendingBuy.name;
+    $("buyGame").textContent = current.title;
+    $("buyPrice").textContent = `KJ ${price}`;
+    const after = profile.jeton - price;
+    $("buyAfter").textContent = after >= 0 ? `Satın alma sonrası: KJ ${after}` : `Yetersiz Küp Jeton (KJ ${profile.jeton}). Kazanmak için ana sayfadaki KJ butonuna bak.`;
+    $("btnBuyYes").disabled = after < 0;
+    $("buyModal").classList.add("on");
+  }
+});
+// Küp Jetonu sunucu düşer; oyun sonucu ancak sunucu onaylayınca alır
+async function answerBuy(ok) {
+  if (!pendingBuy) return;
+  const pb = pendingBuy, game = current, w = $("frame").contentWindow;
+  pendingBuy = null;
+  $("buyModal").classList.remove("on");
+  if (ok) {
+    try {
+      const r = await rpc("kup_purchase", { p_game: game.id, p_item: pb.name, p_price: pb.price });
+      ok = !!r.ok; setJeton(r.jeton);
+      if (r.badge) badgeToast("shopper", r.badge);
+      if (!ok) toast("Yetersiz Küp Jeton");
+    } catch (e) { ok = false; toast(errMsg(e)); }
+  }
+  if (current === game && w) w.postMessage({ type: "kup:purchaseResult", reqId: pb.reqId, id: pb.id, ok, jeton: profile.jeton }, "*");
+  renderTop();
+}
+$("btnBuyYes").onclick = () => answerBuy(true);
+$("btnBuyNo").onclick = () => answerBuy(false);
+$("frame").addEventListener("load", sendProfile);
+
+// ================================================================ Olaylar
+document.querySelectorAll("#nav button[data-page]").forEach(b => b.onclick = () => showPage(b.dataset.page));
+$("logo").onclick = () => showPage("home");
+$("me").onclick = () => showPage("profile");
+$("search").oninput = renderHome;
+document.addEventListener("click", e => {
+  const c = e.target.closest("[data-game]");
+  if (c) openGameSheet(c.dataset.game);
+});
+$("gameModal").addEventListener("click", e => { if (e.target.id === "gameModal") $("gameModal").classList.remove("on"); });
+$("btnDaily").onclick = claimDaily;
+$("btnExit").onclick = exitGame;
+$("jeton").onclick = () => { renderEarn(); $("earnModal").classList.add("on"); };
+$("btnEarnClose").onclick = () => $("earnModal").classList.remove("on");
+$("earnModal").addEventListener("click", e => { if (e.target.id === "earnModal") $("earnModal").classList.remove("on"); });
+$("btnFull").onclick = () => {
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  else document.documentElement.requestFullscreen && document.documentElement.requestFullscreen().catch(() => {});
+};
+const NAME_RE = /^[A-Za-z0-9ÇĞİÖŞÜçğıöşü _.-]{2,20}$/;
+$("swAuto").onclick = () => { setAutoUpd(!autoUpd()); renderUpd(); if (autoUpd()) maybeApplyUpdate(); };
+$("btnCheckUpd").onclick = () => checkUpdate(true);
+$("btnProfName").onclick = async () => {
+  const n = $("profName").value.trim();
+  if (!NAME_RE.test(n)) { toast("Kullanıcı adı 2-20 harf/rakam olmalı"); return; }
+  if (n === profile.name) return;
+  try { await rpc("kup_rename", { p_name: n }); profile.name = n; cache(); renderTop(); renderProfile(); toast("Kaydedildi. Girişte artık bu adı kullan."); }
+  catch (e) { toast(errMsg(e)); }
+};
+$("btnPass").onclick = async () => {
+  const o = $("passOld").value, n = $("passNew").value;
+  if (!o) { toast("Mevcut şifreni yaz"); return; }
+  if (n.length < 6) { toast("Yeni şifre en az 6 karakter olmalı"); return; }
+  if (n !== $("passNew2").value) { toast("Yeni şifreler aynı değil"); return; }
+  $("btnPass").disabled = true;
+  try { await rpc("kup_change_password", { p_old: o, p_new: n }); ["passOld", "passNew", "passNew2"].forEach(id => $(id).value = ""); toast("🔒 Şifren değişti. Girişte artık yeni şifreni kullan."); }
+  catch (e) { toast(errMsg(e)); }
+  $("btnPass").disabled = false;
+};
+$("accounts").addEventListener("click", async e => {
+  if (e.target.id === "btnLogout") { logout(); return; }
+  if (e.target.id === "btnCloseAcc") {
+    // Hesap sunucudan kalıcı silinir (oyun kayıtları dahil)
+    if (prompt(`"${profile.name}" hesabı kalıcı olarak kapatılacak (Küp Jeton, avatar, rozetler ve oyun ilerlemesi silinir). Onaylamak için kullanıcı adını yazın:`) !== profile.name) { toast("Hesap kapatılmadı"); return; }
+    try { await rpc("kup_delete_me"); } catch (err) { toast(errMsg(err)); return; }
+    logout();
+  }
+});
+
+// ---------------------------------------------------------------- Açılış ekranı / giriş (kullanıcı adı + şifre)
+let authMode = "signup", importFrom = null;
+function openAuth(mode, old) {
+  authMode = mode; importFrom = old || null;
+  const su = mode === "signup";
+  $("authTitle").textContent = su ? (importFrom ? "☁️ Hesabını taşı" : "👋 Hesap oluştur") : "Giriş yap";
+  $("authSub").textContent = su
+    ? (importFrom ? `"${importFrom.name}" hesabın buluta taşınacak. Bir şifre belirle; artık her cihazdan bu adla girebilirsin.` : "Bir kullanıcı adı ve şifre seç. Başka cihazlardan da bu bilgilerle girersin.")
+    : "Kullanıcı adın ve şifrenle gir.";
+  $("btnName").textContent = su ? (importFrom ? "Taşı ve başla" : "Başla") : "Giriş yap";
+  $("btnAuthSwitch").textContent = su ? "Zaten hesabın var mı? Giriş yap" : "Hesabın yok mu? Hesap oluştur";
+  $("nameInput").value = importFrom ? importFrom.name : "";
+  $("nameInput").readOnly = !!importFrom;
+  $("passInput").value = ""; $("authErr").textContent = "";
+  $("passInput").autocomplete = su ? "new-password" : "current-password";
+  const olds = oldAccounts();
+  $("oldAccs").innerHTML = su && !importFrom && olds.length
+    ? `<p class="muted" style="margin:18px 0 4px">Bu cihazda eski hesabın var. Seç, Küp Jetonu ve rozetleriyle buluta taşıyalım:</p>` +
+      olds.map((a, i) => `<button class="accRow" data-old="${i}"><span class="face" style="background:${escH(a.avatar?.skin || SKINS[0])}">${faceEmoji(a.avatar?.face)}</span>
+        <span><b>${escH(a.name)}</b><div class="muted" style="font-size:13px">KJ ${a.jeton | 0} · Katılma: ${escH(a.joined || "—")}</div></span></button>`).join("")
+    : "";
+  $("nameModal").classList.add("on");
+  setTimeout(() => (importFrom ? $("passInput") : $("nameInput")).focus(), 50);
+}
+$("oldAccs").addEventListener("click", e => { const b = e.target.closest("[data-old]"); if (b) openAuth("signup", oldAccounts()[+b.dataset.old]); });
+$("btnAuthSwitch").onclick = () => openAuth(authMode === "signup" ? "login" : "signup");
+$("btnName").onclick = async () => {
+  const n = $("nameInput").value.trim(), pw = $("passInput").value, err = t => { $("authErr").textContent = t; };
+  if (!sb) { err("Sunucuya bağlanılamadı. İnternetini kontrol edip sayfayı yenile."); return; }
+  if (!NAME_RE.test(n) || slug(n).length < 2) { err("Kullanıcı adı 2-20 harf/rakam olmalı"); $("nameInput").focus(); return; }
+  if (pw.length < 6) { err("Şifre en az 6 karakter olmalı"); $("passInput").focus(); return; }
+  $("btnName").disabled = true; err("");
+  try {
+    if (authMode === "signup") {
+      if (await rpc("kup_login_email", { p_name: n })) throw new Error("Bu kullanıcı adı alınmış");
+      const { data, error } = await sb.auth.signUp({ email: emailFor(n), password: pw, options: { data: { name: n } } });
+      if (error) throw new Error(/registered|exists/i.test(error.message) ? "Bu kullanıcı adı alınmış (benzer bir ad var)" : error.message);
+      session = data.session;
+      if (!session) throw new Error("Hesap açıldı ama giriş yapılamadı. Giriş yap'ı dene.");
+      if (importFrom) { try { await rpc("kup_import", { p_old: importFrom }); forgetOld(importFrom.name); } catch (e) { toast("Eski hesap taşınamadı: " + errMsg(e)); } }
+    } else {
+      const email = await rpc("kup_login_email", { p_name: n });
+      if (!email) throw new Error("Bu kullanıcı adıyla hesap yok");
+      const { data, error } = await sb.auth.signInWithPassword({ email, password: pw });
+      if (error) throw new Error(/invalid/i.test(error.message) ? "Şifre yanlış" : error.message);
+      session = data.session;
+    }
+    if (!(await refreshProfile())) throw new Error("Profil yüklenemedi, tekrar dene");
+    $("nameModal").classList.remove("on"); $("landing").classList.remove("on");
+    afterLogin();
+    toast(importFrom ? "☁️ Eski hesabın buluta taşındı!" : `Hoş geldin, ${profile.name}!`);
+  } catch (e) { err(errMsg(e)); }
+  $("btnName").disabled = false;
+};
+$("passInput").addEventListener("keydown", e => { if (e.key === "Enter") $("btnName").click(); });
+$("nameInput").addEventListener("keydown", e => { if (e.key === "Enter") $("passInput").focus(); });
+$("btnSignup").onclick = () => openAuth("signup");
+$("btnSignup2").onclick = () => openAuth("signup");
+$("btnLogin").onclick = () => openAuth("login");
+$("lGameRow").addEventListener("click", e => { if (e.target.closest("[data-game]")) { e.stopPropagation(); openAuth("signup"); } });
+$("nameModal").addEventListener("click", e => { if (e.target.id === "nameModal" && $("landing").classList.contains("on")) $("nameModal").classList.remove("on"); });
+
+// ---------------------------------------------------------------- Ayarlar ve tazeleme
+async function loadCfgRemote() {
+  if (!sb) return;
+  const { data, error } = await sb.from("settings").select("value").eq("key", "cfg").maybeSingle();
+  if (error || !data) return;
+  const txt = JSON.stringify(data.value || {});
+  if (txt === localStorage.getItem(CFG_KEY)) return;
+  try { localStorage.setItem(CFG_KEY, txt); } catch (e) {}
+  loadCfg(); renderTop();
+  if (!current) renderHome();
+  if ($("avatar").classList.contains("on")) renderAvatarOpts();
+  stages.forEach(s => s.update());
+}
+function afterLogin() {
+  renderTop(); renderHome(); stages.forEach(s => s.update());
+  if ($("profile").classList.contains("on")) renderProfile();
+  fetchGifts(); loadQuests();
+}
+// Admin değişiklikleri (Küp Jeton, duyuru, hediye) sayfa yenilenmeden gelsin
+async function tick() {
+  if (document.hidden) return;
+  if (offline && navigator.onLine) { connect(); return; }
+  loadCfgRemote();
+  if (!session) return;
+  fetchGifts();
+  if (!current && !pendingBuy) {
+    const j = profile.jeton, a = JSON.stringify(profile.avatar);
+    if (await refreshProfile()) {
+      const av = JSON.stringify(profile.avatar) !== a; // başka cihazda değişen avatar burada da görünsün
+      if (profile.jeton !== j || av) renderTop();
+      if (av) { stages.forEach(s => s.update()); if ($("avatar").classList.contains("on")) renderAvatarOpts(); }
+      if ($("home").classList.contains("on")) renderHome();
+    }
+  }
+}
+setInterval(tick, 45000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) tick(); });
+addEventListener("storage", e => {
+  if (e.key !== CFG_KEY) return;
+  loadCfg(); renderTop(); renderHome();
+  if ($("avatar").classList.contains("on")) renderAvatarOpts();
+  stages.forEach(s => s.update());
+});
+
+// ================================================================ 🤖 Destek Asistanı (e-posta yerine; supabase/yama-destek.sql)
+// Sık sorulanları kendisi cevaplar. Yetmezse "yöneticiye yaz" moduna geçer: mesaj support_msgs tablosuna gider, admin panelinden cevaplanır.
+// Girişsiz yazan cihaz rastgele bir anahtarla (kupDestekAnahtar) kendi konuşmasını bulur. Ana sayfa adresi #destek ile doğrudan açılır.
+const SUP_FAQ = [
+  { k: ["şifre", "sifre", "parola", "unuttum", "giremiyorum", "giriş yapamıyorum"], a: "🔑 Hesaplar e-posta kullanmadığı için şifre sıfırlama e-postası yok. Şifreni unuttuysan <b>yöneticiye yaz</b>: kullanıcı adını yaz, yönetici şifreni sıfırlar ve yeni şifreni buradan bildirir.<br>Şifreni biliyor ve değiştirmek istiyorsan: <b>Profil → Şifre</b>.", admin: true },
+  { k: ["jeton", "kj", "para", "kazan", "zengin", "bedava"], a: "💎 Küp Jeton kazanmak için her gün <b>günlük ödül</b>ü al, oyun oyna (birkaç dakikada bir jeton gelir), <b>rozet</b> kazan ve ana sayfadaki <b>📋 günlük görevler</b>i bitir. Üst çubuktaki <b>KJ</b> düğmesine basınca güncel miktarları görürsün." },
+  { k: ["promo", "kod"], a: "🎟️ Promo kodu kullanmak için üst çubuktaki <b>KJ</b> düğmesine bas, en alttaki <b>Promo kod</b> kutusuna yaz ve <b>Kullan</b>'a bas. Kodları yönetici duyurur." },
+  { k: ["kayıt", "kayit", "ilerleme", "silindi", "kayboldu", "gitti", "sıfırlandı", "sifirlandi"], a: "☁️ İlerlemen hesabınla birlikte bulutta saklanır. Başka cihazda aynı <b>kullanıcı adı ve şifre</b> ile girince geri gelir. Doğru hesapla girdiğinden emin ol (Profil'de adın yazar). Hâlâ yoksa <b>yöneticiye yaz</b> ve hangi oyunda ne kaybolduğunu anlat.", admin: true },
+  { k: ["satın", "satin", "aldım", "aldim", "gelmedi", "düştü", "dustu"], a: "🛒 Bir satın alma eksik geldiyse ya da jetonun yanlış düştüyse <b>yöneticiye yaz</b>: hangi oyunda, hangi eşyayı, yaklaşık ne zaman aldığını yaz. Yönetici kayıtlardan kontrol eder.", admin: true },
+  { k: ["hesabı sil", "hesabi sil", "hesap sil", "hesabımı", "hesabimi", "kapat", "sil"], a: "🗑️ Hesabını silmek için <b>Profil → Hesap → Hesabı kapat</b>'a bas. Bu işlem geri alınamaz; jetonların, avatarın ve kayıtların silinir." },
+  { k: ["ad değiştir", "adımı", "adimi", "kullanıcı adı", "kullanici adi", "isim"], a: "👤 Kullanıcı adını <b>Profil → Kullanıcı adı</b> bölümünden değiştirebilirsin. Girişte artık yeni adını kullanırsın." },
+  { k: ["çok oyunculu", "cok oyunculu", "oda", "arkadaşımla", "arkadasimla", "birlikte", "online"], a: "👥 <b>Küp Futbol</b>, <b>Küp Arena</b> ve <b>Küp Yarışı</b> çok oyunculu. Oyunda oda kur, çıkan <b>4 haneli kodu</b> arkadaşına söyle; o da odaya katılırken kodu yazsın. Boş yerleri botlar doldurur." },
+  { k: ["arkadaş", "arkadas", "sohbet", "mesaj"], a: "💬 Arkadaş eklemek için üst çubuktaki <b>👥</b> düğmesine bas ve kullanıcı adıyla ara. Sadece kabul edilmiş arkadaşlarınla yazışabilir, onları oyuna davet edebilirsin." },
+  { k: ["şikayet", "şikâyet", "sikayet", "küfür", "kufur", "engelle", "rahatsız", "hile"], a: "🛡️ Sana kötü davranan biri varsa sohbet penceresindeki <b>Şikâyet</b> ya da <b>Engelle</b> düğmesini kullan. Şikâyetler son mesajlarla birlikte yöneticiye gider. Başka bir sorun için <b>yöneticiye yaz</b>.", admin: true },
+  { k: ["kasıyor", "kasiyor", "donuyor", "yavaş", "yavas", "lag", "fps", "takılıyor"], a: "⚡ Oyun yavaşsa <b>Profil → Grafik modu → ⚡ Performans</b>'ı seç. Diğer sekmeleri ve uygulamaları kapatmak da yardımcı olur." },
+  { k: ["ses", "müzik", "muzik"], a: "🔊 Sesleri <b>Profil → Ses ve müzik</b> bölümünden ayarlayabilirsin (ana ses, oyun sesleri, müzik)." },
+  { k: ["indir", "apk", "uygulama", "telefon", "android", "bilgisayar", "windows", "mac"], a: "📱 Küp Evreni tarayıcıda çalışır, indirmen gerekmez. Telefon ya da bilgisayar uygulaması için ana sayfadaki <b>İndir</b> düğmesine bas. Hesabın her yerde aynıdır." },
+  { k: ["açılmıyor", "acilmiyor", "çalışmıyor", "calismiyor", "hata", "bozuk", "siyah ekran", "beyaz ekran"], a: "🔧 Önce sayfayı yenile (bilgisayarda Ctrl+F5). Olmazsa <b>Profil → Uygulama → Güncellemeleri denetle</b>'ye bas. Hâlâ bozuksa <b>yöneticiye yaz</b>: hangi oyunda ne olduğunu ve hangi cihazı kullandığını anlat.", admin: true },
+  { k: ["seviye", "xp", "rozet"], a: "⭐ Oyun oynadıkça XP kazanır, seviye atlarsın; seviye ödüllerini <b>Profil</b>'den alırsın. Rozetler oyunlardaki görevlerle açılır, hangilerinin kaldığını Profil'de görürsün." },
+  { k: ["yönetici", "yonetici", "admin", "insan", "gerçek kişi"], a: "Tamam, mesajını yöneticiye ileteyim.", direct: true },
+];
+const SUP_CHIPS = ["Şifremi unuttum", "Küp Jeton nasıl kazanılır?", "İlerlemem kayboldu", "Arkadaşımla nasıl oynarım?", "Oyun kasıyor", "✉️ Yöneticiye yaz"];
+const SUP_TOK_KEY = "kupDestekAnahtar";
+let supAdmin = false, supTimer = null, supBot = [], supFirst = true;
+function supToken() {
+  let t = null; try { t = localStorage.getItem(SUP_TOK_KEY); } catch (e) {}
+  if (!t || !/^[A-Za-z0-9]{16,40}$/.test(t)) {
+    const a = new Uint8Array(20); crypto.getRandomValues(a);
+    t = Array.from(a, b => "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"[b % 62]).join("");
+    try { localStorage.setItem(SUP_TOK_KEY, t); } catch (e) {}
+  }
+  return t;
+}
+const supArgs = () => session ? {} : { p_token: supToken() };
+function supAnswer(q) {
+  const t = q.toLocaleLowerCase("tr"); let best = null, score = 0;
+  for (const f of SUP_FAQ) { const n = f.k.filter(k => t.includes(k)).length; if (n > score) { score = n; best = f; } }
+  return best;
+}
+const supMsg = (cls, who, html, tm) => `<div class="msg ${cls}">${who ? `<div class="who">${who}</div>` : ""}${html}${tm ? `<div class="t">${tm}</div>` : ""}</div>`;
+const supBotSay = html => supBot.push(supMsg("", "🤖 Asistan", html));
+const SUP_ADMIN_BTN = `<div style="margin-top:8px"><button class="btn sm blue" data-sup-mode="1">✉️ Yöneticiye yaz</button></div>`;
+function supSetMode(on) {
+  supAdmin = on;
+  $("supMode").className = on ? "adm" : "muted";
+  $("supMode").textContent = on ? "✉️ Yöneticiye yazıyorsun: mesajın kaydedilir, cevap gelince burada görünür." : "🤖 Asistan anında cevaplar. Çözülmezse yöneticiye yazabilirsin.";
+  $("supInput").placeholder = on ? (session ? "Yöneticiye mesajın…" : "Kullanıcı adın ve sorunun…") : "Sorunu yaz…";
+  $("supChips").innerHTML = on ? `<button data-sup-mode="0">🤖 Asistana dön</button>` : SUP_CHIPS.map(c => `<button data-sup-chip="${escH(c)}">${escH(c)}</button>`).join("");
+}
+async function supLoad(scroll) {
+  let l = null;
+  try { l = await rpc("kup_destek_list", supArgs()); } catch (e) {}
+  const box = $("supList"); if (!box) return;
+  const atEnd = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+  const hello = supMsg("", "🤖 Asistan", `Merhaba${profile.name ? " " + escH(profile.name) : ""}! Ben Küp Evreni destek asistanıyım. Sorunu yaz ya da aşağıdan seç.`);
+  const fmt = d => new Date(d).toLocaleString("tr-TR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  const srv = (Array.isArray(l) ? l : []).map(m => supMsg(m.admin ? "adm" : "me", m.admin ? "🛠️ Yönetici" : "", escH(m.body), fmt(m.created_at))).join("");
+  box.innerHTML = hello + (srv ? `<div class="muted" style="font-size:12px;text-align:center">— Yöneticiyle yazışman —</div>` + srv : "") + supBot.join("");
+  if (scroll || atEnd || supFirst) box.scrollTop = box.scrollHeight;
+  supFirst = false;
+}
+function openSupport() {
+  supBot = []; supFirst = true; supSetMode(false);
+  $("supList").innerHTML = `<p class="muted">Yükleniyor…</p>`;
+  $("supModal").classList.add("on");
+  supLoad(true); clearInterval(supTimer); supTimer = setInterval(() => { if (!document.hidden) supLoad(); }, 8000);
+  supSeen = 0; supBadge(0);
+  setTimeout(() => $("supInput").focus(), 50);
+}
+function closeSupport() {
+  $("supModal").classList.remove("on"); clearInterval(supTimer);
+  if (location.hash === "#destek") history.replaceState(null, "", location.pathname + location.search);
+}
+function supGoAdmin() {
+  supSetMode(true);
+  supBotSay(session ? "Tamam! Sorununu ayrıntılı yaz, yöneticiye ileteyim." : "Tamam! Giriş yapmadığın için önce <b>kullanıcı adını</b>, sonra sorununu yaz. Örnek: <i>Adım Ali123, şifremi unuttum</i>");
+}
+async function supSend(text) {
+  const fromBox = text === undefined, t = String(fromBox ? $("supInput").value : text).trim();
+  if (!t) return;
+  if (fromBox) $("supInput").value = "";
+  if (t === "✉️ Yöneticiye yaz") { supGoAdmin(); return supLoad(true); }
+  if (supAdmin) {
+    let name = null;
+    if (!session) { const m = t.match(/(?:ad[ıi]m|kullan[ıi]c[ıi] ad[ıi]m?)\s*:?\s*([^\s,.;]+)/i); name = m ? m[1] : t.split(/[\s,]+/)[0]; }
+    $("btnSupSend").disabled = true;
+    try {
+      await rpc("kup_destek_send", { p_body: t, p_name: name, ...supArgs() });
+      supBot = [supMsg("", "🤖 Asistan", "✅ Mesajın yöneticiye iletildi. Cevap gelince burada göreceksin" + (session ? ", ana sayfada da haber veririz." : ". Aynı cihazdan bu pencereyi tekrar açınca cevabı görürsün."))];
+    } catch (e) {
+      if (fromBox) $("supInput").value = t;
+      toast(/function|schema|does not exist/i.test(e.message) ? "Destek şu an kullanılamıyor, sonra tekrar dene" : errMsg(e));
+    }
+    $("btnSupSend").disabled = false;
+    return supLoad(true);
+  }
+  supBot.push(supMsg("me", "", escH(t)));
+  const f = supAnswer(t);
+  if (f && f.direct) supGoAdmin();
+  else if (f) supBotSay(f.a + (f.admin ? SUP_ADMIN_BTN : ""));
+  else supBotSay("Bunu tam anlayamadım 🤔 Başka kelimelerle sorabilir ya da mesajını yöneticiye iletebilirim." + SUP_ADMIN_BTN);
+  return supLoad(true);
+}
+// Yöneticiden cevap geldiyse haber ver
+let supSeen = -1;
+function supBadge(n) {
+  document.querySelectorAll("[data-destek]").forEach(a => {
+    if (!a.dataset.base) a.dataset.base = a.textContent;
+    a.textContent = a.dataset.base + (n ? ` (${n} yeni)` : ""); a.style.fontWeight = n ? "700" : "";
+  });
+}
+async function supCheck() {
+  if ($("supModal").classList.contains("on")) return;
+  let n = 0; try { n = await rpc("kup_destek_unread", supArgs()); } catch (e) { return; }
+  n = Number(n) || 0;
+  if (n > 0 && n !== supSeen) toast(`🤖 Destek'ten ${n} yeni cevap var. Profil → Destek Asistanı`);
+  supSeen = n; supBadge(n);
+}
+setTimeout(supCheck, 5000);
+setInterval(() => { if (!document.hidden && !current) supCheck(); }, 120000);
+document.addEventListener("click", e => {
+  const a = e.target.closest("[data-destek]"); if (a) { e.preventDefault(); openSupport(); return; }
+  const c = e.target.closest("[data-sup-chip]"); if (c) { supSend(c.dataset.supChip); return; }
+  const m = e.target.closest("[data-sup-mode]");
+  if (m) {
+    if (m.dataset.supMode === "1") supSend("✉️ Yöneticiye yaz");
+    else { supSetMode(false); supBotSay("Tamam, başka ne sormak istersin?"); supLoad(true); }
+  }
+});
+$("btnSupSend").onclick = () => supSend();
+$("supInput").addEventListener("keydown", e => { if (e.key === "Enter") supSend(); });
+$("btnSupClose").onclick = closeSupport;
+$("supModal").addEventListener("click", e => { if (e.target.id === "supModal") closeSupport(); });
+if (location.hash === "#destek") setTimeout(openSupport, 300);
+addEventListener("hashchange", () => { if (location.hash === "#destek") openSupport(); });
+
+// ================================================================ Başlat
+function showLanding() {
+  $("landing").classList.add("on");
+  $("lGameRow").innerHTML = visibleGames().filter(g => !g.soon).map(gameCard).join("");
+  if (!showLanding.done) { showLanding.done = true; avatarStage($("lAvatar")); }
+}
+renderTop();
+renderHome();
+avatarStage($("helloAvatar"), { spin: false, zoom: 2.2 });
+if (!profile.cloud) showLanding(); // önbellekte hesap yoksa hemen açılış ekranı
+// ---------------------------------------------------------------- Çevrimdışı mod
+// İnternet yokken: önbellekteki hesapla açılır, oyunlar cihazdaki kayıtla oynanır.
+// Küp Jeton kazanma/harcama sunucu ister: internet gelince her şey kendiliğinden eşitlenir.
+let offline = false;
+function setOffline(on) {
+  offline = on;
+  let b = $("offlineBar");
+  if (on && !b) {
+    b = document.createElement("div"); b.id = "offlineBar";
+    b.style.cssText = "position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:60;background:#3a2f12;color:#ffd166;border:1px solid #6b5520;border-radius:12px;padding:9px 14px;font-size:14px;box-shadow:0 6px 20px #0008;max-width:calc(100% - 32px);text-align:center";
+    b.textContent = "📴 İnternet yok: çevrimdışı oynuyorsun. İlerlemen bu cihazda tutuluyor, internet gelince buluta gider. Küp Jeton kazanma ve satın alma internet ister.";
+    document.body.appendChild(b);
+  }
+  if (b) b.style.display = on ? "" : "none";
+}
+const netErr = e => !navigator.onLine || /fetch|network|load failed|retryable/i.test(String((e && (e.name + " " + e.message)) || e));
+// Oturumu bul; internet sorunu ile gerçekten çıkış yapılmış olmasını ayır
+async function connect() {
+  if (!sb) { if (profile.cloud) { setOffline(true); afterLogin(); } else showLanding(); return; }
+  let res = null, err = null;
+  try { res = await sb.auth.getSession(); err = res.error; } catch (e) { err = e; }
+  session = (res && res.data && res.data.session) || null;
+  if (!session && profile.cloud && err && netErr(err)) { setOffline(true); afterLogin(); return; } // giriş var ama sunucuya ulaşılamıyor
+  if (!session) {
+    setOffline(false);
+    if (profile.cloud) { try { localStorage.removeItem(KEY); } catch (e) {} profile = structuredClone(DEFAULT); renderTop(); }
+    showLanding(); return;
+  }
+  const ok = await refreshProfile();
+  setOffline(!ok); // profil gelmediyse sunucuya ulaşılamıyor
+  afterLogin();
+  if (ok) syncDirtySaves();
+}
+// Çevrimdışıyken oynanan oyunların kayıtlarını gönder
+function syncDirtySaves() {
+  if (!session) return;
+  const m = syncMeta();
+  for (const g of GAMES) if (g.saveKey && m[g.saveKey] && m[g.saveKey].uid === session.user.id && g !== current) pushSave(g);
+}
+addEventListener("online", () => { if (offline) connect(); else syncDirtySaves(); loadCfgRemote(); });
+addEventListener("offline", () => { if (profile.cloud) setOffline(true); });
+(async () => {
+  loadCfgRemote();
+  if (sb) sb.auth.onAuthStateChange((ev, s) => { session = s; });
+  await connect();
+})();
+// Sayfayı ve oyunları cihaza kaydet (internet yokken de açılsın)
+if ("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register("sw.js").catch(() => {});
+</script>
+</body>
+</html>

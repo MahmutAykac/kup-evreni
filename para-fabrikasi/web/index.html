@@ -1,0 +1,1510 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Para Fabrikası Tycoon</title>
+<!--
+  Para Fabrikası Tycoon: boş arsada kendi para fabrikanı kur (3D damlatıcı tycoon).
+  Küp Evreni platformunda çalışır (tek başına da açılır). Kayıt anahtarı: paraFabrikasi.
+  Kayıt: { money, totalEarned, register, bought, rebirths, lastSeen, passes{double,auto}, giftIds, helpSeen, muted, px, pz }
+  (totalEarned düz sayı: liderlik tablosu okur, yeniden doğuşta korunur).
+  Oyun: yeşil "Al" karelerine basınca makine / yapı kurulur. Damlatıcılar banda küp bırakır, küpler bantta kayıp fırına düşer
+  ve paraya dönüşür; para Kasa'da birikir, "Para Topla" karesine basınca cebe geçer. Yükselticiler küpün değerini katlar.
+  Her şey alınınca Yeniden Doğuş: fabrika sıfırlanır, kalıcı +%50 gelir. Çevrimdışı: en fazla 2 saat, yarı hızla.
+  Kontroller: WASD / oklar yürü · fareyle sürükle: kamera · tekerlek: yakınlaş · Esc / P: menü · Dokunmatik: joystick + sürükle-bak.
+  Godot sürümü: godot/betikler/parafabrika.gd (aynı kurallar, aynı kayıt).
+  Test kancası: window.step(sn) oyun mantığını elle ilerletir; window.pf test için iç durumu verir.
+-->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>/* Küp Evreni grafik modu (Profil → Grafik modu): performans | dengeli | yuksek */(function () { try {
+  var m = "dengeli"; try { m = JSON.parse(localStorage.getItem("kupGrafik") || '"dengeli"'); } catch (e) {}
+  if (m !== "performans" && m !== "yuksek") return;
+  var O = THREE.WebGLRenderer, Y = function (p) {
+    p = p || {}; p.antialias = m === "yuksek";
+    var r = new O(p), sp = r.setPixelRatio.bind(r);
+    r.setPixelRatio = function (x) { sp(m === "yuksek" ? Math.min(2, window.devicePixelRatio || 1) : Math.max(0.5, (x || 1) * 0.6)); };
+    r.setPixelRatio(1);
+    if (m === "performans") Object.defineProperty(r.shadowMap, "enabled", { get: function () { return false; }, set: function () {} });
+    return r;
+  };
+  Y.prototype = O.prototype; THREE.WebGLRenderer = Y;
+} catch (e) {} })();</script>
+<style>
+  :root { --panel: rgba(18, 26, 51, 0.74); --line: rgba(255,255,255,0.16); --text: #fff; --gold: #ffe14d; --ink: #24304a; --muted: #64708a;
+    --green: #22c55e; --purple: #7c5cff; --teal: #19b3a6; }
+  * { box-sizing: border-box; }
+  html, body { -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; overscroll-behavior: none; }
+  html, body { margin: 0; height: 100%; background: linear-gradient(#6fb8f2, #dff1ff 70%); color: var(--text);
+    font-family: "Nunito", "Trebuchet MS", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; font-weight: 700;
+    overflow: hidden; -webkit-user-select: none; user-select: none; touch-action: none; }
+  button { font: inherit; color: inherit; }
+  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  .pill { background: var(--panel); border-radius: 16px; border: 2px solid var(--line); }
+  #moneyBox { position: fixed; left: 50%; top: 12px; transform: translateX(-50%); padding: 4px 22px 6px; text-align: center; pointer-events: none;
+    border-radius: 24px; }
+  #money { font-size: 44px; font-weight: 900; color: var(--gold); line-height: 1.1; font-variant-numeric: tabular-nums; white-space: nowrap;
+    text-shadow: 0 3px 0 rgba(0,0,0,0.25); display: inline-block; transition: transform 0.12s; }
+  #money.bump { transform: scale(1.1); }
+  #income { font-size: 18px; color: #7dffb3; font-weight: 800; white-space: nowrap; }
+  #goal { position: fixed; left: 50%; transform: translateX(-50%); padding: 6px 14px 8px; text-align: center; pointer-events: none; max-width: calc(100vw - 24px); }
+  #goalText { font-size: 16px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #goalBar { height: 9px; border-radius: 5px; background: rgba(255,255,255,0.15); margin-top: 5px; overflow: hidden; min-width: 220px; }
+  #goalFill { height: 100%; width: 0; background: #39e67a; border-radius: 5px; transition: width 0.25s; }
+  #badges { position: fixed; left: 12px; top: 12px; display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
+  #badges .pill { padding: 5px 11px; font-size: 15px; font-weight: 800; }
+  #bRebirth { color: #c9a7ff; } #bPasses { color: #8ff0ff; white-space: pre-line; }
+  #btns { position: fixed; right: 12px; top: 12px; display: flex; gap: 6px; z-index: 6; }
+  #btns button { width: 50px; height: 48px; border-radius: 14px; border: 0; border-bottom: 4px solid rgba(0,0,0,0.35); background: var(--panel);
+    font-size: 21px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+  #btns button:active { transform: translateY(2px); border-bottom-width: 2px; }
+  #toasts { position: fixed; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 6px; align-items: center;
+    pointer-events: none; z-index: 20; width: max-content; max-width: calc(100vw - 32px); }
+  .toast { background: rgba(255,255,255,0.96); color: var(--ink); padding: 6px 14px; border-radius: 12px; font-size: 15px; font-weight: 800;
+    border: 2px solid var(--teal); animation: tfade 3.1s forwards; text-align: center; }
+  @keyframes tfade { 0%, 82% { opacity: 1; } 100% { opacity: 0; transform: translateY(-8px); } }
+  .ft { position: fixed; pointer-events: none; font-weight: 900; font-size: 20px; color: #ffe14d; white-space: nowrap; z-index: 4;
+    text-shadow: 0 0 3px #101830, 0 2px 0 #101830, 0 -1px 0 #101830, 1px 0 0 #101830, -1px 0 0 #101830; animation: rise 1.1s ease-out forwards; }
+  .ft.big { font-size: 28px; }
+  @keyframes rise { 0% { opacity: 0; margin-top: 8px; } 15% { opacity: 1; } 70% { opacity: 1; } to { opacity: 0; margin-top: -56px; } }
+  #joy { position: fixed; width: 124px; height: 124px; margin: -62px 0 0 -62px; border-radius: 50%; background: rgba(12,18,40,0.28);
+    border: 3px solid rgba(255,255,255,0.5); pointer-events: none; display: none; z-index: 3; }
+  #joy.idle { opacity: 0.55; }
+  #knob { position: absolute; left: 50%; top: 50%; width: 52px; height: 52px; margin: -26px 0 0 -26px; border-radius: 50%; background: rgba(255,255,255,0.82); }
+  .overlay { position: fixed; inset: 0; display: none; align-items: flex-start; justify-content: center; background: rgba(8,12,30,0.55);
+    padding: 16px; overflow-y: auto; touch-action: pan-y; z-index: 10; }
+  .overlay.show { display: flex; }
+  .card { background: #fff; color: var(--ink); border-radius: 22px; border: 4px solid var(--teal); padding: 18px 22px; width: 100%; max-width: 540px;
+    margin: auto; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 12px 40px rgba(0,0,0,0.3); }
+  .card h2 { margin: 0; text-align: center; color: #5b3fd9; font-size: 26px; font-weight: 900; }
+  .card p { margin: 0; font-size: 17px; line-height: 1.4; }
+  .card .small { font-size: 14px; color: var(--muted); }
+  .card .center { text-align: center; }
+  .card .row2 { display: flex; gap: 8px; }
+  .card .row2 > * { flex: 1; }
+  .btn { border: 0; border-radius: 14px; padding: 12px 10px; font-size: 18px; font-weight: 900; cursor: pointer; background: #e6ecf5; color: var(--ink);
+    border-bottom: 4px solid rgba(0,0,0,0.22); min-height: 50px; }
+  .btn:active { transform: translateY(2px); border-bottom-width: 2px; }
+  .btn.green { background: var(--green); color: #fff; }
+  .btn.purple { background: var(--purple); color: #fff; }
+  .btn.lilac { background: #efe8ff; color: var(--purple); }
+  .btn.red { background: #ffe1e1; color: #b42318; }
+  .btn:disabled { opacity: 0.5; cursor: default; }
+  .shoprow { display: flex; align-items: center; gap: 12px; padding: 6px 0; border-bottom: 1px solid #e6ecf5; }
+  .shoprow .ic { font-size: 34px; width: 48px; text-align: center; }
+  .shoprow .tx { flex: 1; } .shoprow .tx b { font-size: 18px; } .shoprow .tx div { font-size: 14px; color: var(--muted); font-weight: 600; }
+  .shoprow .btn { min-width: 110px; }
+  .big { font-size: 46px; font-weight: 900; color: #16a34a; text-align: center; }
+  /* Alçak ekran (yatay telefon): arayüz küçülür, oyun alanı kalır */
+  @media (max-height: 460px) {
+    #money { font-size: 32px; } #income { font-size: 14px; } #moneyBox { padding: 2px 16px 4px; }
+    #goalText { font-size: 13px; } #goalBar { height: 6px; margin-top: 3px; } #goal { padding: 4px 10px 6px; }
+    #btns button { width: 42px; height: 40px; font-size: 18px; }
+    #badges .pill { font-size: 13px; padding: 3px 8px; }
+    .ft { font-size: 16px; } .ft.big { font-size: 22px; }
+    .card { padding: 12px 16px; gap: 7px; } .card h2 { font-size: 21px; } .card p { font-size: 15px; } .btn { min-height: 42px; padding: 8px; font-size: 16px; }
+  }
+  #noWebgl { display: none; position: fixed; inset: 0; align-items: center; justify-content: center; text-align: center; padding: 24px; color: #24304a; font-size: 18px; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="moneyBox" class="pill"><div id="money">₺0</div><div id="income">+₺0 /sn</div></div>
+<div id="goal" class="pill"><div id="goalText"></div><div id="goalBar"><div id="goalFill"></div></div></div>
+<div id="badges"><div id="bRebirth" class="pill" style="display:none"></div><div id="bPasses" class="pill" style="display:none"></div></div>
+<div id="btns">
+  <button id="bShop" title="Mağaza">🛒</button><button id="bMute" title="Ses">🔊</button><button id="bMenu" title="Menü">☰</button><button id="bExit" title="Çık">✕</button>
+</div>
+<div id="toasts"></div>
+<div id="joy"><div id="knob"></div></div>
+
+<div class="overlay" id="ovHelp"><div class="card">
+  <h2>🏭 Para Fabrikası Tycoon</h2>
+  <p>🟢 Yeşil karelere bas: makine ve yapı satın al. Işık huzmesi alınabilecek olanı gösterir.</p>
+  <p>🏭 Damlatıcılar küp bırakır; küpler bantta kayıp fırına düşer ve paraya dönüşür. Kemerler küpün değerini katlar!</p>
+  <p>💰 Para Kasa'da birikir: sarı "Para Topla" karesine basıp topla. Her şeyi alınca ♻️ Yeniden Doğuş!</p>
+  <p class="small">Klavye: WASD / oklar yürü · fareyle sürükle: kamera · tekerlek: yakınlaş · Esc: menü. Dokunmatik: sol tarafta joystick, sağda sürükle-bak.</p>
+  <button class="btn green" data-close>Hadi başlayalım!</button>
+</div></div>
+<div class="overlay" id="ovPause"><div class="card">
+  <h2>Duraklatıldı</h2>
+  <div id="pauseBody"></div>
+  <button class="btn green" id="btnResume">Devam</button>
+  <div class="row2"><button class="btn" data-open="ovShop">💎 Mağaza</button><button class="btn" data-open="ovHelp">❓ Nasıl oynanır?</button></div>
+  <div class="row2"><button class="btn lilac" data-open="ovReborn">♻️ Yeniden Doğuş</button><button class="btn" data-mute>🔊 Ses: Açık</button></div>
+  <button class="btn red" data-exit>Çık</button>
+</div></div>
+<div class="overlay" id="ovShop"><div class="card">
+  <h2>💎 Küp Jeton Mağazası</h2>
+  <div id="shopBody"></div>
+  <button class="btn" data-close>Kapat</button>
+</div></div>
+<div class="overlay" id="ovOffline"><div class="card">
+  <h2>Sen yokken kazandın!</h2>
+  <p class="center">Fabrikan sen yokken de çalıştı!</p>
+  <div class="big" id="offAmount">+₺0</div>
+  <p class="small center">(en fazla 2 saatlik gelirin yarısı)</p>
+  <button class="btn green" id="btnOffline">Harika!</button>
+</div></div>
+<div class="overlay" id="ovReborn"><div class="card">
+  <h2>♻️ Yeniden Doğuş</h2>
+  <div id="rebornBody"></div>
+  <button class="btn purple" id="btnReborn">♻️ Yeniden Doğ</button>
+  <button class="btn" data-close>Vazgeç</button>
+</div></div>
+<div id="noWebgl">3D için WebGL gerekli; bu tarayıcıda açılamadı. Chrome / Edge ile açmayı dene.</div>
+
+<script>
+"use strict";
+// ================================================================ Yardımcılar
+const $ = id => document.getElementById(id);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmt = n => Math.floor(n).toLocaleString("tr-TR");
+// Kısa para metni: 12.345 · 1,25 Mn · 3,4 Mr (Godot'taki kisa ile aynı)
+function short(n) {
+  if (n < 1e6) return fmt(n);
+  for (const [v, u] of [[1e15, "Ka"], [1e12, "Tn"], [1e9, "Mr"], [1e6, "Mn"]]) if (n >= v) {
+    const x = n / v; return x.toFixed(x < 10 ? 2 : x < 100 ? 1 : 0).replace(".", ",") + " " + u;
+  }
+  return fmt(n);
+}
+const dec = n => Math.abs(n - Math.round(n)) < 0.001 ? String(Math.round(n)) : n.toFixed(1).replace(".", ",");
+const nowS = () => Math.floor(Date.now() / 1000);
+function setText(el, t) { if (el._t !== t) { el._t = t; el.textContent = t; } }
+function notify(msg) {
+  const el = document.createElement("div");
+  el.className = "toast"; el.textContent = msg;
+  $("toasts").appendChild(el);
+  setTimeout(() => el.remove(), 3100);
+  while ($("toasts").children.length > 3) $("toasts").firstChild.remove();
+}
+const hex = c => new THREE.Color(c);
+// Türkçe ilgi eki: "Ali" → "Ali'nin", "Can" → "Can'ın", "Umut" → "Umut'un"
+function possessive(name) {
+  const V = "aıoueiöüâîû", low = name.toLocaleLowerCase("tr-TR");
+  let last = ""; for (let i = low.length - 1; i >= 0; i--) if (V.includes(low[i])) { last = low[i]; break; }
+  const u = "aıâ".includes(last) && last ? "ı" : "oûu".includes(last) && last ? "u" : "öü".includes(last) && last ? "ü" : "i";
+  const endsV = low.length > 0 && V.includes(low[low.length - 1]);
+  return name + "'" + (endsV ? "n" + u + "n" : u + "n");
+}
+
+// ================================================================ Config (Godot sürümüyle aynı)
+const START_MONEY = 10, REBIRTH_BONUS = 0.5, OFFLINE_MAX = 7200, OFFLINE_RATE = 0.5;
+const BELT_SPEED = 2.6, CUBE = 0.42, CUBE_MAX = 150, PART_MAX = 220, WALK = 7.5, BOUND = 13.4;
+const UP_Y = 4, UP_Z = -5.6, STAIRS = [-13.4, -11.0, 0.6], SPAWN = { x: 0, z: 9.5 };
+const CASH_PAD = { x: 10.4, y: 0, z: 2.8 }, REBIRTH_PAD = { x: -3.2, y: 0, z: 3.4 }, PAD_R = 0.85;
+// Damlatıcı türleri: küp değeri (₺) ve bırakma aralığı (sn)
+const TIERS = {
+  bakir: { name: "Bakır", value: 3, every: 2.0, color: 0xf08a4b },
+  gumus: { name: "Gümüş", value: 12, every: 2.0, color: 0xd9e3ef },
+  altin: { name: "Altın", value: 40, every: 1.8, color: 0xffcf33 },
+  elmas: { name: "Elmas", value: 160, every: 1.6, color: 0x4fe3ff },
+  kristal: { name: "Kristal", value: 600, every: 1.5, color: 0xd47bff },
+  neon: { name: "Neon", value: 2400, every: 1.4, color: 0x3dff8b },
+};
+// Bantlar: z, zemin yüksekliği, başlangıç x, bitiş x (fırın ağzı), yön, damlatıcı direklerinin z'si
+const BELTS = {
+  A: { z: -1.5, y: 0, x0: -10.4, x1: 8.7, dir: 1, kz: -3.3 },
+  B: { z: -9.0, y: 4, x0: 9.4, x1: -10.1, dir: -1, kz: -10.8 },
+};
+// Satın alınanlar (sıra = ilerleme). after: önce alınması gereken · px/pz/k: "Al" karesinin yeri (k=1 üst kat)
+const ITEMS = [
+  { id: "bant1", name: "Konveyör Bandı", price: 0, after: "", kind: "belt", belt: "A", px: 0, pz: 4.5, k: 0 },
+  { id: "d1", name: "Bakır Damlatıcı", price: 10, after: "bant1", kind: "drop", belt: "A", x: -9, tier: "bakir", px: -9, pz: 0.9, k: 0 },
+  { id: "d2", name: "Bakır Damlatıcı 2", price: 35, after: "d1", kind: "drop", belt: "A", x: -7, tier: "bakir", px: -7, pz: 0.9, k: 0 },
+  { id: "zemin1", name: "Zemin Döşemesi", price: 60, after: "d1", kind: "build", px: -5, pz: 5, k: 0 },
+  { id: "u1", name: "Lazer Kapı", price: 120, after: "d2", kind: "up", belt: "A", x: 4.2, mult: 1.5, color: 0x35e0ff, style: "lazer", px: 4.2, pz: 0.9, k: 0 },
+  { id: "d3", name: "Gümüş Damlatıcı", price: 200, after: "d2", kind: "drop", belt: "A", x: -5, tier: "gumus", px: -5, pz: 0.9, k: 0 },
+  { id: "duvar_sol", name: "Sol Duvar", price: 300, after: "zemin1", kind: "build", px: -10.5, pz: 5.5, k: 0 },
+  { id: "zemin2", name: "Zemin Döşemesi 2", price: 380, after: "zemin1", kind: "build", px: 5, pz: 5, k: 0 },
+  { id: "d4", name: "Gümüş Damlatıcı 2", price: 520, after: "d3", kind: "drop", belt: "A", x: -3, tier: "gumus", px: -3, pz: 0.9, k: 0 },
+  { id: "duvar_sag", name: "Sağ Duvar", price: 650, after: "duvar_sol", kind: "build", px: 10.5, pz: 6.5, k: 0 },
+  { id: "lamba1", name: "Duvar Lambaları", price: 800, after: "duvar_sag", kind: "build", px: -8, pz: 8.5, k: 0 },
+  { id: "d5", name: "Altın Damlatıcı", price: 1000, after: "d4", kind: "drop", belt: "A", x: -1, tier: "altin", px: -1, pz: 0.9, k: 0 },
+  { id: "on_duvar", name: "Ön Duvar", price: 1250, after: "duvar_sag", kind: "build", px: -4, pz: 9.5, k: 0 },
+  { id: "u2", name: "Plazma Kemer", price: 1600, after: "d5", kind: "up", belt: "A", x: 6.6, mult: 2, color: 0xff4fd8, style: "kemer", px: 6.6, pz: 0.9, k: 0 },
+  { id: "kapi", name: "Giriş Kapısı", price: 2000, after: "on_duvar", kind: "build", px: 0, pz: 9.5, k: 0 },
+  { id: "pencere", name: "Pencereler", price: 2400, after: "on_duvar", kind: "build", px: 4, pz: 9.5, k: 0 },
+  { id: "d6", name: "Altın Damlatıcı 2", price: 3000, after: "d5", kind: "drop", belt: "A", x: 1, tier: "altin", px: 1, pz: 0.9, k: 0 },
+  { id: "bitki1", name: "Saksı Çiçekleri", price: 3600, after: "kapi", kind: "build", px: 8, pz: 9, k: 0 },
+  { id: "hali", name: "Kırmızı Halı", price: 4200, after: "kapi", kind: "build", px: 0, pz: 7, k: 0 },
+  { id: "bank", name: "Banklar", price: 5000, after: "bitki1", kind: "build", px: -6.5, pz: 7, k: 0 },
+  { id: "kat2", name: "İkinci Kat", price: 6500, after: "d6", kind: "build", px: 0, pz: 2.8, k: 0 },
+  { id: "merdiven", name: "Merdiven", price: 8000, after: "kat2", kind: "build", px: -12.2, pz: 2.4, k: 0 },
+  { id: "bant2", name: "Üst Kat Bandı", price: 10000, after: "merdiven", kind: "belt", belt: "B", px: -9, pz: -6.8, k: 1 },
+  { id: "d7", name: "Elmas Damlatıcı", price: 13000, after: "bant2", kind: "drop", belt: "B", x: 8, tier: "elmas", px: 8, pz: -6.8, k: 1 },
+  { id: "korkuluk", name: "Korkuluklar", price: 17000, after: "bant2", kind: "build", px: 11, pz: -6.8, k: 1 },
+  { id: "d8", name: "Elmas Damlatıcı 2", price: 22000, after: "d7", kind: "drop", belt: "B", x: 6, tier: "elmas", px: 6, pz: -6.8, k: 1 },
+  { id: "u3", name: "Kristal Halka", price: 30000, after: "d8", kind: "up", belt: "B", x: -4.8, mult: 2, color: 0xa970ff, style: "halka", px: -4.8, pz: -6.8, k: 1 },
+  { id: "lamba2", name: "Üst Kat Lambaları", price: 38000, after: "korkuluk", kind: "build", px: 11, pz: -8.6, k: 1 },
+  { id: "d9", name: "Kristal Damlatıcı", price: 48000, after: "d8", kind: "drop", belt: "B", x: 4, tier: "kristal", px: 4, pz: -6.8, k: 1 },
+  { id: "bitki2", name: "Üst Kat Bitkileri", price: 60000, after: "lamba2", kind: "build", px: 11, pz: -10.4, k: 1 },
+  { id: "d10", name: "Kristal Damlatıcı 2", price: 80000, after: "d9", kind: "drop", belt: "B", x: 2, tier: "kristal", px: 2, pz: -6.8, k: 1 },
+  { id: "otomat", name: "İçecek Otomatları", price: 100000, after: "bitki2", kind: "build", px: 10, pz: -12.3, k: 1 },
+  { id: "u4", name: "Neon Tünel", price: 130000, after: "d10", kind: "up", belt: "B", x: -7.2, mult: 2.5, color: 0xb6ff3d, style: "tunel", px: -7.2, pz: -6.8, k: 1 },
+  { id: "cati", name: "Tente Çatı", price: 170000, after: "otomat", kind: "build", px: 7.5, pz: -12.3, k: 1 },
+  { id: "d11", name: "Neon Damlatıcı", price: 220000, after: "d10", kind: "drop", belt: "B", x: 0, tier: "neon", px: 0, pz: -6.8, k: 1 },
+  { id: "su_kulesi", name: "Su Kulesi", price: 300000, after: "cati", kind: "build", px: 5, pz: -12.3, k: 1 },
+  { id: "d12", name: "Neon Damlatıcı 2", price: 400000, after: "d11", kind: "drop", belt: "B", x: -2, tier: "neon", px: -2, pz: -6.8, k: 1 },
+  { id: "tabela", name: "Neon Tabela", price: 520000, after: "su_kulesi", kind: "build", px: 2.5, pz: -12.3, k: 1 },
+  { id: "bayrak", name: "Bayraklar", price: 650000, after: "tabela", kind: "build", px: 0, pz: -12.3, k: 1 },
+  { id: "agac", name: "Ağaçlar", price: 800000, after: "bayrak", kind: "build", px: -6, pz: 10.2, k: 0 },
+  { id: "cesme", name: "Fıskiye", price: 1000000, after: "agac", kind: "build", px: -5.5, pz: 7.8, k: 0 },
+  { id: "vitrin", name: "Mücevher Vitrini", price: 1250000, after: "cesme", kind: "build", px: 6.8, pz: 9.8, k: 0 },
+  { id: "fener", name: "Sokak Lambaları", price: 1500000, after: "vitrin", kind: "build", px: -4, pz: 10, k: 0 },
+  { id: "heykel", name: "Altın Küp Heykeli", price: 1900000, after: "fener", kind: "build", px: 5.8, pz: 6.6, k: 0 },
+  { id: "kupa", name: "Dev Kupa", price: 2400000, after: "heykel", kind: "build", px: 0, pz: 8.4, k: 0 },
+];
+const ITEM = Object.fromEntries(ITEMS.map(o => [o.id, o]));
+// Küp Jeton (Küp Evreni platform parası) ile alınanlar
+const PASSES = [
+  { id: "double", name: "2x Para", icon: "💎", jeton: 80, desc: "Bütün küpler iki kat para eder. Kalıcı." },
+  { id: "auto", name: "Otomatik Toplama", icon: "🤖", jeton: 50, desc: "Para Kasa'da beklemez, doğrudan cebine gelir. Kalıcı." },
+];
+// Palet (oyuncak gibi: açık gri zemin, turkuaz / turuncu / mor vurgular)
+const C = { floor: 0xbfc7d2, tile1: 0xeceff4, tile2: 0xdde3eb, teal: 0x19b3a6, orange: 0xff8a3d, purple: 0x7c5cff, wall: 0xf1ece3, dark: 0x2f3a4a, body: 0x3d4a5e };
+
+// ================================================================ Kayıt
+const SAVE_KEY = "paraFabrikasi";
+function freshSave() {
+  return { money: START_MONEY, totalEarned: 0, register: 0, bought: {}, rebirths: 0, lastSeen: 0, passes: {}, giftIds: [], helpSeen: false, muted: false, px: SPAWN.x, pz: SPAWN.z };
+}
+const num = v => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : 0; };
+let save = freshSave();
+try {
+  const s = JSON.parse(localStorage.getItem(SAVE_KEY) || "null");
+  if (s && typeof s === "object") {
+    save = { ...save, ...s };
+    const b = {}; if (s.bought && typeof s.bought === "object") for (const k in s.bought) if (s.bought[k] && ITEM[k]) b[k] = true;
+    save.bought = b;
+    const p = {}; if (s.passes && typeof s.passes === "object") for (const k in s.passes) p[k] = !!s.passes[k];
+    save.passes = p;
+    save.giftIds = Array.isArray(s.giftIds) ? s.giftIds : [];
+  }
+} catch (e) {}
+for (const k of ["money", "totalEarned", "register"]) save[k] = Math.min(1e15, num(save[k]));
+save.rebirths = Math.floor(Math.min(1000, num(save.rebirths))); save.lastSeen = num(save.lastSeen);
+save.helpSeen = !!save.helpSeen; save.muted = !!save.muted;
+save.px = clamp(Number.isFinite(+save.px) ? +save.px : SPAWN.x, -BOUND, BOUND); save.pz = clamp(Number.isFinite(+save.pz) ? +save.pz : SPAWN.z, -BOUND, BOUND);
+let lastSave = 0;
+function persist(force) {
+  if (!force && performance.now() - lastSave < 4000) return;
+  lastSave = performance.now();
+  save.lastSeen = nowS(); save.px = Math.round(pl.x * 100) / 100; save.pz = Math.round(pl.z * 100) / 100;
+  for (const k of ["money", "register", "totalEarned"]) save[k] = Math.round(save[k] * 100) / 100;
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) {}
+  reportStats();
+}
+
+// ================================================================ Küp Evreni köprüsü
+const platform = { inside: window.parent !== window, profile: null, reqs: {} };
+function machineCount() { let have = 0, all = 0; for (const o of ITEMS) if (o.kind !== "build") { all++; if (owns(o.id)) have++; } return [have, all]; }
+function stats() {
+  const m = machineCount();
+  return { "💰 Para": short(save.money), "📈 Gelir/sn": short(incomePerSec()), "🏭 Makine": m[0] + "/" + m[1], "♻️ Yeniden Doğuş": String(save.rebirths) };
+}
+function reportStats() {
+  if (!platform.inside) return;
+  parent.postMessage({ type: "kup:stats", stats: stats() }, "*");
+}
+function requestPurchase(item, done) {
+  if (!platform.inside) { notify("Küp Jeton ile almak için oyunu Küp Evreni'nden aç (ana klasördeki index.html)"); return; }
+  const reqId = Math.random().toString(36).slice(2);
+  platform.reqs[reqId] = done;
+  parent.postMessage({ type: "kup:purchase", reqId, id: item.id, name: item.name, price: item.jeton, icon: item.icon }, "*");
+}
+addEventListener("message", e => {
+  if (!platform.inside || e.source !== parent) return;
+  const m = e.data || {};
+  if (m.type === "kup:profile") { platform.profile = m; rebuildAvatar(); updateSign(); rerenderOpen(); }
+  else if (m.type === "kup:purchaseResult") {
+    if (platform.profile) platform.profile.jeton = m.jeton;
+    const done = platform.reqs[m.reqId]; delete platform.reqs[m.reqId];
+    if (done) done(!!m.ok);
+    rerenderOpen();
+  }
+  else if (m.type === "kup:gift") receiveGifts(m.gifts);
+});
+
+// ================================================================ Küp Evreni hediyeleri (admin panelinden)
+function applyGiftItem(key, n) {
+  if (key === "money") { save.money = Math.min(1e15, save.money + Math.min(n, 1e12)); return true; }
+  const [kind, id] = key.split(":");
+  if (kind === "pass" && (id === "double" || id === "auto")) {
+    if (save.passes[id]) return false;
+    save.passes[id] = true; if (id === "auto") flushRegister(); return true;
+  }
+  return false;
+}
+function receiveGifts(gifts) {
+  save.giftIds = save.giftIds || [];
+  let any = false;
+  const acks = [];
+  for (const g of Array.isArray(gifts) ? gifts : []) {
+    if (!g || !g.gid) continue;
+    const skipped = [];
+    if (!save.giftIds.includes(g.gid)) {
+      for (const it of g.items || []) {
+        const n = Math.max(1, Math.floor(Math.min(Number(it.n) || 1, 1e12)));
+        if (applyGiftItem(String(it.key), n)) any = true; else skipped.push(String(it.key));
+      }
+      save.giftIds = [g.gid, ...save.giftIds].slice(0, 200);
+    }
+    acks.push({ type: "kup:giftAck", gid: g.gid, skipped });
+  }
+  persist(true);
+  if (platform.inside) for (const a of acks) parent.postMessage(a, "*");
+  if (any) { SFX.collect(); notify("🎁 Hediye alındı!"); updateHud(true); rerenderOpen(); }
+}
+
+// ================================================================ Ses (WebAudio ile sentezlenir)
+const A = { ctx: null };
+function initAudio() {
+  if (A.ctx) { if (A.ctx.state === "suspended") A.ctx.resume(); return; }
+  try { A.ctx = (c => { try { const g = c.createGain(), d = c.destination, oku = () => { let s = {}; try { s = JSON.parse(localStorage.getItem("kupSes") || "{}"); } catch (e) {} const v = (s.ana ?? 1) * (s.efekt ?? 1); g.gain.value = v >= 0 && v <= 1 ? v : 1; }; oku(); g.connect(d); Object.defineProperty(c, "destination", { get: () => g }); addEventListener("storage", e => { if (e.key === "kupSes") oku(); }); } catch (e) {} return c; })(new (window.AudioContext || window.webkitAudioContext)()); /* Küp Evreni ses ayarı (Profil → Ses) */ } catch (e) { return; }
+  A.master = A.ctx.createGain(); A.master.gain.value = save.muted ? 0 : 0.5; A.master.connect(A.ctx.destination);
+  A.noise = A.ctx.createBuffer(1, A.ctx.sampleRate, A.ctx.sampleRate);
+  const d = A.noise.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+}
+const audioOn = () => A.ctx && A.ctx.state === "running";
+function tone(freq, dur, type = "sine", gain = 0.1, freqEnd, delay = 0) {
+  if (!audioOn()) return;
+  const t0 = A.ctx.currentTime + delay, o = A.ctx.createOscillator(), g = A.ctx.createGain();
+  o.type = type; o.frequency.setValueAtTime(freq, t0);
+  if (freqEnd) o.frequency.exponentialRampToValueAtTime(freqEnd, t0 + dur);
+  g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(gain, t0 + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  o.connect(g).connect(A.master); o.start(t0); o.stop(t0 + dur + 0.05);
+}
+function noise(dur, gain, freq, type = "lowpass", delay = 0) {
+  if (!audioOn()) return;
+  const t0 = A.ctx.currentTime + delay, s = A.ctx.createBufferSource(), f = A.ctx.createBiquadFilter(), g = A.ctx.createGain();
+  s.buffer = A.noise; f.type = type; f.frequency.value = freq;
+  g.gain.setValueAtTime(gain, t0); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  s.connect(f).connect(g).connect(A.master); s.start(t0, Math.random() * 0.5); s.stop(t0 + dur + 0.05);
+}
+const lastSfx = {};
+const limit = (k, gap) => { const t = performance.now() / 1000; if (t - (lastSfx[k] || -9) < gap) return false; lastSfx[k] = t; return true; };
+const vary = v => 1 + (Math.random() * 2 - 1) * v;
+const SFX = {
+  buy: () => { const p = vary(0.08); tone(420 * p, 0.14, "triangle", 0.2, 900 * p); tone(880 * p, 0.2, "sine", 0.09, 1320 * p, 0.07); noise(0.05, 0.1, 2500, "bandpass"); },
+  big: () => { const p = vary(0.06); tone(330 * p, 0.14, "triangle", 0.2, 700 * p); [523, 659, 784].forEach((f, i) => tone(f * p, i === 2 ? 0.4 : 0.25, "triangle", 0.1, undefined, 0.08 + i * 0.06)); noise(0.3, 0.12, 300); },
+  collect: () => { const p = vary(0.05); [1318, 1568, 1760, 2093].forEach((f, i) => tone(f * p, i === 3 ? 0.25 : 0.1, "square", 0.045, undefined, i * 0.05)); noise(0.2, 0.08, 6000, "bandpass", 0.02); },
+  drop: () => { if (!limit("drop", 0.09)) return; const p = vary(0.25); tone(950 * p, 0.06, "sine", 0.05, 620 * p); },
+  furnace: () => { if (!limit("furnace", 0.14)) return; const p = vary(0.15); tone(1046 * p, 0.16, "sine", 0.05); noise(0.12, 0.06, 900, "bandpass"); },
+  laser: () => { if (!limit("laser", 0.08)) return; const p = vary(0.2); tone(1500 * p, 0.09, "sawtooth", 0.025, 2400 * p); },
+  bad: () => tone(200, 0.2, "sawtooth", 0.06, 140),
+  click: () => tone(620, 0.05, "square", 0.03),
+  rebirth: () => { [523, 659, 784, 1046].forEach((f, i) => tone(f, i === 3 ? 0.6 : 0.18, "triangle", 0.11, undefined, i * 0.12)); tone(1318, 0.6, "sine", 0.06, undefined, 0.36); },
+};
+
+// ================================================================ 3D sahne
+let renderer;
+try { renderer = new THREE.WebGLRenderer({ canvas: $("game"), antialias: true, alpha: true }); }
+catch (e) { $("noWebgl").style.display = "flex"; throw e; }
+renderer.setClearColor(0x000000, 0);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(0xd6ecff, 45, 120);
+const camera = new THREE.PerspectiveCamera(52, 1, 0.3, 220);
+scene.add(new THREE.HemisphereLight(0xf2f7ff, 0xc4ccd8, 0.62));
+const sun = new THREE.DirectionalLight(0xfff3e2, 0.62);
+sun.position.set(-9, 20, 11); sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024);
+Object.assign(sun.shadow.camera, { left: -22, right: 22, top: 22, bottom: -22, near: 1, far: 70 });
+sun.shadow.bias = -0.0008;
+scene.add(sun); scene.add(sun.target);
+
+const vcMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+const glowMat = new THREE.MeshBasicMaterial({ vertexColors: true });
+const goldMat = new THREE.MeshPhongMaterial({ color: 0xffc533, emissive: 0x7a4d00, shininess: 80, specular: 0xffffff });
+const glassMat = new THREE.MeshPhongMaterial({ color: 0xb8e6ff, transparent: true, opacity: 0.35, shininess: 90, depthWrite: false });
+// Küpler: örnek rengi kadar ışık da saçar (ışıltılı)
+const cubeMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
+cubeMat.onBeforeCompile = sh => { sh.fragmentShader = sh.fragmentShader.replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\n totalEmissiveRadiance += diffuseColor.rgb * 0.6;"); };
+const padOn = new THREE.MeshBasicMaterial({ vertexColors: true });
+const padOff = new THREE.MeshLambertMaterial({ vertexColors: true, color: 0x8a9a90 });
+
+// ---------------------------------------------------------------- Birleşik mesh (köşe renkli, az çizim çağrısı)
+const newGeo = () => ({ p: [], n: [], c: [] });
+const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3(), _n = new THREE.Vector3(), _t1 = new THREE.Vector3(), _t2 = new THREE.Vector3();
+function tri(g, a, b, c, n, col) {
+  _t1.subVectors(b, a); _t2.subVectors(c, a); _t1.cross(_t2);
+  if (_t1.dot(n) < 0) { const t = b; b = c; c = t; }
+  g.p.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+  for (let i = 0; i < 3; i++) { g.n.push(n.x, n.y, n.z); g.c.push(col.r, col.g, col.b); }
+}
+const FACES = [[[1, 0, 0], [0, 1, 0], [0, 0, 1]], [[-1, 0, 0], [0, 0, 1], [0, 1, 0]], [[0, 1, 0], [0, 0, 1], [1, 0, 0]],
+  [[0, -1, 0], [1, 0, 0], [0, 0, 1]], [[0, 0, 1], [1, 0, 0], [0, 1, 0]], [[0, 0, -1], [0, 1, 0], [1, 0, 0]]];
+const rotX = a => new THREE.Matrix4().makeRotationX(a), rotY = a => new THREE.Matrix4().makeRotationY(a), rotZ = a => new THREE.Matrix4().makeRotationZ(a);
+const _cc = {};
+const col = h => _cc[h] || (_cc[h] = new THREE.Color(h));
+// Kutu: boyut (w, h, d), merkez (x, y, z), renk, isteğe bağlı dönüş (Matrix4)
+function K(g, w, h, d, x, y, z, hx, rot) {
+  const cl = col(hx), m = new THREE.Vector3(x, y, z), half = new THREE.Vector3(w / 2, h / 2, d / 2);
+  const P = v => { if (rot) v.applyMatrix4(rot); return v.add(m); };
+  for (const [nv, uv, vv] of FACES) {
+    const nn = new THREE.Vector3(...nv).multiply(half), uu = new THREE.Vector3(...uv).multiply(half), ww = new THREE.Vector3(...vv).multiply(half);
+    const c0 = P(nn.clone().sub(uu).sub(ww)), c1 = P(nn.clone().add(uu).sub(ww)), c2 = P(nn.clone().add(uu).add(ww)), c3 = P(nn.clone().sub(uu).add(ww));
+    const bn = new THREE.Vector3(...nv); if (rot) bn.transformDirection(rot);
+    tri(g, c0, c1, c2, bn, cl); tri(g, c0, c2, c3, bn, cl);
+  }
+}
+// Silindir / koni: üst ve alt yarıçap, yükseklik, merkez
+function S(g, rt, rb, h, x, y, z, hx, seg = 10, rot) {
+  const cl = col(hx), m = new THREE.Vector3(x, y, z);
+  const P = (px, py, pz) => { const v = new THREE.Vector3(px, py, pz); if (rot) v.applyMatrix4(rot); return v.add(m); };
+  const D = (px, py, pz) => { const v = new THREE.Vector3(px, py, pz); if (rot) v.transformDirection(rot); return v.normalize(); };
+  for (let i = 0; i < seg; i++) {
+    const a0 = i / seg * Math.PI * 2, a1 = (i + 1) / seg * Math.PI * 2, am = (a0 + a1) / 2;
+    const p0 = P(Math.cos(a0) * rb, -h / 2, Math.sin(a0) * rb), p1 = P(Math.cos(a1) * rb, -h / 2, Math.sin(a1) * rb);
+    const p2 = P(Math.cos(a1) * rt, h / 2, Math.sin(a1) * rt), p3 = P(Math.cos(a0) * rt, h / 2, Math.sin(a0) * rt);
+    const n = D(Math.cos(am), (rb - rt) / Math.max(0.001, h), Math.sin(am));
+    if (rb > 0.0001) tri(g, p0, p1, p2, n, cl);
+    if (rt > 0.0001) { tri(g, p0, p2, p3, n, cl); tri(g, P(0, h / 2, 0), p3, p2, D(0, 1, 0), cl); }
+    if (rb > 0.0001) tri(g, P(0, -h / 2, 0), p0, p1, D(0, -1, 0), cl);
+  }
+}
+function toGeo(g) {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(g.p, 3));
+  geo.setAttribute("normal", new THREE.Float32BufferAttribute(g.n, 3));
+  geo.setAttribute("color", new THREE.Float32BufferAttribute(g.c, 3));
+  return geo;
+}
+function meshOf(g, parent, shadow = true, material = vcMat) {
+  if (!g.p.length) return null;
+  const m = new THREE.Mesh(toGeo(g), material);
+  m.castShadow = shadow; m.receiveShadow = true;
+  parent.add(m); return m;
+}
+const glowOf = (g, parent) => meshOf(g, parent, false, glowMat);
+
+// ---------------------------------------------------------------- Yazı (tuval dokulu)
+function drawLines(cv, lines, opt = {}) {
+  const x = cv.getContext("2d");
+  x.clearRect(0, 0, cv.width, cv.height);
+  x.textAlign = "center"; x.textBaseline = "middle"; x.lineJoin = "round";
+  let y = 0; const tot = lines.reduce((s, l) => s + l[2] * 1.15, 0);
+  y = (cv.height - tot) / 2;
+  for (const [t, c, sz] of lines) {
+    x.font = `900 ${sz}px "Nunito", "Trebuchet MS", system-ui, sans-serif`;
+    const cy = y + sz * 0.575;
+    if (opt.glow) { x.shadowColor = opt.glow; x.shadowBlur = 24; }
+    x.lineWidth = Math.max(6, sz * 0.2); x.strokeStyle = opt.stroke || "rgba(14,20,44,0.9)"; x.strokeText(t, cv.width / 2, cy);
+    x.shadowBlur = 0; x.fillStyle = c; x.fillText(t, cv.width / 2, cy);
+    y += sz * 1.15;
+  }
+}
+function textSprite(lines, worldH, w = 512, h = 160, opt = {}) {
+  const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
+  drawLines(cv, lines, opt);
+  const tex = new THREE.CanvasTexture(cv); tex.anisotropy = 4;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
+  sp.scale.set(worldH * w / h, worldH, 1);
+  sp.userData = { cv, tex, key: JSON.stringify(lines), opt };
+  return sp;
+}
+function setSprite(sp, lines) {
+  const k = JSON.stringify(lines);
+  if (sp.userData.key === k) return;
+  sp.userData.key = k; drawLines(sp.userData.cv, lines, sp.userData.opt); sp.userData.tex.needsUpdate = true;
+}
+function textPlane(lines, worldW, w, h, opt = {}) {
+  const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
+  drawLines(cv, lines, opt);
+  const tex = new THREE.CanvasTexture(cv); tex.anisotropy = 4;
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(worldW, worldW * h / w), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }));
+  m.userData = { cv, tex, key: JSON.stringify(lines), opt };
+  return m;
+}
+
+// ---------------------------------------------------------------- Çevre
+{
+  const g = newGeo();
+  K(g, 260, 0.2, 260, 0, -0.4, 0, 0x9fd98b);
+  K(g, 34, 0.1, 34, 0, -0.27, 0, 0xd3d9e0);
+  K(g, 120, 0.06, 7, 0, -0.29, 22, 0x4a5160);
+  for (let i = 0; i < 12; i++) K(g, 2.2, 0.02, 0.35, -55 + i * 10, -0.25, 22, 0xffffff);
+  K(g, 28.6, 0.26, 28.6, 0, -0.17, 0, C.teal);
+  K(g, 28, 0.3, 28, 0, -0.15, 0, C.floor);
+  for (const sx of [-1, 1]) { K(g, 24.6, 0.24, 24.6, sx * 34, -0.2, 0, 0xb9c2cc); K(g, 24, 0.26, 24, sx * 34, -0.17, 0, 0xd5dbe2); }
+  for (const [x, z, s] of [[-17, -12, 1.1], [-18, 6, 0.9], [17.5, -4, 1.0], [18, 9, 0.8], [-9, 17.5, 0.9], [11, 17.2, 1.0], [-22, -18, 1.2], [21, -17, 1.0]]) {
+    K(g, 1.4 * s, 0.9 * s, 1.4 * s, x, 0.1 * s - 0.05, z, 0x7cc46a); K(g, 1.0 * s, 0.7 * s, 1.0 * s, x + 0.3, 0.55 * s, z - 0.2, 0x8fd47c);
+  }
+  meshOf(g, scene, false);
+}
+// İkinci katın yeri: sarı-siyah uyarı şeridi (İkinci Kat alınınca kalkar)
+const hazard = new THREE.Group(); scene.add(hazard);
+{ const g = newGeo(); for (let i = 0; i < 28; i++) K(g, 1, 0.03, 0.35, -13.5 + i + 0.5, 0.015, UP_Z - 0.2, i % 2 ? C.dark : 0xffd23f); meshOf(g, hazard, false); }
+
+// Bant dokusu: koyu zemin üstünde açık oklar (kaydırılarak akıyor gibi görünür)
+const beltTex = (() => {
+  const cv = document.createElement("canvas"); cv.width = cv.height = 64;
+  const x = cv.getContext("2d"); const im = x.createImageData(64, 64);
+  for (let yy = 0; yy < 64; yy++) for (let xx = 0; xx < 64; xx++) {
+    const d = Math.abs(yy - 31.5), u = ((xx - d * 0.9) % 64 + 64) % 64;
+    let c = [0x2a, 0x30, 0x39]; if (u < 12 && d < 26) c = [0x4a, 0x54, 0x63]; if (yy < 3 || yy > 60) c = [0x1d, 0x22, 0x29];
+    const i = (yy * 64 + xx) * 4; im.data[i] = c[0]; im.data[i + 1] = c[1]; im.data[i + 2] = c[2]; im.data[i + 3] = 255;
+  }
+  x.putImageData(im, 0, 0);
+  const t = new THREE.CanvasTexture(cv); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4; return t;
+})();
+
+// Paylaşılan "Al" karesi geometrileri
+const padBaseGeo = (() => { const g = newGeo(); S(g, 0.98, 1.02, 0.08, 0, 0.04, 0, 0xf4f7fb, 20); return toGeo(g); })();
+const padDiscGeo = (hx, inner) => { const g = newGeo(); S(g, 0.8, 0.8, 0.1, 0, 0.07, 0, hx, 20); S(g, 0.52, 0.52, 0.02, 0, 0.125, 0, inner, 20); return toGeo(g); };
+const greenDisc = padDiscGeo(0x2fe07a, 0x16a34a), goldDisc = padDiscGeo(0xffc533, 0xfff1a8), purpleDisc = padDiscGeo(0xb18cff, 0x7c5cff);
+
+// Küpler ve parçacıklar: tek InstancedMesh (her biri tek çizim çağrısı)
+// (örnek rengi köşe rengiyle çarpılır: kutulara beyaz köşe rengi verilir)
+const whiteBox = s => { const g = new THREE.BoxGeometry(s, s, s); g.setAttribute("color", new THREE.Float32BufferAttribute(new Array(g.attributes.position.count * 3).fill(1), 3)); return g; };
+const cubeMesh = new THREE.InstancedMesh(whiteBox(CUBE), cubeMat, CUBE_MAX);
+const partMesh = new THREE.InstancedMesh(whiteBox(1), new THREE.MeshBasicMaterial({ color: 0xffffff, vertexColors: true }), PART_MAX);
+for (const im of [cubeMesh, partMesh]) {
+  im.instanceMatrix.setUsage(THREE.DynamicDrawUsage); im.frustumCulled = false;
+  for (let i = 0; i < im.instanceMatrix.count; i++) im.setColorAt(i, col(0xffffff));
+  im.count = 0;
+  scene.add(im);
+}
+// Hedef ışını ve yön oku
+const beam = (() => {
+  const cv = document.createElement("canvas"); cv.width = 4; cv.height = 64;
+  const x = cv.getContext("2d"), gr = x.createLinearGradient(0, 0, 0, 64);
+  gr.addColorStop(0, "rgba(255,255,255,0)"); gr.addColorStop(1, "rgba(255,255,255,1)"); x.fillStyle = gr; x.fillRect(0, 0, 4, 64);
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.62, 12, 16, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0x4dffa0, map: new THREE.CanvasTexture(cv), transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+  m.visible = false; scene.add(m); return m;
+})();
+const arrow = (() => {
+  const g = newGeo(), c0 = col(0x4dffa0), up = new THREE.Vector3(0, 1, 0);
+  for (const z0 of [0, -0.3]) {
+    tri(g, new THREE.Vector3(0, 0, 0.55 + z0), new THREE.Vector3(-0.5, 0, 0.05 + z0), new THREE.Vector3(0, 0, 0.3 + z0), up, c0);
+    tri(g, new THREE.Vector3(0, 0, 0.55 + z0), new THREE.Vector3(0.5, 0, 0.05 + z0), new THREE.Vector3(0, 0, 0.3 + z0), up, c0);
+  }
+  const m = new THREE.Mesh(toGeo(g), new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }));
+  m.visible = false; scene.add(m); return m;
+})();
+
+// ================================================================ Ekonomi
+const owns = id => !!save.bought[id];
+const hasPass = id => !!save.passes[id];
+const mult = () => (1 + REBIRTH_BONUS * save.rebirths) * (hasPass("double") ? 2 : 1);
+function beltMult(b) { let m = 1; for (const o of ITEMS) if (o.kind === "up" && o.belt === b && owns(o.id)) m *= o.mult; return m; }
+// Sabit durumdaki gelir (₺/sn): damlatıcılar × yükselticiler × doğuş × geçiş
+function incomePerSec() {
+  let t = 0;
+  for (const b of ["A", "B"]) { let g = 0; for (const o of ITEMS) if (o.kind === "drop" && o.belt === b && owns(o.id)) g += TIERS[o.tier].value / TIERS[o.tier].every; t += g * beltMult(b); }
+  return t * mult();
+}
+const visibleItems = () => ITEMS.filter(o => !owns(o.id) && (!o.after || owns(o.after))).map(o => o.id);
+const allBought = () => Object.keys(save.bought).length >= ITEMS.length;
+function padPos(id) {
+  if (id === "kasa") return CASH_PAD; if (id === "dogus") return REBIRTH_PAD;
+  const o = ITEM[id]; return { x: o.px, y: o.k ? UP_Y : 0, z: o.pz };
+}
+function buy(id) {
+  const o = ITEM[id];
+  if (!o || owns(id) || !visibleItems().includes(id)) return false;
+  if (save.money < o.price) {
+    SFX.bad();
+    const miss = o.price - save.money;
+    notify(!hasPass("auto") && save.register >= miss ? `₺${short(miss)} daha lazım · Kasada para var: Para Topla'ya bas!` : `₺${short(miss)} daha lazım`);
+    return false;
+  }
+  save.money -= o.price;
+  save.bought[id] = true;
+  removePad(id);
+  buildItem(id, true);
+  buildBlockers();
+  const p = padPos(id);
+  (o.price >= 5000 || o.kind === "belt" ? SFX.big : SFX.buy)();
+  if (o.price >= 5000 || id === "kat2") shake = Math.max(shake, id === "kat2" ? 0.6 : 0.35);
+  const gp = new THREE.Vector3(); built[id].getWorldPosition(gp);
+  burst(gp.add(new THREE.Vector3(0, 1, 0)), 26, [0x39e67a, 0xffd23f, 0x35e0ff, 0xff8a3d, C.purple]);
+  floatText(o.name + " kuruldu!", new THREE.Vector3(p.x, p.y + 2.2, p.z), "#ffffff", true);
+  refreshPads();
+  if (allBought()) { notify("🎉 Fabrika tamamlandı! ♻️ Yeniden Doğuş karesi açıldı"); SFX.rebirth(); }
+  persist(); updateHud(true);
+  return true;
+}
+// Küp fırına düştü: parası kasaya (Otomatik Toplama'da doğrudan cebe)
+function addMoney(n) {
+  if (hasPass("auto")) { save.money = Math.min(1e15, save.money + n); save.totalEarned = Math.min(1e15, save.totalEarned + n); }
+  else save.register = Math.min(1e15, save.register + n);
+}
+function flushRegister() {
+  const n = save.register; if (n <= 0) return;
+  save.register = 0; save.money = Math.min(1e15, save.money + n); save.totalEarned = Math.min(1e15, save.totalEarned + n);
+}
+function collect() {
+  const n = Math.floor(save.register);
+  if (n < 1) return 0;
+  save.register -= n; save.money = Math.min(1e15, save.money + n); save.totalEarned = Math.min(1e15, save.totalEarned + n);
+  SFX.collect();
+  for (let i = 0, c = Math.min(40, 12 + Math.floor(Math.log(n + 1) * 2.5)); i < c; i++) {
+    const a = Math.random() * Math.PI * 2, s = 1.5 + Math.random() * 2.5;
+    addPart(new THREE.Vector3(CASH_PAD.x + Math.cos(a) * 0.4, 0.3, CASH_PAD.z + Math.sin(a) * 0.4), new THREE.Vector3(Math.cos(a) * s, 6 + Math.random() * 4, Math.sin(a) * s),
+      [0xffd23f, 0xffe98a, 0xffb800][i % 3], 1.2, 0.2);
+  }
+  floatText("+₺" + short(n), new THREE.Vector3(CASH_PAD.x, 2.6, CASH_PAD.z), "#ffe14d", true);
+  persist(); updateHud(true);
+  return n;
+}
+function rebirth() {
+  if (!allBought()) return false;
+  save.rebirths++; save.bought = {}; save.money = START_MONEY; save.register = 0;
+  if (pl.z < UP_Z + 0.5 || pl.y > 0.5) { pl.x = SPAWN.x; pl.z = SPAWN.z; pl.y = 0; }
+  buildFactory();
+  shownMoney = save.money;
+  SFX.rebirth(); shake = 0.5;
+  burst(new THREE.Vector3(pl.x, 1.5, pl.z), 40, [0xb18cff, 0xffd23f, 0x35e0ff]);
+  notify("♻️ Yeniden doğdun! Gelir artık x" + dec(1 + REBIRTH_BONUS * save.rebirths));
+  persist(true); updateHud(true); rerenderOpen();
+  return true;
+}
+function applyOffline() {
+  if (save.lastSeen <= 0) return 0;
+  const gone = nowS() - save.lastSeen;
+  if (gone < 60) return 0;
+  const k = Math.floor(incomePerSec() * Math.min(gone, OFFLINE_MAX) * OFFLINE_RATE);
+  if (k <= 0) return 0;
+  save.money = Math.min(1e15, save.money + k); save.totalEarned = Math.min(1e15, save.totalEarned + k); save.lastSeen = nowS();
+  return k;
+}
+
+// ================================================================ Fabrika kurulumu
+const built = {};             // id → Group
+const pads = {};              // id → {g, disc, label}
+let cashPad = null, rebirthPad = null, cashScreen = null, signText = null;
+let droppers = [], uppers = { A: [], B: [] }, spinners = [], flags = [], growing = [], blockers = [], cubes = [], parts = [];
+const furnaceSum = { A: 0, B: 0 }, furnaceT = { A: 0, B: 0 };
+
+function buildFactory() {
+  for (const id in built) { scene.remove(built[id]); delete built[id]; }
+  for (const id in pads) { scene.remove(pads[id].g); delete pads[id]; }
+  if (cashPad) { scene.remove(cashPad.g); cashPad = null; }
+  droppers = []; uppers = { A: [], B: [] }; spinners = []; flags = []; growing = []; cubes = []; cashScreen = null; signText = null;
+  hazard.visible = true;
+  for (const o of ITEMS) if (owns(o.id)) buildItem(o.id, false);
+  buildBlockers(); refreshPads();
+}
+function makePad(lines, pos, disc) {
+  const g = new THREE.Group(); g.position.set(pos.x, pos.y, pos.z); scene.add(g);
+  const base = new THREE.Mesh(padBaseGeo, vcMat); base.receiveShadow = true; g.add(base);
+  const d = new THREE.Mesh(disc || greenDisc, padOn); g.add(d);
+  const label = textSprite(lines, 1.05, 512, 160); label.position.y = 1.85; g.add(label);
+  return { g, disc: d, label };
+}
+const padLines = (o, ok) => [[o.name, "#ffffff", 50], [o.price === 0 ? "BEDAVA" : "₺" + short(o.price), ok ? "#5dff9b" : "#ff6b6b", 62]];
+function removePad(id) {
+  const p = pads[id]; if (!p) return; delete pads[id];
+  growing.push({ g: p.g, t: 0, shrink: true });
+}
+function refreshPads() {
+  const vis = visibleItems();
+  for (const id in pads) if (!vis.includes(id)) removePad(id);
+  for (const id of vis) {
+    if (pads[id]) continue;
+    const o = ITEM[id], ok = save.money >= o.price;
+    const p = makePad(padLines(o, ok), padPos(id)); p.ok = ok; p.disc.material = ok ? padOn : padOff;
+    pads[id] = p; p.g.scale.setScalar(0.01); growing.push({ g: p.g, t: -0.25 });
+  }
+  if (allBought() && !rebirthPad) {
+    rebirthPad = makePad([["♻️ Yeniden Doğuş", "#ffffff", 50], ["+%50 kalıcı gelir", "#e2c6ff", 52]], REBIRTH_PAD, purpleDisc);
+  } else if (!allBought() && rebirthPad) { scene.remove(rebirthPad.g); rebirthPad = null; }
+}
+// Yeşil fiyat = alınabilir, kırmızı = para yetmiyor
+function padColors() {
+  for (const id in pads) {
+    const p = pads[id], ok = save.money >= ITEM[id].price;
+    if (p.ok !== ok) { p.ok = ok; setSprite(p.label, padLines(ITEM[id], ok)); p.disc.material = ok ? padOn : padOff; }
+  }
+}
+function buildBlockers() {
+  const B = blockers = [];
+  for (const b of ["A", "B"]) {
+    if (!owns(b === "A" ? "bant1" : "bant2")) continue;
+    const d = BELTS[b], k = b === "A" ? 0 : 1, fx = d.x1 + d.dir * 1.25;
+    B.push([Math.min(d.x0, d.x1) - 0.3, d.z - 0.9, Math.max(d.x0, d.x1) + 0.3, d.z + 0.9, k]);
+    B.push([fx - 1.35, d.z - 1.45, fx + 1.35, d.z + 1.45, k]);
+  }
+  if (owns("bant1")) B.push([9.1, 0.25, 11.7, 0.85, 0]);
+  for (const d of droppers) { const kz = BELTS[d.belt].kz; B.push([d.x - 0.4, kz - 0.45, d.x + 0.4, kz + 0.45, d.belt === "A" ? 0 : 1]); }
+  if (owns("duvar_sol")) B.push([-14.5, -6, -13.4, 12.3, 0]);
+  if (owns("duvar_sag")) B.push([13.4, -6, 14.5, 12.3, 0]);
+  if (owns("on_duvar")) { B.push([-14.5, 11.75, -2, 12.3, 0]); B.push([2, 11.75, 14.5, 12.3, 0]); }
+  if (owns("bitki1")) for (const [x, z] of [[-12.9, 11.3], [12.9, 11.3], [-2.7, 11.3], [2.7, 11.3]]) B.push([x - 0.45, z - 0.45, x + 0.45, z + 0.45, 0]);
+  if (owns("bank")) for (const x of [-9.5, -6.2]) B.push([x - 1, 10.8, x + 1, 11.6, 0]);
+  if (owns("cesme")) B.push([-10, 6, -7, 9, 0]);
+  if (owns("vitrin")) B.push([8.6, 9.2, 10.6, 10.6, 0]);
+  if (owns("heykel")) B.push([7.7, 5.7, 9.3, 7.3, 0]);
+  if (owns("kupa")) B.push([-1.1, 4.1, 1.1, 6.3, 0]);
+  if (owns("otomat")) B.push([-8.7, -13.6, -5.9, -12.5, 1]);
+  if (owns("su_kulesi")) B.push([11.3, -13.6, 13.6, -11.3, 1]);
+  if (owns("lamba2")) for (const [x, z] of [[12.9, -6.3], [12.9, -10.6], [-12.9, -12.9], [-3.5, -13.1], [3.5, -13.1]]) B.push([x - 0.3, z - 0.3, x + 0.3, z + 0.3, 1]);
+  if (owns("bitki2")) for (const [x, z] of [[12.95, -8.4], [-1.6, -13.05], [-12.95, -11.8]]) B.push([x - 0.4, z - 0.4, x + 0.4, z + 0.4, 1]);
+}
+// Zemin yüksekliği (yürünemez yerde -100)
+function groundY(x, z) {
+  if (Math.abs(x) > BOUND || Math.abs(z) > BOUND) return -100;
+  if (owns("merdiven") && x >= STAIRS[0] && x <= STAIRS[1] && z <= STAIRS[2] && z >= UP_Z) return UP_Y * (STAIRS[2] - z) / (STAIRS[2] - UP_Z);
+  if (z < UP_Z) return owns("kat2") ? UP_Y : -100;
+  return 0;
+}
+function isFree(x, z, yNow) {
+  const h = groundY(x, z);
+  if (h < -50 || Math.abs(h - yNow) > 0.75) return false;
+  if (h > 0.05 && h < UP_Y - 0.05) return true;
+  const k = h > 2 ? 1 : 0, r = 0.35;
+  for (const e of blockers) if (e[4] === k && x > e[0] - r && x < e[2] + r && z > e[1] - r && z < e[3] + r) return false;
+  return true;
+}
+
+function buildItem(id, anim) {
+  const o = ITEM[id], g = new THREE.Group();
+  scene.add(g); built[id] = g;
+  if (o.kind === "belt") buildBelt(g, o.belt);
+  else if (o.kind === "drop") buildDropper(g, o);
+  else if (o.kind === "up") buildUpper(g, o);
+  else buildStructure(g, id);
+  if (anim) { g.scale.setScalar(0.01); growing.push({ g, t: 0 }); }
+  if (id === "kat2") hazard.visible = false;
+}
+function buildBelt(g, b) {
+  const d = BELTS[b], xa = Math.min(d.x0, d.x1), xb = Math.max(d.x0, d.x1), L = xb - xa, cx = (xa + xb) / 2;
+  g.position.set(cx, d.y, d.z);
+  const s = newGeo(), gl = newGeo();
+  K(s, L, 0.5, 1.5, 0, 0.5, 0, C.dark);
+  K(s, L, 0.24, 0.16, 0, 0.88, -0.74, C.teal); K(s, L, 0.24, 0.16, 0, 0.88, 0.74, C.teal);
+  K(s, L + 0.1, 0.08, 1.6, 0, 0.26, 0, 0x262e3b);
+  const n = Math.floor(L / 2.4) + 1;
+  for (let i = 0; i <= n; i++) K(s, 0.3, 0.26, 1.3, -L / 2 + 0.3 + (L - 0.6) * i / n, 0.13, 0, 0x262e3b);
+  S(s, 0.3, 0.3, 1.5, -L / 2, 0.62, 0, 0x8a96a8, 12, rotX(Math.PI / 2)); S(s, 0.3, 0.3, 1.5, L / 2, 0.62, 0, 0x8a96a8, 12, rotX(Math.PI / 2));
+  // Fırın / pres (bandın bittiği yerde)
+  const fx = d.x1 + d.dir * 1.25 - cx, dir = d.dir;
+  const body = b === "A" ? 0x4b5166 : 0x5b4a8a, trim = b === "A" ? C.orange : 0xb18cff, mouth = b === "A" ? 0xffa43a : 0xff5ce1;
+  K(s, 2.5, 2.3, 2.7, fx, 1.15, 0, body); K(s, 2.7, 0.3, 2.9, fx, 2.42, 0, trim); K(s, 2.7, 0.16, 2.9, fx, 0.08, 0, C.dark);
+  K(s, 0.14, 1.3, 1.9, fx - dir * 1.25, 1.0, 0, 0x1b2030);
+  for (let i = 0; i < 5; i++) K(s, 0.16, 0.18, 0.38, fx - dir * 1.27, 1.74, -0.76 + i * 0.38, i % 2 ? 0x1b2030 : 0xffd23f);
+  S(s, 0.34, 0.4, 1.9, fx + dir * 0.55, 3.45, -0.65, 0x39404f, 12); S(s, 0.44, 0.44, 0.25, fx + dir * 0.55, 4.4, -0.65, trim, 12);
+  if (b === "B") for (const z of [-0.6, 0.6]) S(s, 0.22, 0.22, 0.9, fx - dir * 0.2, 2.95, z, 0xc9d1dc, 10);
+  meshOf(s, g);
+  K(gl, 0.08, 1.0, 1.55, fx - dir * 1.31, 0.98, 0, mouth); K(gl, 2.72, 0.08, 2.92, fx, 2.3, 0, mouth);
+  glowOf(gl, g);
+  const tex = beltTex.clone(); tex.needsUpdate = true; tex.repeat.set(L / 1.32, 1);
+  const top = new THREE.Mesh(new THREE.PlaneGeometry(L, 1.32), new THREE.MeshLambertMaterial({ map: tex }));
+  top.rotation.x = -Math.PI / 2; if (dir < 0) top.rotation.z = Math.PI; top.position.y = 0.79; top.receiveShadow = true;
+  g.add(top); g.userData.tex = tex;
+  const lab = textSprite([[b === "A" ? "FIRIN" : "PRES", b === "A" ? "#ffe2c2" : "#f0dcff", 80]], 0.55, 384, 110);
+  lab.position.set(fx, 3.0, 0.8); g.add(lab);
+  if (b === "A") buildCash(g);
+}
+function buildCash(g) {
+  const k = new THREE.Group(); k.position.set(10.4 - g.position.x, 0, 0.55 - g.position.z); g.add(k);
+  const s = newGeo();
+  for (const sx of [-1.05, 1.05]) K(s, 0.22, 2.0, 0.22, sx, 1.0, 0, C.body);
+  K(s, 2.6, 1.5, 0.3, 0, 2.3, 0, C.dark); K(s, 2.7, 0.12, 0.36, 0, 3.08, 0, 0xffd23f); K(s, 2.3, 1.15, 0.05, 0, 2.27, 0.16, 0x10251f);
+  meshOf(s, k);
+  cashScreen = textPlane([["KASA", "#9ff7c9", 44], ["₺0", "#ffe14d", 92]], 2.2, 512, 256);
+  cashScreen.position.set(0, 2.27, 0.2); k.add(cashScreen);
+  cashPad = makePad([["PARA TOPLA", "#ffe14d", 56], ["", "#5dff9b", 60]], CASH_PAD, goldDisc);
+  cashPad.label.position.y = 1.75;
+}
+function buildDropper(g, o) {
+  const d = BELTS[o.belt], t = TIERS[o.tier], tc = t.color, arm = d.z - d.kz;
+  g.position.set(o.x, d.y, d.kz);
+  const s = newGeo();
+  K(s, 1.1, 0.2, 1.1, 0, 0.1, 0, C.dark); K(s, 0.5, 2.7, 0.5, 0, 1.45, 0, C.body); K(s, 0.56, 0.22, 0.56, 0, 0.75, 0, tc);
+  K(s, 0.5, 0.45, arm + 0.3, 0, 2.62, arm / 2, C.body);
+  meshOf(s, g);
+  const head = new THREE.Group(); head.position.set(0, 2.6, arm); g.add(head);
+  const h = newGeo(), gl = newGeo();
+  K(h, 1.15, 0.85, 1.15, 0, 0.12, 0, tc); K(h, 1.25, 0.14, 1.25, 0, 0.6, 0, C.body); S(h, 0.5, 0.2, 0.55, 0, -0.55, 0, C.body, 10);
+  K(gl, 1.2, 0.12, 1.2, 0, -0.18, 0, new THREE.Color(tc).lerp(new THREE.Color(0xffffff), 0.35).getHex());
+  if (o.tier === "bakir") S(h, 0.3, 0.42, 0.25, 0, 0.8, 0, 0xc0602c, 10);
+  else if (o.tier === "gumus") { K(h, 0.08, 0.7, 0.08, -0.35, 0.95, -0.35, 0xb7c2d0); K(h, 0.08, 0.5, 0.08, 0.35, 0.85, -0.35, 0xb7c2d0); S(gl, 0.1, 0.1, 0.12, -0.35, 1.32, -0.35, 0xff5c5c, 8); }
+  else if (o.tier === "altin") for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2 + Math.PI / 4; S(h, 0, 0.14, 0.35, Math.cos(a) * 0.38, 0.84, Math.sin(a) * 0.38, 0xffe066, 4); }
+  meshOf(h, head); glowOf(gl, head);
+  if (["elmas", "kristal", "neon"].includes(o.tier)) {
+    // Dönen süs: elmas taşı / kristal salkımı / neon halka
+    const orn = new THREE.Group(); orn.position.y = 1.25; head.add(orn);
+    const si = newGeo();
+    if (o.tier === "elmas") { S(si, 0, 0.32, 0.35, 0, 0.17, 0, tc, 6); S(si, 0.32, 0, 0.25, 0, -0.12, 0, tc, 6); }
+    else if (o.tier === "kristal") { S(si, 0, 0.14, 0.7, 0, 0.1, 0, tc, 5); S(si, 0, 0.1, 0.5, 0.2, 0, 0.05, tc, 5, rotZ(-0.4)); S(si, 0, 0.1, 0.45, -0.18, 0, -0.05, tc, 5, rotZ(0.45)); }
+    else { for (let i = 0; i < 12; i++) { const a = i * Math.PI * 2 / 12; K(si, 0.16, 0.08, 0.2, Math.cos(a) * 0.38, 0, Math.sin(a) * 0.38, tc, rotY(-a)); } S(si, 0.12, 0.12, 0.12, 0, 0, 0, 0xffffff, 8); }
+    glowOf(si, orn);
+    spinners.push({ g: orn, speed: o.tier === "neon" ? 2.6 : 1.6 });
+  }
+  droppers.push({ id: o.id, belt: o.belt, x: o.x, tier: o.tier, t: Math.random() * t.every, head, squash: 0 });
+}
+function buildUpper(g, o) {
+  const d = BELTS[o.belt], r = o.color; g.position.set(o.x, d.y, d.z);
+  const s = newGeo(), gl = newGeo();
+  if (o.style === "lazer") {
+    for (const z of [-0.98, 0.98]) { K(s, 0.4, 2.5, 0.36, 0, 1.25, z, C.body); K(s, 0.46, 0.2, 0.42, 0, 0.1, z, C.dark); K(gl, 0.42, 0.12, 0.38, 0, 2.1, z, r); }
+    K(s, 0.5, 0.42, 2.4, 0, 2.6, 0, C.body); K(gl, 0.52, 0.1, 2.3, 0, 2.38, 0, r);
+  } else if (o.style === "kemer") {
+    for (let i = 0; i < 9; i++) { const a = Math.PI * i / 8; K(s, 0.45, 0.45, 0.42, 0, 1 + Math.sin(a) * 1.55, -Math.cos(a) * 1.05, 0xe8e3f5, rotX(a)); K(gl, 0.5, 0.12, 0.47, 0, 1 + Math.sin(a) * 1.3, -Math.cos(a) * 0.82, r, rotX(a)); }
+    for (const z of [-1.05, 1.05]) K(s, 0.5, 1, 0.5, 0, 0.5, z, C.body);
+  } else if (o.style === "halka") {
+    for (let i = 0; i < 16; i++) { const a = Math.PI * 2 * i / 16; K(gl, 0.3, 0.3, 0.42, 0, 1.25 + Math.sin(a) * 1.15, Math.cos(a) * 1.15, r, rotX(a)); }
+    for (const z of [-1.2, 1.2]) { K(s, 0.4, 0.4, 0.4, 0, 0.2, z, C.body); K(s, 0.2, 0.4, 0.2, 0, 0.5, z, C.body); }
+  } else {
+    // Neon tünel: koyu çerçeve, parlayan kaburgalar
+    for (const x of [-1.05, 1.05]) { K(s, 0.22, 0.25, 2.4, x, 2.55, 0, 0x2a2440); for (const z of [-1.1, 1.1]) K(s, 0.22, 2.4, 0.22, x, 1.3, z, 0x2a2440); }
+    for (let i = 0; i < 4; i++) { const x = -0.85 + i * 0.57; K(gl, 0.12, 0.12, 2.36, x, 2.42, 0, r); K(gl, 0.12, 2.2, 0.06, x, 1.35, -0.99, r); K(gl, 0.12, 2.2, 0.06, x, 1.35, 0.99, r); }
+  }
+  meshOf(s, g); glowOf(gl, g);
+  // Işık perdesi (küp geçerken parlar)
+  const cm = new THREE.MeshBasicMaterial({ color: r, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+  const curtain = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 1.6), cm); curtain.rotation.y = Math.PI / 2; curtain.position.y = 1.6; g.add(curtain);
+  const lab = textSprite([["x" + dec(o.mult), "#" + new THREE.Color(r).lerp(new THREE.Color(0xffffff), 0.45).getHexString(), 110]], 0.8, 256, 128);
+  lab.position.y = 3.35; g.add(lab);
+  uppers[o.belt].push({ id: o.id, x: o.x, mult: o.mult, color: new THREE.Color(r), mat: cm, flash: 0, lab });
+}
+// Duvar parçası: gövde + turkuaz taban şeridi + turuncu üst başlık
+function wall(g, x0, z0, x1, z1, h = 2.6) {
+  const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, w = Math.abs(x1 - x0), d = Math.abs(z1 - z0);
+  K(g, w, h, d, cx, h / 2, cz, C.wall); K(g, w + 0.06, 0.45, d + 0.06, cx, 0.225, cz, C.teal); K(g, w + 0.14, 0.2, d + 0.14, cx, h + 0.1, cz, C.orange);
+}
+// Karo döşeme (iki tonlu)
+function tiles(g, x0, z0, x1, z1, y) {
+  const nx = Math.round((x1 - x0) / 2), nz = Math.round((z1 - z0) / 2), sx = (x1 - x0) / nx, sz = (z1 - z0) / nz;
+  for (let i = 0; i < nx; i++) for (let j = 0; j < nz; j++) K(g, sx - 0.07, 0.05, sz - 0.07, x0 + sx * (i + 0.5), y + 0.025, z0 + sz * (j + 0.5), (i + j) % 2 ? C.tile2 : C.tile1);
+}
+function pot(g, x, y, z, s) {
+  S(g, 0.38 * s, 0.3 * s, 0.6 * s, x, y + 0.3 * s, z, C.orange, 8); S(g, 0.4 * s, 0.4 * s, 0.08 * s, x, y + 0.62 * s, z, 0xff9f5c, 8);
+  K(g, 0.62 * s, 0.6 * s, 0.62 * s, x, y + 0.95 * s, z, 0x48b85c); K(g, 0.42 * s, 0.4 * s, 0.42 * s, x + 0.08, y + 1.35 * s, z - 0.05, 0x5fcf6c);
+  K(g, 0.16 * s, 0.16 * s, 0.16 * s, x - 0.15, y + 1.3 * s, z + 0.3 * s, 0xff6fae);
+}
+function tree(g, x, z, s) {
+  K(g, 0.5 * s, 2 * s, 0.5 * s, x, s - 0.3, z, 0x8a5a3c); K(g, 2.6 * s, 1.6 * s, 2.6 * s, x, 2.6 * s - 0.3, z, 0x4fb862);
+  K(g, 1.9 * s, 1.2 * s, 1.9 * s, x + 0.2, 3.7 * s - 0.3, z - 0.1, 0x63c96f); K(g, 1 * s, 0.8 * s, 1 * s, x - 0.1, 4.5 * s - 0.3, z + 0.1, 0x7ad57f);
+}
+function buildStructure(g, id) {
+  const s = newGeo(), gl = newGeo();
+  const at = (x, y, z) => g.position.set(x, y, z);
+  switch (id) {
+    case "zemin1": at(-6.7, 0, 3.2); tiles(s, -6.7, -8.8, 6.7, 8.8, 0); break;
+    case "zemin2": at(6.7, 0, 3.2); tiles(s, -6.7, -8.8, 6.7, 8.8, 0); break;
+    case "duvar_sol": at(-13.6, 0, 3.2); wall(s, -0.2, -8.8, 0.2, 8.8); break;
+    case "duvar_sag": at(13.6, 0, 3.2); wall(s, -0.2, -8.8, 0.2, 8.8); break;
+    case "on_duvar": at(0, 0, 12); wall(s, -13.8, -0.2, -2, 0.2); wall(s, 2, -0.2, 13.8, 0.2); break;
+    case "pencere": {
+      at(0, 0, 3.2);
+      for (const z of [-4, 2, 7]) for (const sx of [-13.6, 13.6]) { K(s, 0.56, 1.3, 2.4, sx, 1.55, z, 0xffffff); K(gl, 0.6, 1.08, 2.18, sx, 1.55, z, 0x6fb7ea); }
+      for (const x of [-10, -5.5, 5.5, 10]) { K(s, 2.4, 1.3, 0.56, x, 1.55, 8.8, 0xffffff); K(gl, 2.18, 1.08, 0.6, x, 1.55, 8.8, 0x6fb7ea); }
+      break;
+    }
+    case "kapi": {
+      at(0, 0, 12);
+      for (const sx of [-2.15, 2.15]) K(s, 0.5, 3.3, 0.6, sx, 1.65, 0, C.purple);
+      K(s, 4.8, 0.6, 0.66, 0, 3.4, 0, C.purple); K(s, 4.3, 0.06, 0.4, 0, 0.03, 0, 0x9aa5b4);
+      for (const sx of [-1.45, 1.45]) K(s, 1, 2.6, 0.1, sx, 1.3, 0.05, 0xd8f0ff);
+      K(gl, 4.4, 0.1, 0.7, 0, 3.08, 0, 0xffd23f);
+      const t = textPlane([["GİRİŞ", "#ffffff", 90]], 1.8, 384, 110); t.position.set(0, 3.42, 0.34); g.add(t);
+      break;
+    }
+    case "lamba1":
+      at(0, 0, 3.2);
+      for (const z of [-5, -0.5, 4, 8]) for (const sx of [-1, 1]) { const x = sx * 13.32; K(s, 0.22, 0.5, 0.5, x, 2.05, z, C.dark); K(gl, 0.3, 0.32, 0.4, x - sx * 0.2, 2.05, z, 0xfff1b8); }
+      break;
+    case "bitki1": for (const [x, z] of [[-12.9, 11.3], [12.9, 11.3], [-2.7, 11.3], [2.7, 11.3]]) pot(s, x, 0, z, 1); break;
+    case "hali": at(0, 0, 8.9); K(s, 2.4, 0.04, 5.8, 0, 0.065, 0, 0xd8344f); K(s, 2.6, 0.03, 6, 0, 0.055, 0, 0xffd23f); break;
+    case "bank":
+      for (const x of [-9.5, -6.2]) { K(s, 2, 0.14, 0.7, x, 0.55, 11.2, C.orange); K(s, 2, 0.6, 0.12, x, 0.95, 11.5, C.orange); for (const sx of [-0.8, 0.8]) K(s, 0.14, 0.5, 0.6, x + sx, 0.25, 11.2, C.dark); }
+      break;
+    case "kat2":
+      at(0, 0, -9.6);
+      K(s, 27.2, UP_Y, 8, 0, UP_Y / 2, 0, C.wall); K(s, 27.26, 0.45, 8.06, 0, 0.225, 0, C.teal); K(s, 27.4, 0.22, 8.2, 0, UP_Y - 0.13, 0, C.orange);
+      for (let i = 0; i < 6; i++) { const x = -10.5 + i * 4.2; K(s, 2.7, 1.7, 0.1, x, 2, 4, 0xffffff); K(gl, 2.4, 1.4, 0.16, x, 2, 4, 0x3f86c4); K(s, 0.08, 1.4, 0.14, x, 2, 4.02, 0xffffff); }
+      tiles(s, -13.4, -3.8, 13.4, 3.8, UP_Y);
+      break;
+    case "merdiven": {
+      const n = 12, run = (STAIRS[2] - UP_Z) / n;
+      for (let i = 0; i < n; i++) { const h = UP_Y * (i + 1) / n, z = STAIRS[2] - run * (i + 0.5); K(s, 2.4, h, run + 0.01, -12.2, h / 2, z, i % 2 ? 0xdfe5ec : C.tile1); K(s, 2.42, 0.06, 0.12, -12.2, h + 0.03, z + run / 2 - 0.06, C.teal); }
+      const slope = Math.atan2(UP_Y, STAIRS[2] - UP_Z), len = Math.hypot(UP_Y, STAIRS[2] - UP_Z);
+      K(s, 0.12, 0.12, len, -10.95, UP_Y / 2 + 1, (STAIRS[2] + UP_Z) / 2, C.orange, rotX(slope));
+      for (let i = 0; i < 4; i++) { const k = (i + 0.5) / 4; K(s, 0.1, 1, 0.1, -10.95, UP_Y * k + 0.5, STAIRS[2] - (STAIRS[2] - UP_Z) * k, C.dark); }
+      break;
+    }
+    case "korkuluk":
+      for (let i = 0; i < 21; i++) K(s, 0.1, 1, 0.1, -10.8 + i * 1.2, UP_Y + 0.5, -5.75, C.dark);
+      K(s, 24.2, 0.12, 0.14, 1.3, UP_Y + 1.02, -5.75, C.orange); K(s, 24.2, 0.06, 0.08, 1.3, UP_Y + 0.55, -5.75, C.dark);
+      for (const z of [-7.4, -9.2, -11, -12.8]) { K(s, 0.1, 1, 0.1, 13.45, UP_Y + 0.5, z, C.dark); K(s, 0.1, 1, 0.1, -13.45, UP_Y + 0.5, z, C.dark); }
+      K(s, 0.14, 0.12, 7.8, 13.45, UP_Y + 1.02, -9.6, C.orange); K(s, 0.14, 0.12, 6, -13.45, UP_Y + 1.02, -10.5, C.orange); K(s, 27, 0.12, 0.14, 0, UP_Y + 1.02, -13.45, C.orange);
+      break;
+    case "lamba2":
+      for (const [x, z] of [[12.9, -6.3], [12.9, -10.6], [-12.9, -12.9], [-3.5, -13.1], [3.5, -13.1]]) {
+        K(s, 0.4, 0.2, 0.4, x, UP_Y + 0.1, z, C.dark); K(s, 0.14, 2.6, 0.14, x, UP_Y + 1.4, z, C.body); S(gl, 0.28, 0.28, 0.4, x, UP_Y + 2.85, z, 0xfff1b8, 10); S(s, 0, 0.38, 0.22, x, UP_Y + 3.16, z, C.orange, 10);
+      }
+      break;
+    case "bitki2": for (const [x, z] of [[12.95, -8.4], [-1.6, -13.05], [-12.95, -11.8]]) pot(s, x, UP_Y, z, 1.2); break;
+    case "otomat":
+      for (const x of [-7.9, -6.6]) { K(s, 1.15, 2.2, 0.85, x, UP_Y + 1.1, -13, x < -7 ? 0xe63946 : 0x2b9de8); K(gl, 0.75, 1.2, 0.05, x - 0.1, UP_Y + 1.4, -12.56, 0xd8f4ff); K(s, 0.16, 0.5, 0.05, x + 0.4, UP_Y + 1.2, -12.56, 0x222222); }
+      break;
+    case "cati":
+      for (let i = 0; i < 14; i++) K(s, 1.75, 0.12, 3, -12.9 + i * 1.75, UP_Y + 3.6, -12.2, i % 2 ? 0xffffff : C.orange, rotX(-0.18));
+      for (const x of [-12.9, -6.5, 0, 6.5, 10.6]) K(s, 0.16, 3.4, 0.16, x, UP_Y + 1.7, -11, C.dark);
+      K(s, 24.6, 0.18, 0.2, -1.1, UP_Y + 3.33, -10.8, C.dark);
+      break;
+    case "su_kulesi":
+      at(12.4, UP_Y, -12.5);
+      for (const [x, z] of [[-0.75, -0.75], [0.75, -0.75], [-0.75, 0.75], [0.75, 0.75]]) K(s, 0.18, 4.6, 0.18, x, 2.3, z, C.dark);
+      K(s, 1.9, 0.12, 0.12, 0, 2.3, -0.75, C.dark); K(s, 1.9, 0.12, 0.12, 0, 2.3, 0.75, C.dark);
+      S(s, 1.25, 1.25, 2, 0, 5.6, 0, C.teal, 16); S(s, 1.28, 1.28, 0.16, 0, 5, 0, 0xffffff, 16); S(s, 0.2, 1.4, 0.8, 0, 7, 0, C.orange, 16);
+      break;
+    case "tabela": {
+      at(0, UP_Y, -13.2);
+      for (const x of [-6.4, 6.4]) K(s, 0.3, 6.2, 0.3, x, 3.1, 0, C.dark);
+      K(s, 14, 2.4, 0.3, 0, 5.4, 0, 0x2a1f4a);
+      K(gl, 14, 0.12, 0.36, 0, 6.55, 0, 0xff4fd8); K(gl, 14, 0.12, 0.36, 0, 4.25, 0, 0xff4fd8);
+      for (const x of [-6.95, 6.95]) K(gl, 0.12, 2.42, 0.36, x, 5.4, 0, 0xff4fd8);
+      signText = textPlane([["", "#ffe6fa", 120]], 13.4, 1024, 180, { glow: "#ff2bd1", stroke: "#ff2bd1" });
+      signText.position.set(0, 5.4, 0.17); g.add(signText); updateSign();
+      break;
+    }
+    case "bayrak": {
+      const P = [[-11.5, UP_Y, -13.2], [9.5, UP_Y, -13.2], [-13.3, 0, 13.3], [13.3, 0, 13.3]], R = [C.teal, C.orange, C.purple, 0xffd23f];
+      P.forEach(([x, y, z], i) => {
+        K(s, 0.14, 5, 0.14, x, y + 2.5, z, 0xe8ecf1); S(s, 0.14, 0.14, 0.14, x, y + 5.05, z, 0xffd23f, 8);
+        const f = new THREE.Group(); f.position.set(x, y + 4.4, z); g.add(f);
+        const fg = newGeo(); K(fg, 1.6, 0.95, 0.05, 0.85, 0, 0, R[i]); K(fg, 0.4, 0.4, 0.06, 0.85, 0, 0, 0xffffff); meshOf(fg, f);
+        flags.push({ g: f, phase: i * 1.3 });
+      });
+      break;
+    }
+    case "agac":
+      for (const [x, z, k] of [[-17.5, -10, 1.2], [-17, 1.5, 1], [-17.8, 11, 1.3], [17.5, -11, 1.1], [17.2, 0.5, 1], [17.8, 10.5, 1.25], [-12, 17.5, 1.1], [-4, 17.2, 0.9], [4, 17.4, 1], [12, 17.6, 1.2], [-8, -17.5, 1.3], [8, -17.2, 1.1]]) tree(s, x, z, k);
+      break;
+    case "cesme": {
+      at(-8.5, 0, 7.5);
+      S(s, 1.45, 1.55, 0.55, 0, 0.275, 0, C.teal, 12); S(s, 1.25, 1.25, 0.05, 0, 0.5, 0, 0x5ec8f2, 12); S(s, 0.25, 0.3, 1.2, 0, 0.9, 0, 0xffffff, 10); S(s, 0.7, 0.5, 0.2, 0, 1.5, 0, C.teal, 12);
+      const w = new THREE.Group(); w.position.y = 1.75; g.add(w);
+      const wg = newGeo(); S(wg, 0, 0.35, 0.7, 0, 0.2, 0, 0x9fe6ff, 10); glowOf(wg, w);
+      spinners.push({ g: w, speed: 0, bob: true });
+      break;
+    }
+    case "vitrin": {
+      at(9.6, 0, 9.9);
+      K(s, 2, 0.9, 1.4, 0, 0.45, 0, C.dark); K(s, 2.06, 0.1, 1.46, 0, 0.92, 0, 0xffd23f);
+      const glass = new THREE.Mesh(new THREE.BoxGeometry(1.9, 1.45, 1.3), glassMat); glass.position.y = 1.68; g.add(glass);
+      [0x4fe3ff, 0xd47bff, 0x3dff8b].forEach((c, i) => {
+        const gem = new THREE.Group(); gem.position.set(-0.6 + i * 0.6, 1.45, 0); g.add(gem);
+        const gg = newGeo(); S(gg, 0, 0.2, 0.25, 0, 0.12, 0, c, 6); S(gg, 0.2, 0, 0.18, 0, -0.09, 0, c, 6); glowOf(gg, gem);
+        spinners.push({ g: gem, speed: 1.2 + i * 0.3 });
+      });
+      break;
+    }
+    case "fener":
+      for (const [x, z] of [[-10, 13.4], [-5, 13.4], [5, 13.4], [10, 13.4], [-14.6, 0], [14.6, 0], [-14.6, -9], [14.6, -9]]) {
+        K(s, 0.4, 0.3, 0.4, x, 0.15, z, C.dark); K(s, 0.16, 3.4, 0.16, x, 1.8, z, C.body); K(s, 0.9, 0.12, 0.12, x, 3.45, z, C.body); S(gl, 0.24, 0.24, 0.32, x, 3.3, z, 0xfff1b8, 10);
+      }
+      break;
+    case "heykel": {
+      at(8.5, 0, 6.5);
+      K(s, 1.5, 1.2, 1.5, 0, 0.6, 0, 0xf2f4f8); K(s, 1.62, 0.15, 1.62, 0, 1.25, 0, 0xffd23f);
+      const h = new THREE.Group(); h.position.y = 2.3; g.add(h);
+      const cube = new THREE.Mesh(new THREE.BoxGeometry(1.05, 1.05, 1.05), goldMat); cube.rotation.set(0.62, 0, 0.62); cube.castShadow = true; h.add(cube);
+      const hl = newGeo(); for (let i = 0; i < 10; i++) { const a = Math.PI * 2 * i / 10; K(hl, 0.16, 0.16, 0.16, Math.cos(a) * 0.95, -0.2, Math.sin(a) * 0.95, 0xffd23f); } glowOf(hl, h);
+      spinners.push({ g: h, speed: 0.9, bob: true });
+      break;
+    }
+    case "kupa": {
+      at(0, 0, 5.2);
+      K(s, 1.8, 0.9, 1.8, 0, 0.45, 0, 0x2a2440); K(s, 1.9, 0.12, 1.9, 0, 0.92, 0, 0xffd23f);
+      const cg = newGeo();
+      S(cg, 0.5, 0.65, 0.3, 0, 1.13, 0, 0xffffff, 14); S(cg, 0.12, 0.38, 0.9, 0, 1.73, 0, 0xffffff, 12); S(cg, 0.95, 0.22, 1.4, 0, 2.88, 0, 0xffffff, 16); S(cg, 1, 1, 0.12, 0, 3.6, 0, 0xffffff, 16);
+      for (const sx of [-1, 1]) { K(cg, 0.5, 0.16, 0.16, sx * 1.05, 3.1, 0, 0xffffff); K(cg, 0.16, 0.8, 0.16, sx * 1.25, 2.75, 0, 0xffffff); }
+      const cm = new THREE.Mesh(toGeo(cg), goldMat); cm.castShadow = true; g.add(cm);
+      break;
+    }
+  }
+  meshOf(s, g); glowOf(gl, g);
+}
+function playerName() { return (platform.profile && platform.profile.name) ? String(platform.profile.name).trim().slice(0, 16) : "Oyuncu"; }
+function updateSign() {
+  if (signText) { const k = possessive(playerName()) + " Fabrikası"; const ud = signText.userData; if (ud.key !== k) { ud.key = k; drawLines(ud.cv, [[k, "#ffe6fa", 120]], ud.opt); ud.tex.needsUpdate = true; } }
+  if (typeof nameTag !== "undefined") setSprite(nameTag, [[playerName(), "#ffffff", 64]]);
+}
+
+// ================================================================ Küpler, parçacıklar, uçan yazılar
+function spawnCube(d) {
+  const b = BELTS[d.belt], t = TIERS[d.tier];
+  if (cubes.length >= CUBE_MAX) { addMoney(t.value * beltMult(d.belt) * mult()); return; }
+  cubes.push({ p: new THREE.Vector3(d.x + (Math.random() - 0.5) * 0.24, b.y + 1.95, b.z + (Math.random() - 0.5) * 0.44), vy: 0, belt: d.belt, phase: 0,
+    value: t.value, color: new THREE.Color(t.color), s: 1, t: 0, ups: 0, rot: Math.random() * Math.PI * 2 });
+  d.squash = 1;
+  SFX.drop();
+}
+function updateCubes(dt) {
+  for (let i = cubes.length - 1; i >= 0; i--) {
+    const k = cubes[i], b = BELTS[k.belt], top = b.y + 0.8 + CUBE / 2;
+    k.t += dt;
+    if (k.phase === 0) {
+      k.vy -= 24 * dt; k.p.y += k.vy * dt;
+      if (k.p.y <= top) { k.p.y = top; k.phase = 1; k.s = 0.8; }
+    } else if (k.phase === 1) {
+      const before = k.p.x; k.p.x += b.dir * BELT_SPEED * dt; k.s = Math.min(1, k.s + dt * 3);
+      uppers[k.belt].forEach((u, j) => {
+        if ((before - u.x) * (k.p.x - u.x) <= 0 && !(k.ups & (1 << j))) {
+          k.ups |= 1 << j; k.value *= u.mult; k.color.lerp(u.color, 0.6).offsetHSL(0, 0, 0.06); u.flash = 1; SFX.laser();
+        }
+      });
+      if (b.dir * (k.p.x - b.x1) >= 0) { k.phase = 2; k.t = 0; }
+    } else {
+      k.p.x += b.dir * BELT_SPEED * dt; k.s = Math.max(0, 1 - k.t / 0.22);
+      if (k.t >= 0.22) {
+        const m = k.value * mult();
+        addMoney(m); furnaceSum[k.belt] += m; cubes.splice(i, 1);
+        if (Math.random() < 0.5) addPart(new THREE.Vector3(b.x1 + b.dir * 1.25 + (Math.random() - 0.5) * 1.2, b.y + 2.6, b.z + (Math.random() - 0.5) * 1.2),
+          new THREE.Vector3(Math.random() * 2 - 1, 2.5 + Math.random() * 2, Math.random() * 2 - 1), k.color.getHex(), 0.6, 0.12);
+        SFX.furnace();
+      }
+    }
+  }
+  // Fırın üstünde toplu "+₺" yazısı (saniyede birkaç kez)
+  for (const b of ["A", "B"]) {
+    furnaceT[b] += dt;
+    if (furnaceT[b] >= 0.45 && furnaceSum[b] > 0) {
+      furnaceT[b] = 0; const d = BELTS[b];
+      floatText("+₺" + short(furnaceSum[b]), new THREE.Vector3(d.x1 + d.dir * 1.25, d.y + 3.0, d.z + 0.5), b === "A" ? "#ffe14d" : "#f0b8ff");
+      furnaceSum[b] = 0;
+    }
+  }
+}
+const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _sv = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0), _diag = new THREE.Vector3(1, 1, 0).normalize();
+function bits(n) { let c = 0; while (n) { c += n & 1; n >>= 1; } return c; }
+function drawCubes() {
+  cubeMesh.count = cubes.length;
+  cubes.forEach((k, i) => {
+    const s = Math.max(0.01, k.s) * (1 + 0.12 * bits(k.ups));
+    _q.setFromAxisAngle(_up, k.rot); _sv.set(s, k.phase === 1 ? s * (2 - Math.min(1, k.s)) : s, s);
+    _m4.compose(k.p, _q, _sv); cubeMesh.setMatrixAt(i, _m4); cubeMesh.setColorAt(i, k.color);
+  });
+  cubeMesh.instanceMatrix.needsUpdate = true; if (cubeMesh.instanceColor) cubeMesh.instanceColor.needsUpdate = true;
+}
+function addPart(p, v, c, life, s) {
+  if (parts.length >= PART_MAX) parts.shift();
+  parts.push({ p, v, c: new THREE.Color(c), t: 0, life, s, rot: Math.random() * 6 });
+}
+function burst(p, n, colors) {
+  for (let i = 0; i < n; i++) { const a = Math.random() * Math.PI * 2, s = 2 + Math.random() * 3.5;
+    addPart(p.clone(), new THREE.Vector3(Math.cos(a) * s, 4 + Math.random() * 5, Math.sin(a) * s), colors[i % colors.length], 0.8 + Math.random() * 0.5, 0.14 + Math.random() * 0.12); }
+}
+function updateParts(dt) {
+  parts = parts.filter(q => (q.t += dt) < q.life);
+  partMesh.count = parts.length;
+  parts.forEach((q, i) => {
+    q.v.y -= 16 * dt; q.p.addScaledVector(q.v, dt); q.rot += dt * 6;
+    const s = Math.max(0.001, q.s * clamp((q.life - q.t) / 0.3, 0, 1));
+    _q.setFromAxisAngle(_diag, q.rot); _sv.set(s, s, s); _m4.compose(q.p, _q, _sv);
+    partMesh.setMatrixAt(i, _m4); partMesh.setColorAt(i, q.c);
+  });
+  partMesh.instanceMatrix.needsUpdate = true; if (partMesh.instanceColor) partMesh.instanceColor.needsUpdate = true;
+}
+let ftN = 0;
+const _pv = new THREE.Vector3();
+function floatText(txt, pos, color, big) {
+  if (ftN > 14) return;
+  _pv.copy(pos).project(camera);
+  if (_pv.z > 1 || Math.abs(_pv.x) > 1.1 || Math.abs(_pv.y) > 1.1) return;
+  const el = document.createElement("div");
+  el.className = "ft" + (big ? " big" : ""); el.textContent = txt; el.style.color = color;
+  el.style.left = ((_pv.x + 1) / 2 * innerWidth) + "px"; el.style.top = ((1 - _pv.y) / 2 * innerHeight) + "px"; el.style.transform = "translate(-50%,-50%)";
+  document.body.appendChild(el); ftN++;
+  setTimeout(() => { el.remove(); ftN--; }, 1100);
+}
+
+// ================================================================ Oyuncu (platform avatarı)
+const FACE_KINDS = ["smile", "grin", "wow", "cool"];
+function drawFace(kind) {
+  const c = document.createElement("canvas"); c.width = c.height = 128;
+  const x = c.getContext("2d");
+  x.fillStyle = "#1b1b1b"; x.strokeStyle = "#1b1b1b"; x.lineWidth = 7; x.lineCap = "round";
+  if (kind === "cool") { x.fillRect(22, 40, 36, 18); x.fillRect(70, 40, 36, 18); x.fillRect(56, 44, 16, 5); }
+  else { x.beginPath(); x.ellipse(44, 50, 7, kind === "wow" ? 12 : 10, 0, 0, 7); x.ellipse(84, 50, 7, kind === "wow" ? 12 : 10, 0, 0, 7); x.fill(); }
+  x.beginPath();
+  if (kind === "wow") { x.ellipse(64, 92, 10, 13, 0, 0, 7); x.fill(); }
+  else if (kind === "grin") { x.moveTo(36, 82); x.quadraticCurveTo(64, 116, 92, 82); x.closePath(); x.fill(); }
+  else { x.arc(64, 74, 26, 0.25 * Math.PI, 0.75 * Math.PI); x.stroke(); }
+  return c;
+}
+const faceTex = {};
+const lambert = (color, extra = {}) => new THREE.MeshLambertMaterial({ color, ...extra });
+function mesh(geo, material, x = 0, y = 0, z = 0, parent = scene, shadow = true) {
+  const m = new THREE.Mesh(geo, material); m.position.set(x, y, z); m.castShadow = shadow; m.receiveShadow = true; parent.add(m); return m;
+}
+function buildAvatar(a) {
+  const g = new THREE.Group(), inner = new THREE.Group();
+  g.add(inner); inner.scale.setScalar(0.42);
+  const part = (w, h, d, c, x, y, z) => mesh(new THREE.BoxGeometry(w, h, d), lambert(c), x, y, z, inner);
+  const legs = [part(0.9, 2, 1, a.pants, -0.5, 1, 0), part(0.9, 2, 1, a.pants, 0.5, 1, 0)];
+  legs.forEach(l => { l.geometry.translate(0, -1, 0); l.position.y = 2; });
+  part(2, 2, 1, a.shirt, 0, 3, 0);
+  const arms = [part(0.9, 2, 1, a.skin, -1.45, 3, 0), part(0.9, 2, 1, a.skin, 1.45, 3, 0)];
+  arms.forEach(l => { l.geometry.translate(0, -0.8, 0); l.position.y = 3.8; });
+  mesh(new THREE.CylinderGeometry(0.62, 0.62, 1.2, 16), lambert(a.skin), 0, 4.6, 0, inner);
+  const face = FACE_KINDS.includes(a.face) ? a.face : "smile";
+  if (!faceTex[face]) faceTex[face] = new THREE.CanvasTexture(drawFace(face));
+  mesh(new THREE.PlaneGeometry(0.9, 0.9), new THREE.MeshBasicMaterial({ map: faceTex[face], transparent: true }), 0, 4.6, 0.63, inner, false);
+  const hc = a.hatColor || "#e63946";
+  if (a.hat === "cap") { mesh(new THREE.CylinderGeometry(0.66, 0.66, 0.35, 16), lambert(hc), 0, 5.3, 0, inner); part(1.1, 0.08, 0.6, hc, 0, 5.15, 0.75); }
+  else if (a.hat === "crown") {
+    mesh(new THREE.CylinderGeometry(0.6, 0.55, 0.4, 8, 1, true), lambert(a.crownColor || "#ffd166", { side: THREE.DoubleSide }), 0, 5.4, 0, inner);
+    for (let i = 0; i < 6; i++) { const an = i / 6 * Math.PI * 2; mesh(new THREE.ConeGeometry(0.1, 0.3, 4), lambert(a.crownColor || "#ffd166"), Math.cos(an) * 0.55, 5.7, Math.sin(an) * 0.55, inner); }
+  } else if (a.hat === "headphones") {
+    mesh(new THREE.TorusGeometry(0.7, 0.07, 8, 20, Math.PI), lambert(hc), 0, 4.75, 0, inner);
+    part(0.25, 0.5, 0.5, hc, -0.7, 4.6, 0); part(0.25, 0.5, 0.5, hc, 0.7, 4.6, 0);
+  } else if (a.hat === "helmet") mesh(new THREE.SphereGeometry(0.95, 20, 14), lambert("#cfe8ff", { transparent: true, opacity: 0.35, depthWrite: false }), 0, 4.65, 0, inner, false);
+  // Yumuşak gölge lekesi
+  const blob = mesh(new THREE.CircleGeometry(0.55, 16), new THREE.MeshBasicMaterial({ color: 0, transparent: true, opacity: 0.22, depthWrite: false }), 0, 0.1, 0, g, false);
+  blob.rotation.x = -Math.PI / 2;
+  return { group: g, legs, arms };
+}
+const pl = { x: save.px, y: 0, z: save.pz, face: Math.PI, moving: false, walk: 0, group: null, parts: null };
+const DEFAULT_AVATAR = { skin: "#e0ac69", shirt: "#2b9de8", pants: "#2b2d42", hat: "cap", hatColor: "#ff8a3d", face: "smile" };
+let avatarKey = "";
+function rebuildAvatar() {
+  const a = { ...DEFAULT_AVATAR, ...((platform.profile && platform.profile.avatar) || {}) }, k = JSON.stringify(a);
+  if (k === avatarKey) return; avatarKey = k;
+  const rot = pl.group ? pl.group.rotation.y : Math.PI;
+  if (pl.group) scene.remove(pl.group);
+  const b = buildAvatar(a);
+  pl.group = b.group; pl.parts = b; pl.group.rotation.y = rot;
+  scene.add(pl.group);
+}
+rebuildAvatar();
+const nameTag = textSprite([[playerName(), "#ffffff", 64]], 0.42, 512, 96);
+scene.add(nameTag);
+
+const keys = new Set();
+const stick = { id: null, ox: 0, oy: 0, x: 0, y: 0 }, look = { id: null, x: 0, y: 0 };
+const cam = { yaw: 0, pitch: 0.82, dist: 15 };
+let shake = 0;
+function updatePlayer(dt) {
+  let fwd = 0, side = 0;
+  if (keys.has("KeyW") || keys.has("ArrowUp")) fwd += 1;
+  if (keys.has("KeyS") || keys.has("ArrowDown")) fwd -= 1;
+  if (keys.has("KeyA") || keys.has("ArrowLeft")) side -= 1;
+  if (keys.has("KeyD") || keys.has("ArrowRight")) side += 1;
+  fwd -= stick.y; side += stick.x;
+  const len = Math.hypot(fwd, side);
+  pl.moving = len > 0.05;
+  if (pl.moving) {
+    const k = Math.min(1, len) / len;
+    const mx = (-Math.sin(cam.yaw) * fwd + Math.cos(cam.yaw) * side) * k, mz = (-Math.cos(cam.yaw) * fwd - Math.sin(cam.yaw) * side) * k;
+    const nx = pl.x + mx * WALK * dt, nz = pl.z + mz * WALK * dt;
+    if (isFree(nx, pl.z, pl.y)) pl.x = nx;
+    if (isFree(pl.x, nz, pl.y)) pl.z = nz;
+    pl.face = Math.atan2(mx, mz); pl.walk += dt * 11;
+  }
+  const h = groundY(pl.x, pl.z); if (h > -50) pl.y = h;
+}
+function syncCamera(dt, instant) {
+  // Dik telefonda yatay görüş daralmasın: dikey FOV'u ekran oranına göre aç (en fazla 80°)
+  const asp = innerWidth / Math.max(1, innerHeight);
+  const fov = asp >= 1 ? 52 : Math.min(80, 2 * Math.atan(Math.tan(52 * Math.PI / 360) / asp) * 180 / Math.PI);
+  if (camera.fov !== fov) { camera.fov = fov; camera.updateProjectionMatrix(); }
+  const tx = pl.x, ty = pl.y + 1.2, tz = pl.z, cd = cam.dist * (asp < 0.9 ? 0.8 : 1);   // dik ekranda biraz yakın
+  const hx = tx + Math.sin(cam.yaw) * Math.cos(cam.pitch) * cd, hy = ty + Math.sin(cam.pitch) * cd, hz = tz + Math.cos(cam.yaw) * Math.cos(cam.pitch) * cd;
+  const k = instant ? 1 : Math.min(1, dt * 7);
+  camera.position.x += (hx - camera.position.x) * k; camera.position.y += (hy - camera.position.y) * k; camera.position.z += (hz - camera.position.z) * k;
+  if (shake > 0) { camera.position.x += (Math.random() * 2 - 1) * shake * 0.35; camera.position.y += (Math.random() * 2 - 1) * shake * 0.35; shake = Math.max(0, shake - dt * 1.6); }
+  camera.lookAt(tx, ty, tz);
+  sun.position.set(tx - 9, 20, tz + 11); sun.target.position.set(tx, 0, tz);
+  const g = pl.group; g.position.set(pl.x, pl.y, pl.z);
+  let d = pl.face - g.rotation.y; d = ((d + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
+  g.rotation.y += d * Math.min(1, dt * 14);
+  const sw = pl.moving ? Math.sin(pl.walk) * 0.7 : 0;
+  pl.parts.legs[0].rotation.x = sw; pl.parts.legs[1].rotation.x = -sw; pl.parts.arms[0].rotation.x = -sw; pl.parts.arms[1].rotation.x = sw;
+  nameTag.position.set(pl.x, pl.y + 2.85, pl.z);
+}
+
+// ================================================================ Güncelleme
+let time = 0, activePad = "", targetPad = "", shownMoney = save.money, saveT = 0;
+function update(dt) {
+  time += dt;
+  for (const d of droppers) {
+    const t = TIERS[d.tier]; d.t += dt;
+    if (d.t >= t.every) { d.t -= t.every; spawnCube(d); }
+    d.squash = Math.max(0, d.squash - dt * 5);
+    d.head.scale.set(1 + d.squash * 0.12, 1 - d.squash * 0.16, 1 + d.squash * 0.12);
+  }
+  updateCubes(dt);
+  for (const b of ["A", "B"]) for (const u of uppers[b]) { u.flash = Math.max(0, u.flash - dt * 3); u.mat.opacity = 0.25 + u.flash * 0.6; u.lab.scale.set(1.6 * (1 + u.flash * 0.25), 0.8 * (1 + u.flash * 0.25), 1); }
+  for (const id of ["bant1", "bant2"]) if (built[id] && built[id].userData.tex) built[id].userData.tex.offset.x = ((built[id].userData.tex.offset.x - dt * BELT_SPEED / 1.32) % 1 + 1) % 1;
+  for (const s of spinners) { s.g.rotation.y += dt * s.speed; if (s.bob) s.g.position.y += Math.sin(time * 2.4) * dt * 0.25; }
+  for (const f of flags) f.g.rotation.y = Math.sin(time * 2.2 + f.phase) * 0.35;
+  // Kurulma animasyonu (geri sekmeli büyüme) ve karelerin kaybolması
+  for (let i = growing.length - 1; i >= 0; i--) {
+    const gr = growing[i]; gr.t += dt;
+    if (gr.shrink) { const k = Math.min(1, gr.t / 0.18); gr.g.scale.setScalar(Math.max(0.01, 1 - k)); if (k >= 1) { scene.remove(gr.g); growing.splice(i, 1); } continue; }
+    if (gr.t < 0) continue;
+    const k = Math.min(1, gr.t / 0.5), c1 = 1.70158, s = 1 + (c1 + 1) * Math.pow(k - 1, 3) + c1 * Math.pow(k - 1, 2);
+    gr.g.scale.setScalar(Math.max(0.01, s));
+    if (k >= 1) { gr.g.scale.setScalar(1); growing.splice(i, 1); }
+  }
+  updateParts(dt);
+  if (!anyOverlay()) updatePlayer(dt); else pl.moving = false;
+  checkPads(); animatePads();
+  shownMoney += (save.money - shownMoney) * Math.min(1, dt * 7);
+  if (Math.abs(save.money - shownMoney) < 0.6) shownMoney = save.money;
+  syncCamera(dt);
+  saveT += dt; if (saveT > 5) { saveT = 0; persist(); }
+}
+function checkPads() {
+  let on = "";
+  for (const id in pads) { const q = padPos(id); if (Math.abs(q.y - pl.y) < 1 && Math.hypot(q.x - pl.x, q.z - pl.z) < PAD_R) { on = id; break; } }
+  if (!on && rebirthPad && Math.abs(pl.y) < 1 && Math.hypot(REBIRTH_PAD.x - pl.x, REBIRTH_PAD.z - pl.z) < PAD_R) on = "dogus";
+  if (!on && cashPad && Math.abs(pl.y) < 1 && Math.hypot(CASH_PAD.x - pl.x, CASH_PAD.z - pl.z) < PAD_R + 0.15) on = "kasa";
+  if (on !== activePad) {
+    activePad = on;
+    if (on === "dogus") { SFX.click(); releaseInput(); show("ovReborn"); }
+    else if (on && on !== "kasa") buy(on);
+  }
+  if (activePad === "kasa" && save.register >= 1) collect();
+}
+function animatePads() {
+  padColors();
+  const pulse = 1 + Math.sin(time * 5) * 0.05;
+  for (const id in pads) pads[id].disc.scale.set(pulse, 1, pulse);
+  if (rebirthPad) rebirthPad.disc.scale.set(pulse, 1, pulse);
+  if (cashPad) {
+    const full = save.register >= 1 && !hasPass("auto");
+    cashPad.disc.scale.setScalar(1 + (full ? Math.sin(time * 7) * 0.07 : 0));
+    setSprite(cashPad.label, [["PARA TOPLA", "#ffe14d", 56], [full ? "₺" + short(save.register) : "", "#5dff9b", 60]]);
+    if (cashScreen) {
+      const t = hasPass("auto") ? "OTOMATİK" : "₺" + short(save.register), ud = cashScreen.userData;
+      if (ud.key !== t) { ud.key = t; drawLines(ud.cv, [["KASA", "#9ff7c9", 44], [t, "#ffe14d", 92]], ud.opt); ud.tex.needsUpdate = true; }
+    }
+  }
+  // Hedef ışını: alınabilir en ucuz kare; yoksa kasadaki parayla alınabiliyorsa Para Topla
+  targetPad = ""; let best = Infinity, cheapest = Infinity;
+  for (const id in pads) { const f = ITEM[id].price; cheapest = Math.min(cheapest, f); if (f <= save.money && f < best) { best = f; targetPad = id; } }
+  if (!targetPad && cashPad && !hasPass("auto") && save.register >= 1 && save.money + save.register >= cheapest) targetPad = "kasa";
+  if (!targetPad && rebirthPad) targetPad = "dogus";
+  const vis = targetPad && targetPad !== activePad;
+  beam.visible = !!vis; arrow.visible = false;
+  if (vis) {
+    const q = padPos(targetPad);
+    beam.position.set(q.x, q.y + 6, q.z);
+    beam.material.color.set(targetPad === "kasa" ? 0xffe14d : targetPad === "dogus" ? 0xc39bff : 0x4dffa0);
+    beam.material.opacity = 0.26 + Math.sin(time * 4) * 0.08;
+    const dx = q.x - pl.x, dz = q.z - pl.z, L = Math.hypot(dx, dz);
+    if (L > 3) {
+      arrow.visible = true; arrow.position.set(pl.x + dx / L * 1.5, pl.y + 0.12, pl.z + dz / L * 1.5);
+      arrow.rotation.y = Math.atan2(dx, dz); arrow.scale.setScalar(1 + Math.sin(time * 6) * 0.08);
+    }
+  }
+}
+function step(sn) { let t = 0; while (t < sn) { update(1 / 30); t += 1 / 30; } drawCubes(); updateHud(true); }
+window.step = step;
+
+// ================================================================ Arayüz
+const OVERLAYS = ["ovPause", "ovShop", "ovReborn", "ovOffline", "ovHelp"];
+const anyOverlay = () => OVERLAYS.some(id => $(id).classList.contains("show"));
+const topOverlay = () => { for (let i = OVERLAYS.length - 1; i >= 0; i--) if ($(OVERLAYS[i]).classList.contains("show")) return OVERLAYS[i]; return null; };
+function show(id) { releaseInput(); renderOpen(id); $(id).classList.add("show"); $(id).scrollTop = 0; drawJoy(); }
+function hide(id) {
+  $(id).classList.remove("show"); drawJoy();
+  if (id === "ovHelp" && !save.helpSeen) { save.helpSeen = true; persist(true); }
+}
+function rerenderOpen() { for (const id of OVERLAYS) if ($(id).classList.contains("show")) renderOpen(id); }
+const muteText = () => save.muted ? "🔇 Ses: Kapalı" : "🔊 Ses: Açık";
+function renderOpen(id) {
+  if (id === "ovPause") {
+    const m = machineCount();
+    $("pauseBody").innerHTML = `<p class="center" style="font-size:19px;font-weight:900">💰 ₺${short(save.money)} &nbsp;·&nbsp; 📈 ₺${short(incomePerSec())}/sn</p>
+      <p class="small center">🏗️ ${Object.keys(save.bought).length}/${ITEMS.length} parça · 🏭 ${m[0]}/${m[1]} makine · ♻️ ${save.rebirths} doğuş · 💵 toplam ₺${short(save.totalEarned)}</p>`;
+    document.querySelectorAll("[data-mute]").forEach(b => b.textContent = muteText());
+  } else if (id === "ovShop") {
+    const p = platform.profile;
+    let h = p && p.jeton != null ? `<p class="center" style="color:#b07800;font-weight:900">Küp Jeton bakiyen: KJ ${fmt(p.jeton)}</p>` : "";
+    for (const it of PASSES) {
+      const own = hasPass(it.id);
+      h += `<div class="shoprow"><div class="ic">${it.icon}</div><div class="tx"><b>${esc(it.name)}</b><div>${esc(it.desc)}</div></div>
+        <button class="btn ${own ? "" : "purple"}" data-pass="${it.id}" ${own ? "disabled" : ""}>${own ? "Sende ✓" : "KJ " + it.jeton}</button></div>`;
+    }
+    h += `<p class="small">${platform.inside ? "Satın alımı Küp Evreni onaylar; Küp Jeton bakiyenden düşer." : "Küp Jeton ile almak için oyunu Küp Evreni'nden aç."}</p>`;
+    $("shopBody").innerHTML = h;
+    $("shopBody").querySelectorAll("[data-pass]").forEach(b => b.onclick = () => buyPass(PASSES.find(x => x.id === b.dataset.pass), b));
+  } else if (id === "ovReborn") {
+    const cur = 1 + REBIRTH_BONUS * save.rebirths, ready = allBought();
+    $("rebornBody").innerHTML = `<p class="center">Fabrikanı sıfırla, kalıcı olarak daha çok kazan!</p>
+      <p class="center" style="color:#7c5cff;font-size:24px;font-weight:900">Gelir çarpanı: x${dec(cur)} → x${dec(cur + REBIRTH_BONUS)}</p>
+      <p class="small center">Bütün makineler, yapılar ve paran sıfırlanır. Toplam kazancın, geçişlerin ve doğuş rozetin kalır.</p>
+      ${ready ? "" : `<p class="center" style="color:#b42318;font-weight:900">Önce fabrikadaki her şeyi satın al (${Object.keys(save.bought).length}/${ITEMS.length}).</p>`}`;
+    $("btnReborn").style.display = ready ? "" : "none";
+  }
+}
+function buyPass(it, btn) {
+  if (!it || hasPass(it.id)) return;
+  const p = platform.profile;
+  if (platform.inside && p && p.jeton != null && p.jeton < it.jeton) { SFX.bad(); notify(`Yetersiz Küp Jeton (KJ ${fmt(p.jeton)})`); return; }
+  btn.disabled = true;
+  requestPurchase(it, ok => {
+    if (!ok) { SFX.bad(); notify("Satın alma tamamlanamadı"); rerenderOpen(); return; }
+    save.passes[it.id] = true; if (it.id === "auto") flushRegister();
+    SFX.collect(); notify(`${it.icon} ${it.name} senin!`);
+    persist(true); updateHud(true); rerenderOpen();
+  });
+  if (!platform.inside) btn.disabled = false;
+}
+function goalInfo() {
+  if (allBought()) return ["🎉 Fabrika tamam! Mor kareye bas: ♻️ Yeniden Doğuş", -1];
+  let best = null; for (const id of visibleItems()) if (!best || ITEM[id].price < best.price) best = ITEM[id];
+  if (!best) return ["", -1];
+  const f = best.price;
+  if (f <= save.money) return [`🟢 ${best.name} alınabilir! Işığı takip et`, 1];
+  if (!hasPass("auto") && save.register >= 1 && save.money + save.register >= f) return [`💰 Kasada ₺${short(save.register)} var · Para Topla'ya bas!`, clamp(save.money / f, 0, 1)];
+  const g = incomePerSec(); let eta = "";
+  if (g > 0) { const sn = Math.ceil((f - save.money - save.register) / g); eta = "  ·  ~" + (sn < 120 ? sn + " sn" : Math.ceil(sn / 60) + " dk"); }
+  return [`🎯 ${best.name} · ₺${short(f)}${eta}`, clamp(save.money / f, 0, 1)];
+}
+let hudT = 0, lastMoney = save.money;
+function updateHud(force) {
+  setText($("money"), "₺" + (shownMoney < 1e9 ? fmt(shownMoney) : short(shownMoney)));
+  if (save.money > lastMoney + 0.5) { const m = $("money"); m.classList.add("bump"); clearTimeout(m._b); m._b = setTimeout(() => m.classList.remove("bump"), 120); }
+  lastMoney = save.money;
+  const t = performance.now();
+  if (!force && t - hudT < 200) return;
+  hudT = t;
+  const ips = incomePerSec(); setText($("income"), "+₺" + (ips < 100 ? dec(ips) : short(ips)) + " /sn");
+  const [gt, gp] = goalInfo();
+  setText($("goalText"), gt); $("goal").style.display = gt ? "" : "none";
+  $("goalBar").style.display = gp >= 0 ? "" : "none"; $("goalFill").style.width = Math.max(0, gp) * 100 + "%";
+  const rb = $("bRebirth"); rb.style.display = save.rebirths > 0 ? "" : "none"; setText(rb, `♻️ ${save.rebirths} · x${dec(1 + REBIRTH_BONUS * save.rebirths)} gelir`);
+  const ps = [hasPass("double") ? "💎 2x Para" : "", hasPass("auto") ? "🤖 Oto Toplama" : ""].filter(Boolean).join("\n");
+  const pb = $("bPasses"); pb.style.display = ps ? "" : "none"; setText(pb, ps);
+  setText($("bMute"), save.muted ? "🔇" : "🔊");
+  layout();
+}
+function layout() {
+  const portrait = innerHeight > innerWidth * 1.1;
+  const mb = $("moneyBox");
+  mb.style.top = portrait ? "70px" : "12px";
+  $("badges").style.top = portrait ? "70px" : "12px";
+  if (portrait) { $("badges").style.top = (70 + mb.offsetHeight + 60) + "px"; }
+  const gTop = mb.offsetTop + mb.offsetHeight + 8;
+  $("goal").style.top = gTop + "px";
+  $("toasts").style.top = (gTop + $("goal").offsetHeight + 10) + "px";
+}
+function toggleMute() {
+  save.muted = !save.muted;
+  if (A.master) A.master.gain.value = save.muted ? 0 : 0.5;
+  SFX.click(); persist(true); rerenderOpen(); updateHud(true);
+}
+function exitGame() {
+  // Platformda oyundan çıkışı üst çubuk yapar; burada kaydedilir ve platforma haber verilir
+  SFX.click();
+  persist(true);
+  for (const id of OVERLAYS) $(id).classList.remove("show");
+  if (platform.inside) parent.postMessage({ type: "kup:exit" }, "*");
+  else notify("Kaydedildi. Sekmeyi kapatabilirsin.");
+}
+
+// ================================================================ Girdi
+function releaseInput() { keys.clear(); stick.id = null; stick.x = stick.y = 0; look.id = null; drag = null; drawJoy(); }
+const isTouch = matchMedia("(pointer: coarse)").matches || "ontouchstart" in window;
+function drawJoy() {
+  const j = $("joy");
+  if (!isTouch || anyOverlay()) { j.style.display = "none"; return; }
+  j.style.display = "block";
+  if (stick.id !== null) { j.classList.remove("idle"); j.style.left = stick.ox + "px"; j.style.top = stick.oy + "px"; }
+  else { j.classList.add("idle"); j.style.left = "96px"; j.style.top = (innerHeight - 120) + "px"; }
+  $("knob").style.transform = `translate(${stick.x * 50}px, ${stick.y * 50}px)`;
+}
+document.querySelectorAll("[data-close]").forEach(b => b.addEventListener("click", () => { SFX.click(); hide(b.closest(".overlay").id); }));
+document.querySelectorAll("[data-open]").forEach(b => b.addEventListener("click", () => { SFX.click(); show(b.dataset.open); }));
+document.querySelectorAll("[data-mute]").forEach(b => b.addEventListener("click", toggleMute));
+document.querySelectorAll("[data-exit]").forEach(b => b.addEventListener("click", exitGame));
+$("btnResume").onclick = () => { SFX.click(); hide("ovPause"); };
+$("btnOffline").onclick = () => { SFX.collect(); hide("ovOffline"); };
+$("btnReborn").onclick = () => { hide("ovReborn"); rebirth(); };
+$("bShop").onclick = () => { SFX.click(); show("ovShop"); };
+$("bMute").onclick = toggleMute;
+$("bMenu").onclick = () => { SFX.click(); show("ovPause"); };
+$("bExit").onclick = exitGame;
+for (const b of document.querySelectorAll("#btns button")) b.addEventListener("pointerdown", e => e.stopPropagation());
+addEventListener("pointerdown", () => initAudio(), true);
+const cv = $("game");
+let drag = null;
+cv.addEventListener("pointerdown", e => {
+  e.preventDefault();
+  if (anyOverlay()) return;
+  if (e.pointerType === "touch") {
+    if (e.clientX < innerWidth / 2 && stick.id === null) { stick.id = e.pointerId; stick.ox = e.clientX; stick.oy = e.clientY; stick.x = stick.y = 0; }
+    else if (look.id === null) { look.id = e.pointerId; look.x = e.clientX; look.y = e.clientY; }
+    drawJoy();
+  } else drag = { x: e.clientX, y: e.clientY, id: e.pointerId };
+  try { cv.setPointerCapture(e.pointerId); } catch (er) {}
+});
+function turn(dx, dy) { cam.yaw -= dx * 0.006; cam.pitch = clamp(cam.pitch + dy * 0.004, 0.45, 1.25); }
+cv.addEventListener("pointermove", e => {
+  if (e.pointerId === stick.id) {
+    let dx = (e.clientX - stick.ox) / 55, dy = (e.clientY - stick.oy) / 55; const L = Math.hypot(dx, dy);
+    if (L > 1) { dx /= L; dy /= L; } stick.x = dx; stick.y = dy; drawJoy();
+  } else if (e.pointerId === look.id) { turn(e.clientX - look.x, e.clientY - look.y); look.x = e.clientX; look.y = e.clientY; }
+  else if (drag && e.pointerId === drag.id) { turn(e.clientX - drag.x, e.clientY - drag.y); drag.x = e.clientX; drag.y = e.clientY; }
+});
+const endPtr = e => {
+  if (e.pointerId === stick.id) { stick.id = null; stick.x = stick.y = 0; drawJoy(); }
+  if (e.pointerId === look.id) look.id = null;
+  if (drag && e.pointerId === drag.id) drag = null;
+};
+cv.addEventListener("pointerup", endPtr); cv.addEventListener("pointercancel", endPtr);
+cv.addEventListener("wheel", e => { e.preventDefault(); cam.dist = clamp(cam.dist + Math.sign(e.deltaY) * 1.2, 8, 28); }, { passive: false });
+addEventListener("keydown", e => {
+  initAudio();
+  const k = e.code;
+  if (k === "Escape" || k === "KeyP") {
+    if (e.repeat) return;
+    const o = topOverlay();
+    if (o) { SFX.click(); hide(o); } else { SFX.click(); show("ovPause"); }
+    return;
+  }
+  if (anyOverlay()) return;
+  if (k.startsWith("Arrow") || k === "Space") e.preventDefault();
+  keys.add(k);
+});
+addEventListener("keyup", e => keys.delete(e.code));
+addEventListener("blur", releaseInput);
+addEventListener("contextmenu", e => e.preventDefault());
+document.addEventListener("visibilitychange", () => { if (document.hidden) { if (!anyOverlay()) show("ovPause"); persist(true); } });
+function resize() {
+  renderer.setPixelRatio(Math.min(2, devicePixelRatio || 1));
+  renderer.setSize(innerWidth, innerHeight, false);
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  syncCamera(1, true); drawJoy(); updateHud(true);
+}
+addEventListener("resize", resize);
+
+// ================================================================ Başlat
+if (groundY(pl.x, pl.z) < -50) { pl.x = SPAWN.x; pl.z = SPAWN.z; }
+buildFactory();
+pl.y = Math.max(0, groundY(pl.x, pl.z));
+const offlineGain = applyOffline();
+shownMoney = save.money;
+resize();
+if (!save.helpSeen) show("ovHelp");
+if (offlineGain > 0) { $("offAmount").textContent = "+₺" + short(offlineGain); show("ovOffline"); }
+if (platform.inside) parent.postMessage({ type: "kup:ready" }, "*");
+persist(true);
+setInterval(() => persist(true), 10000);
+let last = performance.now();
+function frame(t) {
+  const dt = Math.min(0.1, (t - last) / 1000); last = t;
+  update(dt); drawCubes(); updateHud();
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+// Test kancası
+window.pf = { save: () => save, pl, cam, ITEMS, padPos, buy, collect, incomePerSec, rebirth, applyOffline, isFree, persist, stats,
+  get cubes() { return cubes; }, get droppers() { return droppers; }, allBought, visibleItems };
+</script>
+</body>
+</html>
