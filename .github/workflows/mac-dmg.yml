@@ -1,0 +1,89 @@
+# Bu dosya herkese açık MahmutAykac/kup-evreni deposunda çalışır (.github/workflows/mac-dmg.yml).
+# Kaynağı roblox-ai deposunda: .github/kup-evreni-depo/mac-dmg.yml (değiştirince oraya da kopyala).
+# Neden burada: .dmg ancak bir Mac makinesinde güvenle yapılır; herkese açık depoda Mac makinesi ücretsiz ve sınırsız.
+# Site yayını (roblox-ai/github-io-yayin.yml) indir/kup-evreni-mac.zip'i buraya koyar; bu iş onu
+# Kup-Evreni.dmg'ye (sürükle-bırak kurulum) çevirir ve "mac" sürüm sayfasına yükler:
+#   https://github.com/MahmutAykac/kup-evreni/releases/download/mac/Kup-Evreni.dmg
+# Zip değişmediyse (özeti aynıysa) hiçbir şey yapmaz.
+# İsteğe bağlı: BUTLER_API_KEY sırrı + ITCH_OYUN değişkeni bu depoda da varsa .dmg itch.io "mac" kanalına da gider.
+name: Mac kurulum dosyası (dmg)
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: mac-dmg
+  cancel-in-progress: true
+jobs:
+  dmg:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: indir/kup-evreni-mac.zip
+          sparse-checkout-cone-mode: false
+      - name: Değişti mi?
+        id: d
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test -s indir/kup-evreni-mac.zip || { echo "::warning::indir/kup-evreni-mac.zip yok"; echo "yap=0" >> "$GITHUB_OUTPUT"; exit 0; }
+          OZET=$(shasum -a 256 indir/kup-evreni-mac.zip | cut -d' ' -f1)
+          ESKI=$(gh release view mac -R "$GITHUB_REPOSITORY" --json body -q .body 2>/dev/null | sed -n 's/.*zip-ozeti: \([0-9a-f]*\).*/\1/p')
+          echo "ozet=$OZET" >> "$GITHUB_OUTPUT"
+          if [ "$OZET" = "$ESKI" ] && [ "${{ github.event_name }}" = "push" ]; then echo "Mac sürümü değişmemiş."; echo "yap=0" >> "$GITHUB_OUTPUT"; else echo "yap=1" >> "$GITHUB_OUTPUT"; fi
+      - name: dmg yap
+        if: steps.d.outputs.yap == '1'
+        run: |
+          mkdir -p sahne
+          ditto -x -k indir/kup-evreni-mac.zip sahne
+          ls -la sahne
+          test -d "sahne/Küp Evreni.app"
+          ln -s /Applications sahne/Applications
+          hdiutil create -volname "Küp Evreni" -srcfolder sahne -fs HFS+ -format UDZO -imagekey zlib-level=9 -ov Kup-Evreni.dmg
+          ls -la Kup-Evreni.dmg
+          # Deneme: dmg açılıyor ve içinde uygulama var mı
+          hdiutil attach -nobrowse -readonly -mountpoint /tmp/kupdmg Kup-Evreni.dmg
+          ls -la /tmp/kupdmg
+          test -x "/tmp/kupdmg/Küp Evreni.app/Contents/MacOS/Küp Evreni"
+          hdiutil detach /tmp/kupdmg
+      - name: Sürüm sayfasına yükle
+        if: steps.d.outputs.yap == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NOT="Küp Evreni macOS kurulum dosyası. Aç, Küp Evreni'ni Applications (Uygulamalar) klasörüne sürükle.
+          zip-ozeti: ${{ steps.d.outputs.ozet }}"
+          if gh release view mac -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload mac Kup-Evreni.dmg --clobber -R "$GITHUB_REPOSITORY"
+            gh release edit mac --notes "$NOT" -R "$GITHUB_REPOSITORY"
+          else
+            gh release create mac Kup-Evreni.dmg --title "Küp Evreni (Mac)" --notes "$NOT" -R "$GITHUB_REPOSITORY"
+          fi
+          echo "https://github.com/$GITHUB_REPOSITORY/releases/download/mac/Kup-Evreni.dmg"
+      - uses: actions/upload-artifact@v4
+        if: steps.d.outputs.yap == '1'
+        with:
+          name: kup-evreni-dmg
+          path: Kup-Evreni.dmg
+          retention-days: 3
+  itch:
+    needs: dmg
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: kup-evreni-dmg
+      - name: itch.io "mac" kanalına yükle
+        env:
+          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
+          OYUN: ${{ vars.ITCH_OYUN }}
+        run: |
+          if [ ! -s Kup-Evreni.dmg ]; then echo "Yeni dmg yok."; exit 0; fi
+          if [ -z "$BUTLER_API_KEY" ] || [ -z "$OYUN" ]; then echo "::warning::BUTLER_API_KEY ya da ITCH_OYUN yok, itch.io'ya yüklenmedi."; exit 0; fi
+          curl -fsSL -o butler.zip https://broth.itch.zone/butler/linux-amd64/LATEST/archive/default
+          unzip -q -o butler.zip -d butler && chmod +x butler/butler
+          ./butler/butler push Kup-Evreni.dmg "$OYUN:mac"
