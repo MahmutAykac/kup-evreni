@@ -1,0 +1,1591 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Hayvanat Bahçesi Tycoon</title>
+<!--
+  Hayvanat Bahçesi Tycoon: boş bir arsada kendi hayvanat bahçeni kur (3D tycoon).
+  Küp Evreni platformunda çalışır (tek başına da açılır). Kayıt anahtarı: hayvanatBahcesi.
+  Kayıt: { money, totalEarned, register, built, animals, upgrades, rebirths, multiplier, lastSeen, passes, giftIds, helpSeen, muted, px, pz }
+  (totalEarned düz sayıdır: liderlik tablosu okur). Godot sürümü: godot/betikler/hayvanat.gd (aynı kurallar, aynı kayıt).
+  Döngü: parlayan karelere bas → yol / çit / hayvan / yapı kurulur → çekicilik artar → ziyaretçi gelir, bilet alır →
+  gelir girişteki Kasada birikir (kasaya basınca toplanır; Otomatik Toplayıcı kendisi toplar).
+  Gelir/sn = min(talep, kapasite) × (bilet + harcama) / 60 × çarpan · talep = 10 + 3 × çekicilik (ziyaretçi/dk).
+  Çevrimdışı: en fazla 2 saat, yarı hızda. Yeniden Doğuş: bahçe tamamlanınca sıfırla, kalıcı +%50 gelir.
+  Kontroller: WASD / oklar yürü · fareyle sürükle: kamera · tekerlek: yakınlaş · E / Space: yem ver · U: yükseltmeler · Esc / P: duraklat.
+  Dokunmatik: sol yarı joystick · sağ yarı sürükle-bak · butonlar.
+  Test kancası: window.step(sn) oyun mantığını elle ilerletir; window.zoo test için iç durumu verir.
+-->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>/* Küp Evreni grafik modu (Profil → Grafik modu): performans | dengeli | yuksek */(function () { try {
+  var m = "dengeli"; try { m = JSON.parse(localStorage.getItem("kupGrafik") || '"dengeli"'); } catch (e) {}
+  if (m !== "performans" && m !== "yuksek") return;
+  var O = THREE.WebGLRenderer, Y = function (p) {
+    p = p || {}; p.antialias = m === "yuksek";
+    var r = new O(p), sp = r.setPixelRatio.bind(r);
+    r.setPixelRatio = function (x) { sp(m === "yuksek" ? Math.min(2, window.devicePixelRatio || 1) : Math.max(0.5, (x || 1) * 0.6)); };
+    r.setPixelRatio(1);
+    if (m === "performans") Object.defineProperty(r.shadowMap, "enabled", { get: function () { return false; }, set: function () {} });
+    return r;
+  };
+  Y.prototype = O.prototype; THREE.WebGLRenderer = Y;
+} catch (e) {} })();</script>
+<style>
+  :root { --panel: rgba(28, 41, 31, 0.8); --line: rgba(255,255,255,0.18); --text: #fff; --gold: #ffd23f; }
+  * { box-sizing: border-box; }
+  html, body { -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; overscroll-behavior: none; }
+  html, body { margin: 0; height: 100%; background: #8fd0f5; color: var(--text); font-family: "Trebuchet MS", system-ui, sans-serif;
+    overflow: hidden; -webkit-user-select: none; user-select: none; touch-action: none; }
+  button { font: inherit; color: inherit; }
+  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  .pill { background: var(--panel); border-radius: 14px; padding: 8px 12px; }
+  #top { position: fixed; left: 14px; top: 12px; pointer-events: none; }
+  #money { font-size: 22px; font-weight: 700; color: var(--gold); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #income { font-size: 15px; color: #c8f7c5; white-space: nowrap; }
+  #visit { font-size: 14px; color: #e4e9f2; white-space: nowrap; }
+  #menu { position: fixed; right: 14px; top: 12px; display: flex; gap: 6px; }
+  #menu button { border: 2px solid var(--line); background: var(--panel); border-radius: 14px; padding: 8px 12px; cursor: pointer; font-size: 15px;
+    white-space: nowrap; min-width: 46px; touch-action: none; }
+  #hint { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); pointer-events: none; text-align: center; font-size: 15px;
+    max-width: min(560px, calc(100vw - 32px)); width: max-content; }
+  #toasts { position: fixed; top: 96px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 6px;
+    align-items: center; pointer-events: none; z-index: 5; width: max-content; max-width: calc(100vw - 32px); }
+  .toast { background: rgba(255,251,234,0.96); color: #2b2b2b; padding: 6px 14px; border-radius: 10px; font-size: 15px; animation: fade 3s forwards; text-align: center; }
+  @keyframes fade { 0%, 82% { opacity: 1; } 100% { opacity: 0; transform: translateY(-8px); } }
+  .pop { position: fixed; transform: translateX(-50%); font-size: 26px; font-weight: 700; color: var(--gold);
+    text-shadow: 0 2px 0 rgba(0,0,0,0.5); pointer-events: none; animation: rise 1s forwards; z-index: 4; white-space: nowrap; }
+  @keyframes rise { to { opacity: 0; transform: translate(-50%, -60px); } }
+  #btnAct { position: fixed; right: 14px; bottom: 70px; display: none; min-width: 160px; text-align: center; border: 2px solid var(--gold); background: var(--panel);
+    border-radius: 14px; padding: 12px 14px; cursor: pointer; font-size: 17px; font-weight: 700; touch-action: none; }
+  #btnAct:disabled { opacity: 0.75; cursor: default; }
+  #btnAct b { display: inline-block; background: #fff; color: #222; border-radius: 6px; width: 22px; text-align: center; margin-right: 6px; }
+  #stick { position: fixed; width: 110px; height: 110px; margin: -55px 0 0 -55px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.45);
+    background: rgba(0,0,0,0.22); display: none; pointer-events: none; }
+  #stick div { position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px; border-radius: 50%; background: rgba(255,255,255,0.75); }
+  .overlay { position: fixed; inset: 0; display: none; align-items: flex-start; justify-content: center; background: rgba(10,20,14,0.55);
+    padding: 16px; overflow-y: auto; touch-action: pan-y; z-index: 10; }
+  .overlay.show { display: flex; }
+  .card { background: #fffbea; color: #2b2b2b; border-radius: 18px; padding: 18px 22px; width: 100%; max-width: 540px; margin: auto 0; line-height: 1.45;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
+  .card h1 { margin: 0 0 8px; font-size: 24px; color: #2f7d32; text-align: center; }
+  .card ul { padding-left: 20px; margin: 8px 0; }
+  .card li { margin: 4px 0; }
+  .muted { color: #6b6455; font-size: 14px; }
+  .big { font-size: 40px; font-weight: 700; color: #b07800; text-align: center; margin: 4px 0; }
+  .btn { border: 0; border-radius: 12px; padding: 11px 14px; cursor: pointer; font-weight: 700; background: #ece4c8; color: #3a3426; }
+  .btn.go { background: #2bb673; color: #fff; }
+  .btn.gold { background: var(--gold); color: #3a3426; }
+  .btn.blue { background: #2b9de8; color: #fff; }
+  .btn:disabled { opacity: 0.5; cursor: default; }
+  .col { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+  .rowb { display: flex; gap: 8px; }
+  .rowb .btn { flex: 1; }
+  .item { display: grid; grid-template-columns: 44px 1fr auto; gap: 10px; align-items: center; padding: 9px 0; border-bottom: 1px solid #ece4c8; }
+  .item .ic { font-size: 28px; text-align: center; }
+  .item .btn { min-width: 112px; font-size: 15px; }
+  .goldtxt { color: #b07800; font-weight: 700; font-size: 18px; }
+  #noWebgl { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 16px; text-align: center; font-size: 18px; color: #222; }
+  @media (max-width: 760px), (max-height: 480px) {
+    #top { padding: 6px 10px; }
+    #money { font-size: 18px; }
+    #income { font-size: 13px; }
+    #visit { font-size: 12px; }
+    #menu button { padding: 6px 9px; font-size: 15px; }
+    #menu span { display: none; }
+    #hint { font-size: 13px; padding: 6px 10px; }
+    #toasts { top: 84px; }
+    .toast { font-size: 13px; }
+    #btnAct { font-size: 15px; min-width: 140px; padding: 10px 12px; }
+    .card { padding: 14px 16px; }
+    .card h1 { font-size: 20px; }
+  }
+  @media (max-width: 560px) {
+    #hint { bottom: 96px; }
+    #btnAct { bottom: 150px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="top" class="pill">
+  <div id="money">💰 50</div>
+  <div id="income"></div>
+  <div id="visit"></div>
+</div>
+<div id="menu">
+  <button id="bUp" title="Yükseltmeler (U)">🛠️ <span>Yükseltmeler</span></button>
+  <button id="bShop" title="Küp Jeton mağazası">💎 <span>KJ Mağaza</span></button>
+  <button id="bHelp" title="Nasıl oynanır">❓</button>
+  <button id="bPause" title="Duraklat (Esc)">II</button>
+</div>
+<div id="toasts"></div>
+<div id="hint" class="pill"></div>
+<button id="btnAct"></button>
+<div id="stick"><div></div></div>
+
+<div id="ovHelp" class="overlay"><div class="card">
+  <h1>🦁 Hayvanat Bahçesi Tycoon</h1>
+  <p style="margin:4px 0">Kendi hayvanat bahçeni kur, ziyaretçileri mutlu et!</p>
+  <ul>
+    <li><b>Parlayan karelere bas:</b> yeterli paran varsa yol, çit, hayvan ya da yeni bir yapı kurulur.</li>
+    <li>Her hayvan ve yapı bahçenin <b>çekiciliğini</b> artırır: daha çok ziyaretçi gelir, her biri bilet alır.</li>
+    <li>Gelir girişteki <b>💰 Kasada</b> birikir. Toplamak için kasanın yeşil karesine bas. 🤖 Otomatik Toplayıcı bunu senin yerine yapar.</li>
+    <li>Hayvanların önünde <b>🍖 Yem ver</b>: mutlu hayvanlar bir süre 1,5 kat çekicilik sağlar.</li>
+    <li>🛠️ <b>Yükseltmeler</b>: bilet fiyatı, ziyaretçi kapasitesi ve hayvan bakımı.</li>
+    <li>Bahçe tamamlanınca <b>♻️ Yeniden Doğuş</b>: baştan başla, kalıcı +%50 gelir kazan.</li>
+    <li>Oyun kapalıyken de kazanırsın (en fazla 2 saat, yarı hızda).</li>
+  </ul>
+  <div class="muted">Klavye: WASD / oklar yürü · fareyle sürükle: kamerayı çevir · tekerlek: yakınlaş · E / Space: yem ver · U: yükseltmeler · Esc / P: duraklat.</div>
+  <div class="muted">Dokunmatik: sol yarıda joystick · sağ yarıda sürükle: kamerayı çevir.</div>
+  <div class="col"><button class="btn go" data-close>Başla!</button></div>
+</div></div>
+<div id="ovPause" class="overlay"><div class="card">
+  <h1>Duraklatıldı</h1>
+  <div id="pauseInfo" style="text-align:center"></div>
+  <div class="col">
+    <button class="btn go" id="btnResume">Devam</button>
+    <div class="rowb"><button class="btn" id="btnPauseUp">🛠️ Yükseltmeler</button><button class="btn" data-open="ovHelp">Nasıl oynanır?</button></div>
+    <div class="rowb"><button class="btn" data-mute>Ses: Açık</button><button class="btn" data-exit>Çık</button></div>
+  </div>
+</div></div>
+<div id="ovUp" class="overlay"><div class="card">
+  <h1>🛠️ Yükseltmeler</h1>
+  <div class="goldtxt" id="upMoney"></div>
+  <div id="upList"></div>
+  <div class="muted" id="upNote" style="margin-top:8px"></div>
+  <div class="col"><button class="btn" data-close>Kapat</button></div>
+</div></div>
+<div id="ovShop" class="overlay"><div class="card">
+  <h1>Küp Jeton Mağazası</h1>
+  <div class="goldtxt" id="shopJeton"></div>
+  <div id="passList"></div>
+  <div class="muted" id="shopNote" style="margin-top:8px"></div>
+  <div class="col"><button class="btn" data-close>Kapat</button></div>
+</div></div>
+<div id="ovOffline" class="overlay"><div class="card">
+  <h1>Sen yokken kazandın!</h1>
+  <div class="big" id="offAmount"></div>
+  <p style="text-align:center;margin:4px 0">Sen yokken ziyaretçiler bilet almaya devam etti. (En fazla 2 saat, yarı hızda.)</p>
+  <div class="col"><button class="btn go" id="btnOffline">Harika!</button></div>
+</div></div>
+<div id="ovReborn" class="overlay"><div class="card">
+  <h1>♻️ Yeniden Doğuş</h1>
+  <p style="margin:4px 0">Bahçen sıfırlanır: para, yapılar, hayvanlar ve yükseltmeler baştan başlar. Geçişler ve 🤖 Otomatik Toplayıcı kalır.</p>
+  <p style="margin:4px 0;color:#2f7d32;font-weight:700" id="rebornTxt"></p>
+  <div class="col"><button class="btn go" id="btnReborn">♻️ Yeniden Doğ</button><button class="btn" data-close>Vazgeç</button></div>
+</div></div>
+<div id="noWebgl">3D için WebGL gerekli; bu tarayıcıda açılamadı. Chrome / Edge ile açmayı dene.</div>
+
+<script>
+"use strict";
+// ================================================================ Yardımcılar
+const $ = id => document.getElementById(id);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const rand = (a, b) => a + Math.random() * (b - a);
+const pick = a => a[Math.floor(Math.random() * a.length)];
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmt = n => Math.floor(n).toLocaleString("tr-TR");
+const dec = n => n >= 100 ? fmt(n) : n.toFixed(1).replace(".", ",");
+const angDiff = (a, b) => { let d = (b - a + Math.PI) % (Math.PI * 2); if (d < 0) d += Math.PI * 2; return d - Math.PI; };
+const unix = () => Math.floor(Date.now() / 1000);
+function setText(el, t) { if (el._t !== t) { el._t = t; el.textContent = t; } }
+function notify(msg) {
+  const el = document.createElement("div");
+  el.className = "toast"; el.textContent = msg;
+  $("toasts").appendChild(el);
+  setTimeout(() => el.remove(), 3000);
+  while ($("toasts").children.length > 3) $("toasts").firstChild.remove();
+}
+let popN = 0;
+function popText(txt, x, y) {
+  if (popN > 10) return;
+  const el = document.createElement("div");
+  el.className = "pop"; el.textContent = txt; el.style.left = x + "px"; el.style.top = y + "px";
+  document.body.appendChild(el); popN++;
+  setTimeout(() => { el.remove(); popN--; }, 1000);
+}
+
+// ================================================================ Config (Godot sürümüyle aynı)
+const START_MONEY = 50;
+const SPEED = 7.5, FAST_MULT = 1.6;          // oyuncu hızı, "Hızlı Yürüyüş" geçişi
+const BOUND = 29.3;
+const PAD_R = 1.3, VISIBLE_PADS = 3;
+const CASH = { x: -5.5, z: 23.6 }, CASH_R = 1.5;
+const START_POS = { x: 0, z: 23 };
+const MAX_VISITORS = 30;
+const FEED_TIME = 60, FEED_MULT = 1.5, FEED_DIST = 3.2;
+const OFFLINE_MAX = 7200, OFFLINE_RATE = 0.5;
+const REBIRTH_BONUS = 0.5;
+const BUS_HALF = 28;
+// Yol ağı: satırlar A (z=14), B (z=0), C (z=-14); sütun -3..3 → x = 7c. G = giriş, P = meydan
+const NODES = { G: { x: 0, z: 26 }, P: { x: 0, z: 21 } };
+for (const [r, z] of [["A", 14], ["B", 0], ["C", -14]]) for (let c = -3; c <= 3; c++) NODES[r + c] = { x: 7 * c, z };
+const PATH_EDGES = {
+  yol_giris: [["P", "A0"], ["A0", "A-1"], ["A0", "A1"]],
+  yol_orta: [["A0", "B0"], ["B0", "B-1"], ["B0", "B1"]],
+  yol_bati: [["A-1", "A-2"], ["A-2", "A-3"], ["B-1", "B-2"], ["B-2", "B-3"]],
+  yol_dogu: [["A1", "A2"], ["A2", "A3"], ["B1", "B2"], ["B2", "B3"]],
+  yol_guney: [["B0", "C0"], ["C0", "C-1"], ["C-1", "C-2"], ["C-2", "C-3"], ["C0", "C1"], ["C1", "C2"], ["C2", "C3"]],
+};
+const PENS = {
+  tavsan: { x: -7, z: 7, ground: 0x8fd16a, fence: 0x9c6b3e, node: "A-1", name: "Tavşanlar", icon: "🐰" },
+  penguen: { x: 7, z: 7, ground: 0xe4f3ff, fence: 0x7fb8e0, node: "A1", name: "Penguenler", icon: "🐧" },
+  zebra: { x: -7, z: -7, ground: 0xd9c27a, fence: 0x9c6b3e, node: "B-1", name: "Zebralar", icon: "🦓" },
+  zurafa: { x: 7, z: -7, ground: 0xe3cb86, fence: 0x9c6b3e, node: "B1", name: "Zürafalar", icon: "🦒" },
+  aslan: { x: -21, z: 7, ground: 0xd6b46c, fence: 0x7d7f86, node: "A-3", name: "Aslanlar", icon: "🦁" },
+  fil: { x: 21, z: 7, ground: 0xbca681, fence: 0x9c6b3e, node: "A3", name: "Filler", icon: "🐘" },
+  panda: { x: -21, z: -7, ground: 0x7cc463, fence: 0x5f8f3e, node: "B-3", name: "Pandalar", icon: "🐼" },
+  kutup: { x: 21, z: -7, ground: 0xf2f8ff, fence: 0x7fb8e0, node: "B3", name: "Kutup Ayıları", icon: "🐻‍❄️" },
+};
+const STOPS = {
+  yiyecek: { node: "P", x: -5.6, z: 21.5, face: -Math.PI / 2 }, tuvalet: { node: "P", x: 5.6, z: 21.5, face: Math.PI / 2 },
+  kafe: { node: "P", x: -15, z: 22, face: -Math.PI / 2 }, cesme: { node: "P", x: 15.8, z: 22, face: Math.PI / 2 },
+  hediyelik: { node: "C-1", x: -7, z: -15.9, face: Math.PI }, akvaryum: { node: "C1", x: 7, z: -15.9, face: Math.PI },
+  oyun_parki: { node: "C-3", x: -21, z: -15.9, face: Math.PI }, dondurma: { node: "C2", x: 14, z: -16.4, face: Math.PI },
+  safari: { node: "C3", x: 21, z: -15.9, face: Math.PI },
+};
+// Satın alınabilir öğeler (kurulma sırası). cek: çekicilik, spend: ziyaretçi başı ek harcama, req: önce kurulmalı
+const ITEMS = [
+  { id: "gise", name: "Bilet Gişesi", icon: "🎟️", price: 0, cek: 2, pad: [5.5, 24.5] },
+  { id: "yol_giris", name: "Giriş Yolu", icon: "🛤️", price: 25, cek: 1, req: "gise", pad: [0, 17] },
+  { id: "tavsan_cit", name: "Tavşan Bahçesi", icon: "🌿", price: 60, cek: 1, req: "yol_giris", pen: "tavsan" },
+  { id: "tavsan", name: "Tavşanlar", icon: "🐰", price: 100, cek: 5, req: "tavsan_cit", animal: "tavsan", count: 4 },
+  { id: "yiyecek", name: "Yiyecek Standı", icon: "🍔", price: 150, cek: 2, spend: 1, req: "yol_giris", pad: [-8, 21.5] },
+  { id: "agac1", name: "Ağaçlar", icon: "🌳", price: 200, cek: 1, req: "yol_giris", pad: [-14, 7] },
+  { id: "penguen_cit", name: "Penguen Havuzu", icon: "🧊", price: 280, cek: 1, req: "yol_giris", pen: "penguen" },
+  { id: "penguen", name: "Penguenler", icon: "🐧", price: 380, cek: 8, req: "penguen_cit", animal: "penguen", count: 4 },
+  { id: "bank1", name: "Banklar", icon: "🪑", price: 480, cek: 1, req: "yol_giris", pad: [-7.5, 17.6] },
+  { id: "yol_orta", name: "Orta Yol", icon: "🛤️", price: 600, cek: 1, req: "yol_giris", pad: [0, 7] },
+  { id: "zebra_cit", name: "Zebra Çayırı", icon: "🌾", price: 800, cek: 2, req: "yol_orta", pen: "zebra" },
+  { id: "zebra", name: "Zebralar", icon: "🦓", price: 1100, cek: 12, req: "zebra_cit", animal: "zebra", count: 3 },
+  { id: "tuvalet", name: "Tuvaletler", icon: "🚻", price: 1400, cek: 3, req: "yol_giris", pad: [8, 21.5] },
+  { id: "zurafa_cit", name: "Zürafa Alanı", icon: "🌳", price: 1800, cek: 1, req: "yol_orta", pen: "zurafa" },
+  { id: "zurafa", name: "Zürafalar", icon: "🦒", price: 2400, cek: 18, req: "zurafa_cit", animal: "zurafa", count: 2 },
+  { id: "meydan", name: "Giriş Meydanı", icon: "🧱", price: 3000, cek: 3, req: "yol_giris", pad: [-13, 24] },
+  { id: "yol_bati", name: "Batı Yolu", icon: "🛤️", price: 3800, cek: 1, req: "yol_orta", pad: [-14, 14] },
+  { id: "aslan_cit", name: "Aslan Kayalığı", icon: "🪨", price: 4800, cek: 2, req: "yol_bati", pen: "aslan" },
+  { id: "aslan", name: "Aslanlar", icon: "🦁", price: 6200, cek: 28, req: "aslan_cit", animal: "aslan", count: 2 },
+  { id: "cesme", name: "Süs Havuzu", icon: "⛲", price: 7800, cek: 5, req: "yol_giris", pad: [19, 22] },
+  { id: "kafe", name: "Kafe", icon: "☕", price: 9500, cek: 4, spend: 3, req: "yol_giris", pad: [-19, 22] },
+  { id: "panda_cit", name: "Bambu Ormanı", icon: "🎋", price: 12000, cek: 2, req: "yol_bati", pen: "panda" },
+  { id: "panda", name: "Pandalar", icon: "🐼", price: 15500, cek: 40, req: "panda_cit", animal: "panda", count: 2 },
+  { id: "lamba", name: "Fenerler", icon: "🏮", price: 19000, cek: 3, req: "yol_giris", pad: [11, 17.6] },
+  { id: "yol_dogu", name: "Doğu Yolu", icon: "🛤️", price: 23000, cek: 1, req: "yol_orta", pad: [14, 14] },
+  { id: "fil_cit", name: "Fil Vadisi", icon: "🌴", price: 28000, cek: 2, req: "yol_dogu", pen: "fil" },
+  { id: "fil", name: "Filler", icon: "🐘", price: 36000, cek: 60, req: "fil_cit", animal: "fil", count: 2 },
+  { id: "cicek", name: "Çiçek Bahçeleri", icon: "🌷", price: 45000, cek: 6, req: "yol_giris", pad: [12.5, 20] },
+  { id: "kutup_cit", name: "Buzul Alanı", icon: "❄️", price: 56000, cek: 2, req: "yol_dogu", pen: "kutup" },
+  { id: "kutup", name: "Kutup Ayıları", icon: "🐻‍❄️", price: 72000, cek: 85, req: "kutup_cit", animal: "kutup", count: 2 },
+  { id: "yol_guney", name: "Güney Yolu", icon: "🛤️", price: 88000, cek: 1, req: "yol_orta", pad: [0, -7.5] },
+  { id: "hediyelik", name: "Hediyelik Eşya", icon: "🎁", price: 110000, cek: 8, spend: 5, req: "yol_guney", pad: [-7, -21.5] },
+  { id: "akvaryum", name: "Akvaryum", icon: "🐠", price: 150000, cek: 120, req: "yol_guney", pad: [7, -22] },
+  { id: "oyun_parki", name: "Oyun Parkı", icon: "🛝", price: 190000, cek: 30, req: "yol_guney", pad: [-21, -21] },
+  { id: "dondurma", name: "Dondurma Arabası", icon: "🍦", price: 240000, cek: 15, spend: 2, req: "yol_guney", pad: [14, -19] },
+  { id: "safari", name: "Safari Otobüsü", icon: "🚌", price: 320000, cek: 200, req: "yol_guney", pad: [21, -21] },
+];
+const ITEM = Object.fromEntries(ITEMS.map(o => [o.id, o]));
+const UPGRADES = [
+  { id: "bilet", name: "Bilet Fiyatı", icon: "🎟️", base: 120, grow: 1.9, max: 15 },
+  { id: "kapasite", name: "Ziyaretçi Kapasitesi", icon: "👥", base: 150, grow: 2.1, max: 15 },
+  { id: "bakim", name: "Hayvan Bakımı", icon: "❤️", base: 500, grow: 2.3, max: 10 },
+  { id: "oto", name: "Otomatik Toplayıcı", icon: "🤖", base: 2500, grow: 1, max: 1 },
+];
+// Küp Jeton (Küp Evreni platform parası) ile alınanlar
+const PASSES = [
+  { id: "double", name: "2x Gelir", icon: "💰", jeton: 75, desc: "Hayvanat bahçesinin bütün geliri 2 katı. Kalıcı." },
+  { id: "speed", name: "Hızlı Yürüyüş", icon: "👟", jeton: 25, desc: "Bahçede %60 daha hızlı yürürsün. Kalıcı." },
+];
+const SKINS = [0xffdbac, 0xf1c27d, 0xe0ac69, 0xc68642, 0x8d5524];
+const SHIRTS = [0xe63946, 0x118ab2, 0x06d6a0, 0xffd166, 0x9b5de5, 0xf15bb5, 0xff8c42, 0xf4f4f4];
+const PANTS = [0x2b2d42, 0x3a5a40, 0x6c584c, 0x1d3557, 0x5c4d7d];
+const HAIRS = [0x2b1b12, 0x5a3a1a, 0xd9a54c, 0x1b1b1b, 0x8a4b1c];
+const FACES = ["smile", "grin", "wow", "cool"];
+
+// ================================================================ Kayıt
+const SAVE_KEY = "hayvanatBahcesi";
+const freshUpgrades = () => ({ bilet: 0, kapasite: 0, bakim: 0, oto: 0 });
+function freshSave() {
+  return { money: START_MONEY, totalEarned: 0, register: 0, built: {}, animals: {}, upgrades: freshUpgrades(), rebirths: 0, multiplier: 1,
+    lastSeen: 0, passes: {}, giftIds: [], helpSeen: false, muted: false, px: START_POS.x, pz: START_POS.z };
+}
+const num = v => { const n = Number(v); return isFinite(n) ? Math.max(0, n) : 0; };
+function loadSave(s) {
+  const d = freshSave();
+  if (!s || typeof s !== "object") return d;
+  const o = { ...d, ...s };
+  o.built = {};
+  if (s.built && typeof s.built === "object") for (const k of Object.keys(s.built)) if (s.built[k] && ITEM[k]) o.built[k] = true;
+  o.upgrades = freshUpgrades();
+  if (s.upgrades && typeof s.upgrades === "object") for (const u of UPGRADES) o.upgrades[u.id] = clamp(Math.floor(num(s.upgrades[u.id])), 0, u.max);
+  o.passes = s.passes && typeof s.passes === "object" ? { ...s.passes } : {};
+  o.giftIds = Array.isArray(s.giftIds) ? s.giftIds : [];
+  o.helpSeen = !!o.helpSeen; o.muted = !!o.muted;
+  for (const k of ["money", "totalEarned", "register"]) o[k] = Math.min(1e15, num(o[k]));
+  o.rebirths = Math.floor(Math.min(1000, num(o.rebirths)));
+  o.multiplier = 1 + REBIRTH_BONUS * o.rebirths;
+  o.lastSeen = num(o.lastSeen);
+  o.px = clamp(Number(o.px) || 0, -BOUND, BOUND); o.pz = clamp(isFinite(Number(o.pz)) && o.pz !== null ? Number(o.pz) : START_POS.z, -BOUND, BOUND);
+  return o;
+}
+let save = freshSave();
+try { save = loadSave(JSON.parse(localStorage.getItem(SAVE_KEY) || "null")); } catch (e) {}
+function countAnimals() {
+  const a = {};
+  for (const o of ITEMS) if (o.animal && save.built[o.id]) a[o.animal] = o.count;
+  save.animals = a;
+}
+countAnimals();
+const r2 = n => Math.round(n * 100) / 100;
+let lastSave = 0;
+function persist(force) {
+  if (!force && performance.now() - lastSave < 4000) return;
+  lastSave = performance.now();
+  save.lastSeen = unix();
+  if (pl) { save.px = r2(pl.x); save.pz = r2(pl.z); }
+  save.money = r2(save.money); save.register = r2(save.register); save.totalEarned = r2(save.totalEarned);
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) {}
+  reportStats();
+}
+
+// ================================================================ Küp Evreni köprüsü
+const platform = { inside: window.parent !== window, profile: null, reqs: {} };
+function stats() {
+  return { "💰 Para": fmt(save.money), "🦁 Hayvan": `${animalCount()}/${ANIMAL_TOTAL}`, "🏗️ Yapı": `${Object.keys(save.built).length}/${ITEMS.length}`,
+    "👥 Ziyaretçi/dk": fmt(flow()), "♻️ Yeniden Doğuş": String(save.rebirths) };
+}
+function reportStats() {
+  if (!platform.inside) return;
+  parent.postMessage({ type: "kup:stats", stats: stats() }, "*");
+}
+function requestPurchase(item, done) {
+  if (!platform.inside) { notify("Küp Jeton ile almak için oyunu Küp Evreni'nden aç (ana klasördeki index.html)"); return; }
+  const reqId = Math.random().toString(36).slice(2);
+  platform.reqs[reqId] = done;
+  parent.postMessage({ type: "kup:purchase", reqId, id: item.id, name: item.name, price: item.jeton, icon: item.icon }, "*");
+}
+addEventListener("message", e => {
+  if (!platform.inside || e.source !== parent) return;
+  const m = e.data || {};
+  if (m.type === "kup:profile") { platform.profile = m; rebuildAvatar(); updateNameTag(); rerenderOpen(); }
+  else if (m.type === "kup:purchaseResult") {
+    if (platform.profile) platform.profile.jeton = m.jeton;
+    const done = platform.reqs[m.reqId]; delete platform.reqs[m.reqId];
+    if (done) done(!!m.ok);
+    rerenderOpen();
+  }
+  else if (m.type === "kup:gift") receiveGifts(m.gifts);
+});
+
+// ================================================================ Küp Evreni hediyeleri (admin panelinden)
+function applyGiftItem(key, n) {
+  if (key === "money" || key === "para") { save.money = Math.min(1e15, save.money + Math.min(n, 1e12)); return true; }
+  const [kind, id] = key.split(":");
+  if (kind === "pass" && (id === "double" || id === "speed")) { if (save.passes[id]) return false; save.passes[id] = true; return true; }
+  return false;
+}
+function receiveGifts(gifts) {
+  save.giftIds = save.giftIds || [];
+  let any = false;
+  const acks = [];
+  for (const g of Array.isArray(gifts) ? gifts : []) {
+    if (!g || !g.gid) continue;
+    const skipped = [];
+    if (!save.giftIds.includes(g.gid)) {
+      for (const it of Array.isArray(g.items) ? g.items : []) {
+        if (!it) continue;
+        const n = Math.max(1, Math.floor(Number(it.n) || 1));
+        if (applyGiftItem(String(it.key), n)) any = true; else skipped.push(String(it.key));
+      }
+      save.giftIds = [g.gid, ...save.giftIds].slice(0, 200);
+    }
+    acks.push({ type: "kup:giftAck", gid: g.gid, skipped });
+  }
+  persist(true);
+  if (platform.inside) for (const a of acks) parent.postMessage(a, "*");
+  if (any) { SFX.cash(); notify("🎁 Hediye alındı!"); updateHud(); rerenderOpen(); }
+}
+
+// ================================================================ Ses (WebAudio ile sentezlenir)
+const A = { ctx: null };
+function initAudio() {
+  if (A.ctx) { if (A.ctx.state === "suspended") A.ctx.resume(); return; }
+  try { A.ctx = (c => { try { const g = c.createGain(), d = c.destination, oku = () => { let s = {}; try { s = JSON.parse(localStorage.getItem("kupSes") || "{}"); } catch (e) {} const v = (s.ana ?? 1) * (s.efekt ?? 1); g.gain.value = v >= 0 && v <= 1 ? v : 1; }; oku(); g.connect(d); Object.defineProperty(c, "destination", { get: () => g }); addEventListener("storage", e => { if (e.key === "kupSes") oku(); }); } catch (e) {} return c; })(new (window.AudioContext || window.webkitAudioContext)()); /* Küp Evreni ses ayarı (Profil → Ses) */ } catch (e) { return; }
+  A.master = A.ctx.createGain(); A.master.gain.value = save.muted ? 0 : 0.5; A.master.connect(A.ctx.destination);
+  A.noise = A.ctx.createBuffer(1, A.ctx.sampleRate, A.ctx.sampleRate);
+  const d = A.noise.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+}
+const audioOn = () => A.ctx && A.ctx.state === "running" && !save.muted;
+function tone(freq, dur, type = "sine", gain = 0.1, freqEnd, delay = 0) {
+  if (!audioOn()) return;
+  const t0 = A.ctx.currentTime + delay, o = A.ctx.createOscillator(), g = A.ctx.createGain();
+  o.type = type; o.frequency.setValueAtTime(freq, t0);
+  if (freqEnd) o.frequency.exponentialRampToValueAtTime(freqEnd, t0 + dur);
+  g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(gain, t0 + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  o.connect(g).connect(A.master); o.start(t0); o.stop(t0 + dur + 0.05);
+}
+function noise(dur, gain, freq, type = "lowpass", delay = 0) {
+  if (!audioOn()) return;
+  const t0 = A.ctx.currentTime + delay, s = A.ctx.createBufferSource(), f = A.ctx.createBiquadFilter(), g = A.ctx.createGain();
+  s.buffer = A.noise; f.type = type; f.frequency.value = freq;
+  g.gain.setValueAtTime(gain, t0); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  s.connect(f).connect(g).connect(A.master); s.start(t0, Math.random() * 0.5); s.stop(t0 + dur + 0.05);
+}
+const SFX = {
+  click: () => tone(620, 0.05, "square", 0.03),
+  cash: () => { tone(1318, 0.12, "square", 0.04); tone(1760, 0.12, "square", 0.04, 0, 0.07); },
+  bad: () => tone(200, 0.2, "sawtooth", 0.05, 140),
+  build: () => { noise(0.12, 0.2, 900); tone(523, 0.12, "triangle", 0.1); tone(659, 0.12, "triangle", 0.1, 0, 0.09); tone(784, 0.25, "triangle", 0.1, 0, 0.18); },
+  feed: () => { tone(440, 0.1, "sine", 0.12, 880); tone(660, 0.14, "sine", 0.1, 1320, 0.1); },
+  reborn: () => { tone(523, 0.18, "triangle", 0.1); tone(659, 0.18, "triangle", 0.1, 0, 0.12); tone(784, 0.18, "triangle", 0.1, 0, 0.24); tone(1046, 0.45, "triangle", 0.12, 0, 0.36); },
+};
+
+// ================================================================ Ekonomi
+const owns = id => !!save.built[id];
+const hasPass = id => !!save.passes[id];
+const lv = id => save.upgrades[id] || 0;
+const ANIMAL_TOTAL = ITEMS.reduce((s, o) => s + (o.count || 0), 0);
+const animalCount = () => Object.values(save.animals).reduce((s, n) => s + n, 0);
+const fed = {};                    // hayvan türü → kalan mutluluk süresi
+const feedTime = () => FEED_TIME + 6 * lv("bakim");
+function appeal(withFeed = true) {
+  let c = 0;
+  const care = 1 + 0.1 * lv("bakim");
+  for (const o of ITEMS) {
+    if (!owns(o.id)) continue;
+    let k = o.cek;
+    if (o.animal) { k *= care; if (withFeed && (fed[o.animal] || 0) > 0) k *= FEED_MULT; }
+    c += k;
+  }
+  return c;
+}
+const spend = () => ITEMS.reduce((s, o) => s + (owns(o.id) ? o.spend || 0 : 0), 0);
+const demand = (wf = true) => 10 + 3 * appeal(wf);
+const capacity = () => Math.round(40 * Math.pow(1.5, lv("kapasite")));
+const flow = (wf = true) => owns("gise") ? Math.min(demand(wf), capacity()) : 0;   // ziyaretçi / dk
+const ticket = () => 5 + 3 * lv("bilet");
+const mult = () => save.multiplier * (hasPass("double") ? 2 : 1);
+const incomePerSec = (wf = true) => flow(wf) * (ticket() + spend()) / 60 * mult();
+const upgradePrice = id => { const u = UPGRADES.find(x => x.id === id); return Math.round(u.base * Math.pow(u.grow, lv(id))); };
+function earn(n) { save.money = Math.min(1e15, save.money + n); save.totalEarned = Math.min(1e15, save.totalEarned + n); }
+function visibleItems() {
+  const l = [];
+  for (const o of ITEMS) {
+    if (owns(o.id) || (o.req && !owns(o.req))) continue;
+    l.push(o.id);
+    if (l.length >= VISIBLE_PADS) break;
+  }
+  return l;
+}
+// Öğeyi satın al ve kur (satın alma karesine basınca)
+function buyItem(id) {
+  const o = ITEM[id];
+  if (!o || owns(id) || !visibleItems().includes(id)) return false;
+  if (save.money < o.price) { SFX.bad(); notify(`Yetersiz para: ${o.icon} ${o.name} için 💰 ${fmt(o.price)} gerekli`); return false; }
+  save.money -= o.price;
+  save.built[id] = true;
+  countAnimals();
+  buildItem(id, true);
+  syncPads(); buildColliders(); buildGraph();
+  SFX.build();
+  notify(`${o.icon} ${o.name} kuruldu!`);
+  if (Object.keys(save.built).length === ITEMS.length) { notify("🎉 Hayvanat bahçesi tamamlandı! Yükseltmeler'den Yeniden Doğuş yapabilirsin"); SFX.reborn(); }
+  persist(true); updateHud(); rerenderOpen();
+  return true;
+}
+function collectCash() {
+  const n = Math.floor(save.register);
+  if (n < 1) return 0;
+  save.register -= n;
+  earn(n);
+  SFX.cash();
+  const p = toScreen(CASH.x, 2.2, CASH.z);
+  if (p) popText("+💰 " + fmt(n), p.x, p.y - 30);
+  persist(); updateHud();
+  return n;
+}
+function buyUpgrade(id) {
+  const u = UPGRADES.find(x => x.id === id);
+  if (!u || lv(id) >= u.max) return false;
+  const f = upgradePrice(id);
+  if (save.money < f) { SFX.bad(); notify(`Yetersiz para (💰 ${fmt(f)} gerekli)`); return false; }
+  save.money -= f;
+  save.upgrades[id] = lv(id) + 1;
+  SFX.build();
+  notify(u.max > 1 ? `${u.icon} ${u.name} → Seviye ${lv(id)}` : `${u.icon} ${u.name} alındı!`);
+  persist(true); updateHud(); rerenderOpen();
+  return true;
+}
+const rebirthReady = () => Object.keys(save.built).length >= ITEMS.length;
+function rebirth() {
+  if (!rebirthReady()) return false;
+  save.rebirths++;
+  save.multiplier = 1 + REBIRTH_BONUS * save.rebirths;
+  save.money = START_MONEY; save.register = 0; save.built = {};
+  save.upgrades = { ...freshUpgrades(), oto: lv("oto") };
+  countAnimals();
+  for (const k in fed) delete fed[k];
+  pl.x = START_POS.x; pl.z = START_POS.z;
+  rebuildZoo();
+  SFX.reborn();
+  notify(`♻️ Yeniden doğdun! Kalıcı gelir çarpanı: ×${dec(save.multiplier)}`);
+  persist(true); updateHud();
+  return true;
+}
+// Oyun kapalıyken geçen süre için gelir (en fazla 2 saat, yarı hızda)
+let offlineGain = 0;
+function applyOffline() {
+  offlineGain = 0;
+  if (save.lastSeen <= 0) return 0;
+  const gone = clamp(unix() - save.lastSeen, 0, OFFLINE_MAX);
+  if (gone < 60) return 0;
+  const n = Math.floor(incomePerSec(false) * gone * OFFLINE_RATE);
+  if (n < 1) return 0;
+  earn(n);
+  offlineGain = n;
+  return n;
+}
+function feed(kind) {
+  if (!PENS[kind] || !(save.animals[kind] > 0) || (fed[kind] || 0) > 0) return false;
+  fed[kind] = feedTime();
+  SFX.feed();
+  for (const a of animals) if (a.kind === kind) { floatText("❤", a.x, a.h + 0.4, a.z); a.wait = 0; }
+  notify(`${PENS[kind].icon} ${PENS[kind].name} mutlu! ${Math.round(feedTime())} sn boyunca 1,5 kat çekicilik`);
+  updateHud();
+  return true;
+}
+
+// ================================================================ 3D
+const canvas = $("game");
+let renderer;
+try { renderer = new THREE.WebGLRenderer({ canvas, antialias: true }); }
+catch (e) { $("noWebgl").style.display = "flex"; throw e; }
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x8fd0f5);
+scene.fog = new THREE.Fog(0xa9dcf7, 70, 150);
+const camera = new THREE.PerspectiveCamera(55, 1, 0.2, 260);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x5d7a3a, 0.62));
+const sun = new THREE.DirectionalLight(0xfff4e0, 0.72);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024);
+Object.assign(sun.shadow.camera, { left: -30, right: 30, top: 30, bottom: -30, near: 1, far: 90 });
+scene.add(sun); scene.add(sun.target);
+const vcMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+
+// Birleşik mesh yapıcı: her yapı tek çizim çağrısı (Godot sürümündeki K / S ile aynı ölçüler)
+const Bld = () => ({ p: [], n: [], c: [] });
+const _va = new THREE.Vector3(), _vb = new THREE.Vector3(), _vc = new THREE.Vector3();
+function tri(b, a, bb, c, n, col) {
+  _va.subVectors(bb, a); _vb.subVectors(c, a); _vc.crossVectors(_va, _vb);
+  if (_vc.dot(n) < 0) { const t = bb; bb = c; c = t; }   // ön yüz saat yönünün tersine
+  for (const v of [a, bb, c]) { b.p.push(v.x, v.y, v.z); b.n.push(n.x, n.y, n.z); b.c.push(col.r, col.g, col.b); }
+}
+const FACES6 = [[[1, 0, 0], [0, 1, 0], [0, 0, 1]], [[-1, 0, 0], [0, 0, 1], [0, 1, 0]], [[0, 1, 0], [0, 0, 1], [1, 0, 0]],
+  [[0, -1, 0], [1, 0, 0], [0, 0, 1]], [[0, 0, 1], [1, 0, 0], [0, 1, 0]], [[0, 0, -1], [0, 1, 0], [1, 0, 0]]].map(f => f.map(v => new THREE.Vector3(...v)));
+const rotX = a => new THREE.Matrix4().makeRotationX(a), rotZ = a => new THREE.Matrix4().makeRotationZ(a);
+function K(b, w, h, d, x, y, z, hex, rot) {
+  const col = new THREE.Color(hex), m = new THREE.Vector3(x, y, z), half = new THREE.Vector3(w / 2, h / 2, d / 2);
+  for (const [n, u, v] of FACES6) {
+    const nn = n.clone().multiply(half), uu = u.clone().multiply(half), vv = v.clone().multiply(half);
+    const cs = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([su, sv]) => {
+      const p = nn.clone().addScaledVector(uu, su).addScaledVector(vv, sv);
+      if (rot) p.applyMatrix4(rot);
+      return p.add(m);
+    });
+    const bn = n.clone(); if (rot) bn.transformDirection(rot);
+    tri(b, cs[0], cs[1], cs[2], bn, col); tri(b, cs[0], cs[2], cs[3], bn, col);
+  }
+}
+function S(b, rt, rb, h, x, y, z, hex, seg = 8, rot) {
+  const col = new THREE.Color(hex), m = new THREE.Vector3(x, y, z);
+  const P = (v) => { if (rot) v.applyMatrix4(rot); return v.add(m); };
+  const D = (v) => { if (rot) v.transformDirection(rot); return v.normalize(); };
+  for (let i = 0; i < seg; i++) {
+    const a0 = i / seg * Math.PI * 2, a1 = (i + 1) / seg * Math.PI * 2, am = (a0 + a1) / 2;
+    const p0 = P(new THREE.Vector3(Math.cos(a0) * rb, -h / 2, Math.sin(a0) * rb)), p1 = P(new THREE.Vector3(Math.cos(a1) * rb, -h / 2, Math.sin(a1) * rb));
+    const p2 = P(new THREE.Vector3(Math.cos(a1) * rt, h / 2, Math.sin(a1) * rt)), p3 = P(new THREE.Vector3(Math.cos(a0) * rt, h / 2, Math.sin(a0) * rt));
+    const n = D(new THREE.Vector3(Math.cos(am), (rb - rt) / Math.max(0.001, h), Math.sin(am)));
+    if (rb > 0.0001) tri(b, p0, p1, p2, n, col);
+    if (rt > 0.0001) { tri(b, p0, p2, p3, n, col); tri(b, P(new THREE.Vector3(0, h / 2, 0)), p3, p2, D(new THREE.Vector3(0, 1, 0)), col); }
+    if (rb > 0.0001) tri(b, P(new THREE.Vector3(0, -h / 2, 0)), p0, p1, D(new THREE.Vector3(0, -1, 0)), col);
+  }
+}
+function bldGeo(b) {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(b.p, 3));
+  g.setAttribute("normal", new THREE.Float32BufferAttribute(b.n, 3));
+  g.setAttribute("color", new THREE.Float32BufferAttribute(b.c, 3));
+  return g;
+}
+function bldMesh(b, parent = scene, shadow = true) {
+  const m = new THREE.Mesh(bldGeo(b), vcMat);
+  m.castShadow = shadow; m.receiveShadow = true;
+  parent.add(m); return m;
+}
+// Yazı: tuval dokulu sprite / levha
+function canvasTex(w, h, draw) {
+  const c = document.createElement("canvas"); c.width = w; c.height = h;
+  draw(c.getContext("2d"), w, h);
+  const t = new THREE.CanvasTexture(c); t.anisotropy = 4; return t;
+}
+function fitText(g, text, maxW, size, weight = 700) {
+  g.font = `${weight} ${size}px "Trebuchet MS", system-ui, sans-serif`;
+  const w = g.measureText(text).width;
+  if (w > maxW) g.font = `${weight} ${Math.floor(size * maxW / w)}px "Trebuchet MS", system-ui, sans-serif`;
+}
+// Çok satırlı sprite yazı (dış çizgili). lines: [[metin, renk]]
+function drawLines(g, w, h, lines) {
+  g.clearRect(0, 0, w, h);
+  g.textAlign = "center"; g.textBaseline = "middle"; g.lineJoin = "round";
+  const lh = h / lines.length;
+  lines.forEach(([t, c], i) => {
+    fitText(g, t, w - 20, Math.floor(lh * 0.78));
+    g.lineWidth = Math.max(4, lh * 0.14); g.strokeStyle = "rgba(0,0,0,0.75)"; g.strokeText(t, w / 2, lh * (i + 0.5));
+    g.fillStyle = c; g.fillText(t, w / 2, lh * (i + 0.5));
+  });
+}
+function textSprite(lines, sw, sh, cw = 512, ch = 192) {
+  const c = document.createElement("canvas"); c.width = cw; c.height = ch;
+  drawLines(c.getContext("2d"), cw, ch, lines);
+  const t = new THREE.CanvasTexture(c);
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, transparent: true, depthWrite: false }));
+  s.scale.set(sw, sh, 1); s.userData.canvas = c; s.userData.tex = t;
+  return s;
+}
+function setSprite(s, lines) {
+  const key = JSON.stringify(lines);
+  if (s.userData.key === key) return;
+  s.userData.key = key;
+  drawLines(s.userData.canvas.getContext("2d"), s.userData.canvas.width, s.userData.canvas.height, lines);
+  s.userData.tex.needsUpdate = true;
+}
+function plaque(text, w, h, x, y, z, color, rotY = 0, parent = scene) {
+  const tex = canvasTex(512, Math.round(512 * h / w), (g, cw, ch) => { g.fillStyle = "rgba(0,0,0,0)"; g.clearRect(0, 0, cw, ch); g.textAlign = "center"; g.textBaseline = "middle"; fitText(g, text, cw - 30, ch * 0.7); g.fillStyle = color; g.fillText(text, cw / 2, ch / 2); });
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }));
+  m.position.set(x, y, z); m.rotation.y = rotY; parent.add(m);
+  return m;
+}
+// Uçan yazı (kalp, para)
+const floaters = [];
+const floatTexCache = {};
+function floatText(t, x, y, z, color = "#ff4d6d") {
+  if (floaters.length > 14) return;
+  const k = t + color;
+  if (!floatTexCache[k]) floatTexCache[k] = canvasTex(128, 128, (g, w, h) => { g.textAlign = "center"; g.textBaseline = "middle"; g.font = "700 80px system-ui, sans-serif"; g.lineWidth = 8; g.strokeStyle = "rgba(0,0,0,0.6)"; g.strokeText(t, w / 2, h / 2); g.fillStyle = color; g.fillText(t, w / 2, h / 2); });
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: floatTexCache[k], transparent: true, depthWrite: false }));
+  s.scale.set(0.9, 0.9, 1); s.position.set(x, y, z); scene.add(s);
+  floaters.push({ s, t: 0 });
+}
+
+// ---------------------------------------------------------------- Sabit dünya: zemin, çevre çiti, kapı, kasa
+function buildWorld() {
+  const b = Bld();
+  K(b, 240, 0.2, 240, 0, -0.1, 0, 0x6fb35a);
+  K(b, 60.6, 0.04, 60.6, 0, 0.02, 0, 0x7cbf5e);
+  for (const [x, z, w, d] of [[-30.3, 0, 0.6, 61.2], [30.3, 0, 0.6, 61.2], [0, -30.3, 61.2, 0.6], [-16.75, 30.3, 26.5, 0.6], [16.75, 30.3, 26.5, 0.6]]) {
+    K(b, w, 1.4, d, x, 0.7, z, 0x3f8f3a); K(b, w + 0.1, 0.25, d + 0.1, x, 1.45, z, 0x4ea547);
+  }
+  for (const sx of [-3.6, 3.6]) { K(b, 1.2, 4.6, 1.2, sx, 2.3, 30.3, 0x9c6b3e); K(b, 1.4, 0.3, 1.4, sx, 4.75, 30.3, 0x7a4f2a); }
+  K(b, 8.6, 1.4, 0.5, 0, 4.4, 30.3, 0xffd23f);
+  K(b, 8.8, 0.2, 0.6, 0, 5.15, 30.3, 0xe63946); K(b, 8.8, 0.2, 0.6, 0, 3.65, 30.3, 0xe63946);
+  K(b, 3, 0.08, 12, 0, 0.04, 36, 0xdcc795);
+  // Uzak ağaçlar (sabit tohumla, Godot sürümüyle benzer)
+  let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  for (let i = 0; i < 26; i++) {
+    const a = i / 26 * Math.PI * 2 + rnd() * 0.2, r = 42 + rnd() * 28, x = Math.cos(a) * r, z = Math.sin(a) * r;
+    if (z > 30 && Math.abs(x) < 8) continue;
+    const s = 1 + rnd() * 0.8;
+    K(b, 0.5 * s, 1.8 * s, 0.5 * s, x, 0.9 * s, z, 0x8b5a2b); K(b, 2.4 * s, 2 * s, 2.4 * s, x, 2.6 * s, z, 0x3a8f3f); K(b, 1.5 * s, 1.2 * s, 1.5 * s, x, 4 * s, z, 0x47a54a);
+  }
+  // Kasa tezgâhı
+  const cx = CASH.x, cz = CASH.z;
+  K(b, 2.2, 1, 1, cx, 0.5, cz + 1.7, 0x2bb673); K(b, 2.4, 0.12, 1.2, cx, 1.06, cz + 1.7, 0xf4f1ea);
+  K(b, 0.8, 0.45, 0.6, cx, 1.35, cz + 1.75, 0x5b6170); K(b, 0.7, 0.12, 0.3, cx, 1.62, cz + 1.6, 0xffd23f);
+  for (const sx of [-1, 1]) K(b, 0.12, 2, 0.12, cx + sx, 2, cz + 2.1, 0x7a4f2a);
+  K(b, 2.6, 0.18, 1.4, cx, 3.05, cz + 1.8, 0x2bb673);
+  const world = bldMesh(b);
+  world.castShadow = true;
+  plaque("HAYVANAT BAHÇESİ", 8, 1.2, 0, 4.4, 30.57, "#7a3b00");
+  plaque("HAYVANAT BAHÇESİ", 8, 1.2, 0, 4.4, 30.03, "#7a3b00", Math.PI);
+}
+buildWorld();
+const cashDisk = new THREE.Mesh(new THREE.CylinderGeometry(CASH_R, CASH_R, 0.08, 20), new THREE.MeshLambertMaterial({ color: 0x2bd67b, emissive: 0x1fbf6a, emissiveIntensity: 0.6 }));
+cashDisk.position.set(CASH.x, 0.06, CASH.z); scene.add(cashDisk);
+const cashTag = textSprite([["", "#ffe066"]], 4, 2.25, 512, 288);
+cashTag.position.set(CASH.x, 3.9, CASH.z + 1.8); scene.add(cashTag);
+function updateCashTag() {
+  const lines = [["💰 KASA", "#ffe066"], [fmt(save.register), "#ffe066"]];
+  if (lv("oto") > 0) lines.push(["🤖 Otomatik", "#c8f7c5"]); else lines.push(["", "#fff"]);
+  setSprite(cashTag, lines);
+}
+// Sıradaki kareyi gösteren ok
+const arrow = (() => { const b = Bld(); S(b, 0.55, 0, 0.9, 0, 0, 0, 0xffd23f, 4); K(b, 0.3, 0.6, 0.3, 0, 0.7, 0, 0xffd23f); const m = bldMesh(b, scene, false); m.visible = false; return m; })();
+
+// ---------------------------------------------------------------- Yol ağı
+let graph = {};
+function buildGraph() {
+  graph = {};
+  for (const k in NODES) graph[k] = [];
+  graph.G.push("P"); graph.P.push("G");
+  for (const id in PATH_EDGES) if (owns(id)) for (const [a, b] of PATH_EDGES[id]) { graph[a].push(b); graph[b].push(a); }
+}
+function findPath(a, b) {
+  if (a === b) return [];
+  const prev = { [a]: "" }, q = [a];
+  while (q.length) {
+    const u = q.shift();
+    if (u === b) break;
+    for (const v of graph[u] || []) if (!(v in prev)) { prev[v] = u; q.push(v); }
+  }
+  if (!(b in prev)) return [];
+  const path = [];
+  for (let x = b; x !== a; x = prev[x]) path.unshift(x);
+  return path;
+}
+function attractions() {
+  const l = [];
+  for (const k in PENS) if (save.animals[k] > 0) { const n = NODES[PENS[k].node]; l.push({ node: PENS[k].node, x: n.x + rand(-3.2, 3.2), z: n.z - 1.25, face: Math.PI, w: 2 }); }
+  for (const id in STOPS) if (owns(id)) { const s = STOPS[id]; l.push({ node: s.node, x: s.x + rand(-0.6, 0.6), z: s.z + rand(-0.6, 0.6), face: s.face, w: 1 }); }
+  return l;
+}
+
+// ---------------------------------------------------------------- Çarpışma
+let boxes = [], circles = [];
+function buildColliders() {
+  boxes = [{ x1: CASH.x - 1.2, x2: CASH.x + 1.2, z1: CASH.z + 1.1, z2: CASH.z + 2.3 }];
+  circles = [];
+  for (const k in PENS) if (owns(k + "_cit")) { const p = PENS[k]; boxes.push({ x1: p.x - 5.15, x2: p.x + 5.15, z1: p.z - 5.15, z2: p.z + 5.15 }); }
+  const bl = { gise: [5.5, 24.9, 3, 2], yiyecek: [-8.3, 21.5, 2.6, 3.2], tuvalet: [8.3, 21.5, 2.6, 3], kafe: [-19, 22, 6, 5], hediyelik: [-7, -21.8, 7, 5],
+    akvaryum: [7, -22.3, 9, 6], dondurma: [14, -18.8, 2.2, 1.4], safari: [21, -21.5, 5, 2.6] };
+  for (const id in bl) if (owns(id)) { const [x, z, w, d] = bl[id]; boxes.push({ x1: x - w / 2, x2: x + w / 2, z1: z - d / 2, z2: z + d / 2 }); }
+  if (owns("cesme")) circles.push({ x: 19, z: 22, r: 2.8 });
+}
+function blocked(x, z, r) {
+  if (Math.abs(x) > BOUND || Math.abs(z) > BOUND) return true;
+  for (const b of boxes) if (x > b.x1 - r && x < b.x2 + r && z > b.z1 - r && z < b.z2 + r) return true;
+  for (const c of circles) if (Math.hypot(x - c.x, z - c.z) < c.r + r) return true;
+  return false;
+}
+
+// ---------------------------------------------------------------- Öğelerin görünüşü
+function pathStrip(b, a, c, hex = 0xdcc795) {
+  const x1 = Math.min(a.x, c.x) - 1.5, x2 = Math.max(a.x, c.x) + 1.5, z1 = Math.min(a.z, c.z) - 1.5, z2 = Math.max(a.z, c.z) + 1.5;
+  K(b, x2 - x1, 0.08, z2 - z1, (x1 + x2) / 2, 0.04, (z1 + z2) / 2, hex);
+}
+function tree(b, x, z, s = 1) {
+  K(b, 0.4 * s, 1.6 * s, 0.4 * s, x, 0.8 * s, z, 0x8b5a2b);
+  K(b, 2 * s, 1.6 * s, 2 * s, x, 2.2 * s, z, 0x3fa34d);
+  K(b, 1.3 * s, 1 * s, 1.3 * s, x, 3.3 * s, z, 0x4cb85a);
+}
+function buildPen(b, kind) {
+  const p = PENS[kind], cx = p.x, cz = p.z, cr = p.fence, hgt = kind === "aslan" ? 1.6 : 1.2;
+  K(b, 9.8, 0.06, 9.8, cx, 0.05, cz, p.ground);
+  for (let i = 0; i < 5; i++) {
+    const t = -5 + i * 2.5;
+    for (const [px, pz] of [[t, -5], [t, 5], [-5, t], [5, t]]) K(b, 0.22, hgt + 0.1, 0.22, cx + px, (hgt + 0.1) / 2, cz + pz, cr);
+  }
+  K(b, 0.22, hgt + 0.1, 0.22, cx + 5, (hgt + 0.1) / 2, cz + 5, cr);
+  for (const ry of [hgt * 0.42, hgt * 0.88]) {
+    K(b, 10.1, 0.12, 0.1, cx, ry, cz - 5, cr); K(b, 10.1, 0.12, 0.1, cx, ry, cz + 5, cr);
+    K(b, 0.1, 0.12, 10.1, cx - 5, ry, cz, cr); K(b, 0.1, 0.12, 10.1, cx + 5, ry, cz, cr);
+  }
+  const tz = cz + 5.2;
+  K(b, 0.12, 1.6, 0.12, cx - 3.6, 0.8, tz, 0x7a4f2a); K(b, 1.6, 0.8, 0.1, cx - 3.6, 1.6, tz + 0.05, 0xfff3c4);
+  if (kind === "tavsan") {
+    K(b, 1.8, 1, 1.3, cx + 2.8, 0.5, cz - 2.8, 0xb5835a); K(b, 2.1, 0.2, 1.6, cx + 2.8, 1.1, cz - 2.8, 0xd04a3a); K(b, 0.5, 0.5, 0.06, cx + 2.8, 0.35, cz - 2.13, 0x3a2a1a);
+    for (let i = 0; i < 6; i++) { K(b, 0.12, 0.12, 0.35, cx - 3 + (i % 3) * 0.6, 0.1, cz - 3 + Math.floor(i / 3) * 0.7, 0xff8c1a); K(b, 0.14, 0.18, 0.1, cx - 3 + (i % 3) * 0.6, 0.25, cz - 3.2 + Math.floor(i / 3) * 0.7, 0x3fa34d); }
+    tree(b, cx - 3.4, cz + 2.6, 0.8);
+  } else if (kind === "penguen") {
+    K(b, 5.6, 0.06, 4, cx - 1.2, 0.09, cz - 1.4, 0x4aa8e0); K(b, 5.9, 0.2, 0.3, cx - 1.2, 0.12, cz + 0.65, 0xcfe8f7);
+    for (const [px, pz, s] of [[3.2, -3.2, 1.6], [3.4, 1.8, 1.1], [-3.6, 3.2, 0.9]]) { K(b, s, s * 0.7, s, cx + px, s * 0.35, cz + pz, 0xdff4ff); K(b, s * 0.6, s * 0.5, s * 0.6, cx + px + 0.2, s * 0.85, cz + pz, 0xf5fbff); }
+  } else if (kind === "zebra") {
+    tree(b, cx + 3.2, cz - 3.2, 1.1); K(b, 2.2, 0.4, 0.8, cx - 3, 0.2, cz - 3.4, 0x8b5a2b); K(b, 2, 0.08, 0.6, cx - 3, 0.38, cz - 3.4, 0x4aa8e0);
+    for (let i = 0; i < 5; i++) K(b, 0.3, 0.5, 0.3, cx - 2 + i * 1.3, 0.25, cz + 3.6 - (i % 2) * 0.5, 0xc8b25a);
+  } else if (kind === "zurafa") {
+    K(b, 0.45, 3.8, 0.45, cx + 3, 1.9, cz - 3, 0x8b5a2b); K(b, 3.4, 0.5, 3.4, cx + 3, 4, cz - 3, 0x5ea34a); K(b, 2.4, 0.4, 2.4, cx + 3, 4.45, cz - 3, 0x6cb555);
+    K(b, 0.35, 2.6, 0.35, cx - 3.4, 1.3, cz - 3.3, 0x8b5a2b); K(b, 2.2, 0.4, 2.2, cx - 3.4, 2.7, cz - 3.3, 0x5ea34a);
+  } else if (kind === "aslan") {
+    K(b, 3.6, 1.4, 2.8, cx + 2.2, 0.7, cz - 2.6, 0x9a958c); K(b, 2.4, 1, 1.9, cx + 2.6, 1.8, cz - 2.9, 0xaaa59b); K(b, 1.6, 0.8, 1.4, cx - 3.2, 0.4, cz - 3, 0x8f8a80);
+    tree(b, cx - 3.4, cz + 2.8, 0.9);
+  } else if (kind === "fil") {
+    K(b, 4.4, 0.06, 3.2, cx - 1.6, 0.09, cz - 2.2, 0x5f9fc4); K(b, 2.6, 0.5, 0.5, cx + 2.6, 0.25, cz + 2.8, 0x7a4f2a); tree(b, cx + 3.2, cz - 3.2, 1.2);
+  } else if (kind === "panda") {
+    for (const [px, pz] of [[-3.4, -3.4], [3.4, -3.2], [3.3, 2.8], [-3.6, 1]]) for (let i = 0; i < 5; i++) {
+      const h = 2.2 + (i % 3) * 0.6;
+      K(b, 0.16, h, 0.16, cx + px + (i % 3) * 0.35 - 0.35, h / 2, cz + pz + Math.floor(i / 3) * 0.4, 0x4f9a3a);
+      K(b, 0.45, 0.12, 0.2, cx + px + (i % 3) * 0.35 - 0.2, h * 0.8, cz + pz + Math.floor(i / 3) * 0.4, 0x6cc24f);
+    }
+    K(b, 2, 0.5, 1.4, cx, 0.25, cz - 2.6, 0x7a4f2a);
+  } else if (kind === "kutup") {
+    K(b, 4.6, 0.06, 3.6, cx + 1.4, 0.09, cz - 1.8, 0x3d8fc9);
+    for (const [px, pz, s] of [[-3.2, -3, 1.4], [-3.4, 2.4, 1], [3.4, 3.2, 1.2]]) K(b, s, s * 0.8, s, cx + px, s * 0.4, cz + pz, 0xcfefff);
+    K(b, 2, 0.6, 1.6, cx - 1.6, 0.3, cz + 1.6, 0xe8f6ff);
+  }
+}
+const itemGroups = {};
+const growing = [];
+let bus = null;
+function buildItem(id, anim) {
+  const o = ITEM[id];
+  if (o.animal) { for (let i = 0; i < o.count; i++) addAnimal(o.animal, i, anim); return; }
+  const b = Bld(), g = new THREE.Group(), labels = [];
+  if (o.pen) {
+    buildPen(b, o.pen);
+    const p = PENS[o.pen];
+    labels.push([p.icon + " " + p.name, 1.5, 0.75, p.x - 3.6, 1.6, p.z + 5.32, "#5a3a10"]);
+  } else if (PATH_EDGES[id]) {
+    for (const [a, c] of PATH_EDGES[id]) pathStrip(b, NODES[a], NODES[c]);
+    if (id === "yol_giris") pathStrip(b, { x: 0, z: 30 }, { x: 0, z: 14 });
+  } else if (id === "gise") {
+    const x = 5.5, z = 24.9;
+    K(b, 3, 2.4, 2, x, 1.2, z, 0xe63946); K(b, 3.02, 0.35, 2.02, x, 0.6, z, 0xf4f1ea); K(b, 2, 0.9, 0.06, x, 1.55, z - 1, 0x25384f);
+    K(b, 2.2, 0.12, 0.4, x, 1.05, z - 1.15, 0xf4f1ea); K(b, 3.5, 0.25, 2.5, x, 2.5, z, 0xf4f1ea); K(b, 3.1, 0.3, 2.1, x, 2.75, z, 0xe63946);
+    K(b, 2.4, 0.6, 0.12, x, 3.3, z - 0.6, 0xffd23f);
+    for (let i = 0; i < 3; i++) K(b, 0.15, 0.9, 0.15, 2.6, 0.45, 25 - i * 1.2, 0x9aa3ad);
+    labels.push(["🎟️ BİLET", 2.3, 0.55, x, 3.3, z - 0.67, "#7a1a1a"]);
+  } else if (id === "yiyecek") {
+    const x = -8.3, z = 21.5;
+    K(b, 1.4, 1.1, 3, x + 0.4, 0.55, z, 0xf2c14e); K(b, 0.2, 2.4, 3, x - 0.4, 1.2, z, 0xc98a2e);
+    for (let i = 0; i < 4; i++) K(b, 2, 0.12, 0.76, x + 0.3, 2.45 - (i % 2 ? 0 : 0.04), z - 1.14 + i * 0.76, i % 2 === 0 ? 0xe63946 : 0xf4f1ea);
+    for (const sz of [-1.4, 1.4]) K(b, 0.1, 1.4, 0.1, x + 1.15, 1.75, z + sz, 0xf4f1ea);
+    S(b, 0.55, 0.6, 0.25, x - 0.3, 3.05, z, 0xd9953a, 10); S(b, 0.62, 0.62, 0.12, x - 0.3, 3.22, z, 0x5bb04a, 10);
+    S(b, 0.6, 0.6, 0.18, x - 0.3, 3.36, z, 0x6b3a1e, 10); S(b, 0.3, 0.58, 0.3, x - 0.3, 3.6, z, 0xe8a64a, 10);
+  } else if (id === "tuvalet") {
+    const x = 8.3, z = 21.5;
+    K(b, 2.6, 2.4, 3, x, 1.2, z, 0x9ad0ec); K(b, 3, 0.25, 3.4, x, 2.5, z, 0xf4f1ea);
+    K(b, 0.06, 1.6, 0.8, x - 1.31, 0.8, z - 0.7, 0x3a6fd8); K(b, 0.06, 1.6, 0.8, x - 1.31, 0.8, z + 0.7, 0xe0559a);
+    K(b, 0.06, 0.4, 0.4, x - 1.33, 1.95, z - 0.7, 0xf4f1ea); K(b, 0.06, 0.4, 0.4, x - 1.33, 1.95, z + 0.7, 0xf4f1ea);
+  } else if (id === "kafe") {
+    const x = -19, z = 22;
+    K(b, 6, 3, 5, x, 1.5, z, 0xf4e1c1); K(b, 6.6, 0.4, 5.6, x, 3.2, z, 0x8b4a2b); K(b, 5, 0.6, 4.2, x, 3.6, z, 0xa3572f);
+    K(b, 0.06, 2, 1.1, x + 3.01, 1, z, 0x6b3a1e);
+    for (const sz of [-1.6, 1.6]) K(b, 0.06, 1.2, 1.4, x + 3.01, 1.6, z + sz, 0x9fd8ff);
+    for (let i = 0; i < 5; i++) K(b, 0.3, 0.5, 1.04, x + 3.3, 2.65, z - 2.08 + i * 1.04, i % 2 === 0 ? 0xe63946 : 0xf4f1ea);
+    for (const tz of [z - 2.6, z + 2.6]) {
+      const tx = x + 5.4;
+      S(b, 0.55, 0.55, 0.08, tx, 0.8, tz, 0xf4f1ea, 8); K(b, 0.1, 0.8, 0.1, tx, 0.4, tz, 0x5b6170); K(b, 0.08, 2.2, 0.08, tx, 1.9, tz, 0x5b6170);
+      S(b, 0.08, 1.25, 0.45, tx, 3, tz, 0x2bb673, 8);
+      for (const sx of [-0.85, 0.85]) K(b, 0.45, 0.45, 0.45, tx + sx, 0.25, tz, 0xb5835a);
+    }
+  } else if (id === "cesme") {
+    const x = 19, z = 22;
+    S(b, 2.6, 2.75, 0.6, x, 0.3, z, 0xb8c0c8, 14); S(b, 2.3, 2.3, 0.08, x, 0.58, z, 0x4aa8e0, 14); S(b, 0.32, 0.36, 1.6, x, 1.3, z, 0xb8c0c8, 8);
+    S(b, 1.05, 0.6, 0.35, x, 2.15, z, 0xb8c0c8, 10); S(b, 0.9, 0.9, 0.06, x, 2.3, z, 0x6cc0f0, 10); S(b, 0.06, 0.14, 0.8, x, 2.7, z, 0xdff4ff, 6);
+  } else if (id === "meydan") {
+    K(b, 47, 0.06, 9.4, 0, 0.03, 22.2, 0xcfc7b0);
+    for (let i = 0; i < 9; i++) K(b, 0.12, 0.065, 9.4, -20 + i * 5, 0.033, 22.2, 0xc4bca8);
+    K(b, 47, 0.065, 0.12, 0, 0.033, 22.2, 0xc4bca8);
+  } else if (id === "agac1") {
+    for (const [x, z] of [[-14, 4], [-14, 10], [14, 4], [14, 10], [-14, -4], [-14, -10], [14, -4], [14, -10]]) tree(b, x, z, 1 + 0.1 * ((x + z) % 3));
+  } else if (id === "bank1") {
+    for (const x of [-7.5, 7.5, -14.5, 14.5, -21.5, 21.5]) {
+      const z = 16.4;
+      K(b, 1.7, 0.1, 0.55, x, 0.5, z, 0xb5835a); K(b, 1.7, 0.45, 0.08, x, 0.8, z + 0.25, 0xb5835a);
+      for (const sx of [-0.7, 0.7]) K(b, 0.1, 0.5, 0.45, x + sx, 0.25, z, 0x3d405b);
+    }
+  } else if (id === "lamba") {
+    for (const [x, z] of [[-4, 16.4], [4, 16.4], [-11, 16.4], [11, 16.4], [-18, 16.4], [18, 16.4], [-3.5, -15.9], [3.5, -15.9], [-17.5, -15.9], [17.5, -15.9]]) {
+      K(b, 0.14, 2.6, 0.14, x, 1.3, z, 0x3d405b); K(b, 0.42, 0.42, 0.42, x, 2.75, z, 0xffe9a0); K(b, 0.55, 0.1, 0.55, x, 3, z, 0x3d405b);
+    }
+  } else if (id === "cicek") {
+    const cols = [0xff6b8b, 0xffd23f, 0xb07cc6, 0xff8c42, 0xf4f1ea];
+    for (const [x, z, s] of [[0, -21, 3.6], [-12.5, 20, 2.4], [12.5, 20, 2.4], [-14, -21, 2.6], [14, -23.2, 2.4]]) {
+      K(b, s + 0.3, 0.25, s + 0.3, x, 0.125, z, 0xa59c8a); K(b, s, 0.3, s, x, 0.15, z, 0x6b4a2b);
+      const n = Math.floor(s / 0.6);
+      for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) K(b, 0.28, 0.28, 0.28, x - s / 2 + 0.3 + i * (s - 0.6) / Math.max(1, n - 1), 0.45, z - s / 2 + 0.3 + j * (s - 0.6) / Math.max(1, n - 1), cols[(i * 3 + j * 7) % cols.length]);
+    }
+  } else if (id === "hediyelik") {
+    const x = -7, z = -21.8;
+    K(b, 7, 3, 5, x, 1.5, z, 0xb07cc6); K(b, 7.6, 0.4, 5.6, x, 3.2, z, 0xffd23f); K(b, 1.2, 2, 0.06, x, 1, z + 2.51, 0x5b3a1a);
+    for (const sx of [-2.2, 2.2]) K(b, 1.6, 1.2, 0.06, x + sx, 1.6, z + 2.51, 0x9fd8ff);
+    K(b, 4, 0.8, 0.12, x, 3.9, z + 2.2, 0xf4f1ea);
+    for (const [sx, c] of [[-3, 0xe63946], [3, 0x2bb673]]) { K(b, 0.7, 0.7, 0.7, x + sx, 0.35, z + 3, c); K(b, 0.74, 0.12, 0.74, x + sx, 0.5, z + 3, 0xffd23f); }
+    labels.push(["🎁 HEDİYELİK", 3.8, 0.7, x, 3.9, z + 2.27, "#5b2a7a"]);
+  } else if (id === "akvaryum") {
+    const x = 7, z = -22.3;
+    K(b, 9, 3.4, 6, x, 1.7, z, 0x2d7fc1); S(b, 2.6, 3.1, 0.9, x, 3.85, z, 0x7fd0ff, 12); S(b, 1.4, 2.6, 0.8, x, 4.7, z, 0x9fdcff, 12); S(b, 0.2, 1.4, 0.5, x, 5.35, z, 0xbfe8ff, 12);
+    K(b, 5, 2, 0.06, x, 1.4, z + 3.01, 0x7fd3ff); K(b, 1.4, 2.2, 0.08, x, 1.1, z + 3.02, 0x1d4f7a);
+    for (const [fx, fy, c] of [[-1.6, 1.8, 0xff8c1a], [1.5, 1.1, 0xffd23f], [-0.8, 0.9, 0xff6b8b], [1.9, 2, 0xff8c1a]]) { K(b, 0.5, 0.3, 0.05, x + fx, fy, z + 3.06, c); K(b, 0.15, 0.25, 0.05, x + fx - 0.3, fy, z + 3.06, c); }
+    labels.push(["🐠 AKVARYUM", 4, 0.7, x, 3, z + 3.1, "#ffffff"]);
+  } else if (id === "oyun_parki") {
+    const x = -21, z = -21;
+    K(b, 7, 0.06, 7, x, 0.05, z, 0xf1dd9a); K(b, 1.4, 2, 1.4, x - 2, 1, z - 2, 0xe63946); K(b, 1.7, 0.2, 1.7, x - 2, 2.1, z - 2, 0xffd23f);
+    K(b, 0.9, 0.12, 3, x - 2, 1.05, z - 0.1, 0x3a86ff, rotX(0.62));
+    for (let i = 0; i < 4; i++) K(b, 0.9, 0.08, 0.1, x - 2, 0.4 + i * 0.45, z - 2.8, 0xf4f1ea);
+    for (const sx of [-1.6, 1.6]) K(b, 0.14, 2.6, 0.14, x + 1.5 + sx, 1.3, z - 1.5, 0x3d405b);
+    K(b, 3.4, 0.14, 0.14, x + 1.5, 2.6, z - 1.5, 0x3d405b);
+    for (const sx of [-0.7, 0.7]) { K(b, 0.04, 1.8, 0.04, x + 1.5 + sx - 0.25, 1.7, z - 1.5, 0x9aa3ad); K(b, 0.04, 1.8, 0.04, x + 1.5 + sx + 0.25, 1.7, z - 1.5, 0x9aa3ad); K(b, 0.6, 0.08, 0.35, x + 1.5 + sx, 0.8, z - 1.5, 0xff8c42); }
+    K(b, 3.2, 0.12, 0.3, x + 1.2, 0.5, z + 2, 0x2bb673, rotZ(0.18)); K(b, 0.3, 0.5, 0.3, x + 1.2, 0.25, z + 2, 0x3d405b);
+    K(b, 2, 0.3, 2, x - 2, 0.15, z + 2, 0xc98a2e); K(b, 1.7, 0.32, 1.7, x - 2, 0.16, z + 2, 0xf7e7b0);
+  } else if (id === "dondurma") {
+    const x = 14, z = -18.8;
+    K(b, 2, 1, 1.1, x, 0.75, z, 0xffc8dd); K(b, 2.04, 0.2, 1.14, x, 1.15, z, 0xf4f1ea);
+    for (const sx of [-0.7, 0.7]) S(b, 0.3, 0.3, 0.12, x + sx, 0.3, z + 0.6, 0x3d405b, 8, rotX(Math.PI / 2));
+    K(b, 0.08, 1.8, 0.08, x, 2.1, z, 0x9aa3ad); S(b, 0.05, 1.35, 0.5, x, 3.1, z, 0xff8fab, 8);
+    S(b, 0.22, 0.02, 0.55, x + 0.6, 1.55, z, 0xd9953a, 6); S(b, 0.24, 0.24, 0.3, x + 0.6, 1.9, z, 0xfff0f5, 6);
+  } else if (id === "safari") {
+    const a = BUS_HALF;
+    for (const [x, z, w, d] of [[0, a, 2 * a + 2, 2], [0, -a, 2 * a + 2, 2], [-a, 0, 2, 2 * a + 2], [a, 0, 2, 2 * a + 2]]) K(b, w, 0.07, d, x, 0.035, z, 0x60656d);
+    for (let i = 0; i < 14; i++) {
+      const t = -a + 2 + i * (2 * a - 4) / 13;
+      for (const z of [a, -a]) K(b, 1, 0.075, 0.15, t, 0.04, z, 0xffd23f);
+      for (const x of [a, -a]) K(b, 0.15, 0.075, 1, x, 0.04, t, 0xffd23f);
+    }
+    const x = 21, z = -21.5;
+    for (const [px, pz] of [[-2.2, -1.1], [2.2, -1.1], [-2.2, 1.1], [2.2, 1.1]]) K(b, 0.16, 2.6, 0.16, x + px, 1.3, z + pz, 0x7a4f2a);
+    K(b, 5.2, 0.25, 3, x, 2.7, z, 0x2bb673); K(b, 3, 0.1, 0.6, x, 0.5, z - 0.6, 0xb5835a); K(b, 2.6, 0.7, 0.1, x, 3.2, z + 1.2, 0xffd23f);
+    labels.push(["🚌 SAFARİ", 2.4, 0.6, x, 3.2, z + 1.27, "#3a2a00"]);
+    buildBus();
+  }
+  bldMesh(b, g);
+  for (const [t, w, h, x, y, z, c] of labels) plaque(t, w, h, x, y, z, c, 0, g);
+  scene.add(g);
+  itemGroups[id] = g;
+  if (anim) { g.scale.set(1, 0.01, 1); growing.push({ n: g, t: 0 }); }
+}
+function buildBus() {
+  if (bus) return;
+  const b = Bld();
+  K(b, 2.3, 1.3, 5, 0, 1.15, 0, 0xf2c14e); K(b, 2.32, 0.55, 4.2, 0, 1.55, -0.2, 0x2a3442); K(b, 2, 0.5, 0.06, 0, 1.55, 2.51, 0x2a3442);
+  for (let i = 0; i < 4; i++) K(b, 2.34, 1, 0.18, 0, 1, -1.8 + i * 1.1, 0x3a2a1a);
+  for (const [x, z] of [[-1, -2.2], [1, -2.2], [-1, 2.2], [1, 2.2]]) K(b, 0.1, 1.2, 0.1, x, 2.3, z, 0x5b6170);
+  K(b, 2.5, 0.12, 5.2, 0, 2.95, 0, 0x2bb673);
+  for (const [x, z] of [[-1.15, -1.6], [1.15, -1.6], [-1.15, 1.6], [1.15, 1.6]]) S(b, 0.42, 0.42, 0.3, x, 0.42, z, 0x2b2d42, 10, rotZ(Math.PI / 2));
+  K(b, 0.4, 0.25, 0.06, -0.7, 0.9, 2.51, 0xfff3a8); K(b, 0.4, 0.25, 0.06, 0.7, 0.9, 2.51, 0xfff3a8);
+  const g = new THREE.Group(); bldMesh(b, g); scene.add(g);
+  bus = { g, s: 60 };
+}
+function busPos(s) {
+  const a = BUS_HALF, L = 2 * a; s = ((s % (4 * L)) + 4 * L) % (4 * L);
+  const k = [[-a, a], [a, a], [a, -a], [-a, -a]], i = Math.floor(s / L), t = (s - i * L) / L;
+  const p0 = k[i], p1 = k[(i + 1) % 4], dx = p1[0] - p0[0], dz = p1[1] - p0[1], l = Math.hypot(dx, dz);
+  return [p0[0] + dx * t, p0[1] + dz * t, Math.atan2(dx / l, dz / l)];
+}
+
+// ---------------------------------------------------------------- Hayvanlar
+const animalGeo = {};
+function animalModel(kind, v) {
+  const key = kind + v;
+  if (animalGeo[key]) return animalGeo[key];
+  const b = Bld(), blk = 0x1b1b1b;
+  if (kind === "tavsan") {
+    const r = [0xf4f1ea, 0xc8a27a, 0x9a9a9a, 0xe9d8c4][v % 4];
+    K(b, 0.5, 0.42, 0.7, 0, 0.3, 0, r); K(b, 0.38, 0.36, 0.36, 0, 0.58, 0.36, r);
+    K(b, 0.1, 0.38, 0.08, -0.09, 0.92, 0.3, r); K(b, 0.1, 0.38, 0.08, 0.09, 0.92, 0.3, r);
+    K(b, 0.06, 0.26, 0.02, -0.09, 0.92, 0.345, 0xffb3c6); K(b, 0.06, 0.26, 0.02, 0.09, 0.92, 0.345, 0xffb3c6);
+    K(b, 0.06, 0.06, 0.02, -0.1, 0.63, 0.545, blk); K(b, 0.06, 0.06, 0.02, 0.1, 0.63, 0.545, blk); K(b, 0.07, 0.05, 0.02, 0, 0.53, 0.545, 0xff8fab);
+    K(b, 0.18, 0.18, 0.12, 0, 0.4, -0.4, 0xf8f8f8);
+    for (const [x, z] of [[-0.15, 0.22], [0.15, 0.22], [-0.17, -0.22], [0.17, -0.22]]) K(b, 0.14, 0.1, 0.24, x, 0.05, z, r);
+  } else if (kind === "penguen") {
+    const g = 0x23262e;
+    K(b, 0.56, 0.8, 0.48, 0, 0.5, 0, g); K(b, 0.42, 0.62, 0.04, 0, 0.46, 0.25, 0xf8f8f8); K(b, 0.46, 0.38, 0.42, 0, 1.08, 0.02, g);
+    K(b, 0.34, 0.2, 0.03, 0, 1.08, 0.235, 0xf8f8f8); K(b, 0.06, 0.06, 0.02, -0.1, 1.12, 0.255, blk); K(b, 0.06, 0.06, 0.02, 0.1, 1.12, 0.255, blk);
+    K(b, 0.12, 0.08, 0.2, 0, 1, 0.32, 0xf6a21a); K(b, 0.08, 0.5, 0.28, -0.32, 0.62, 0, g); K(b, 0.08, 0.5, 0.28, 0.32, 0.62, 0, g);
+    K(b, 0.16, 0.06, 0.26, -0.13, 0.03, 0.12, 0xf6a21a); K(b, 0.16, 0.06, 0.26, 0.13, 0.03, 0.12, 0xf6a21a);
+    if (v % 2 === 1) K(b, 0.2, 0.1, 0.04, 0, 1.26, 0.2, 0xffd23f);
+  } else if (kind === "zebra") {
+    const w = 0xf6f6f2;
+    for (const [x, z] of [[-0.25, 0.55], [0.25, 0.55], [-0.25, -0.55], [0.25, -0.55]]) {
+      K(b, 0.18, 0.8, 0.18, x, 0.4, z, w); K(b, 0.19, 0.08, 0.19, x, 0.3, z, blk); K(b, 0.19, 0.08, 0.19, x, 0.55, z, blk); K(b, 0.2, 0.08, 0.2, x, 0.04, z, blk);
+    }
+    K(b, 0.7, 0.65, 1.5, 0, 1.1, 0, w);
+    for (let i = 0; i < 5; i++) K(b, 0.72, 0.67, 0.1, 0, 1.1, -0.6 + i * 0.3, blk);
+    K(b, 0.3, 0.75, 0.36, 0, 1.6, 0.72, w); K(b, 0.32, 0.08, 0.38, 0, 1.45, 0.72, blk); K(b, 0.32, 0.08, 0.38, 0, 1.7, 0.72, blk);
+    K(b, 0.08, 0.7, 0.14, 0, 1.75, 0.55, blk); K(b, 0.3, 0.32, 0.6, 0, 1.95, 0.95, w); K(b, 0.27, 0.22, 0.14, 0, 1.9, 1.27, blk);
+    K(b, 0.08, 0.18, 0.06, -0.1, 2.18, 0.78, w); K(b, 0.08, 0.18, 0.06, 0.1, 2.18, 0.78, w);
+    K(b, 0.04, 0.06, 0.06, -0.16, 2, 1.02, blk); K(b, 0.04, 0.06, 0.06, 0.16, 2, 1.02, blk); K(b, 0.06, 0.5, 0.06, 0, 1, -0.78, blk);
+  } else if (kind === "zurafa") {
+    const s = 0xe8b04a, sp = 0x8a4b1c;
+    for (const [x, z] of [[-0.28, 0.6], [0.28, 0.6], [-0.28, -0.6], [0.28, -0.6]]) { K(b, 0.18, 1.6, 0.18, x, 0.8, z, s); K(b, 0.2, 0.12, 0.2, x, 0.06, z, 0x5a3a1a); }
+    K(b, 0.8, 0.8, 1.5, 0, 1.9, 0, s);
+    for (const [x, y, z] of [[0.41, 1.8, 0.4], [0.41, 2.05, -0.3], [-0.41, 1.85, 0.1], [-0.41, 2.1, -0.45], [0.41, 2.1, -0.05], [-0.41, 1.75, 0.5]]) K(b, 0.02, 0.24, 0.26, x, y, z, sp);
+    K(b, 0.24, 0.26, 0.02, 0, 2.05, 0.75, sp); K(b, 0.32, 2, 0.38, 0, 3.1, 0.58, s);
+    for (const [x, y] of [[0.17, 2.6], [-0.17, 3], [0.17, 3.45], [-0.17, 3.8]]) K(b, 0.02, 0.22, 0.2, x, y, 0.58, sp);
+    K(b, 0.06, 1.9, 0.08, 0, 3.05, 0.37, sp); K(b, 0.32, 0.32, 0.62, 0, 4.15, 0.8, s); K(b, 0.24, 0.2, 0.12, 0, 4.08, 1.14, 0xd9953a);
+    K(b, 0.06, 0.22, 0.06, -0.09, 4.4, 0.66, sp); K(b, 0.06, 0.22, 0.06, 0.09, 4.4, 0.66, sp);
+    K(b, 0.04, 0.06, 0.06, -0.17, 4.2, 0.9, blk); K(b, 0.04, 0.06, 0.06, 0.17, 4.2, 0.9, blk);
+    K(b, 0.06, 0.6, 0.06, 0, 1.8, -0.78, s); K(b, 0.1, 0.16, 0.1, 0, 1.45, -0.78, sp);
+  } else if (kind === "aslan") {
+    const s = 0xd9a54c;
+    for (const [x, z] of [[-0.28, 0.55], [0.28, 0.55], [-0.28, -0.55], [0.28, -0.55]]) K(b, 0.22, 0.62, 0.22, x, 0.31, z, s);
+    K(b, 0.75, 0.65, 1.4, 0, 0.9, 0, s);
+    if (v % 2 === 0) K(b, 0.95, 0.95, 0.5, 0, 1.25, 0.8, 0x8a4b1c);
+    K(b, 0.55, 0.5, 0.45, 0, 1.2, 1.02, s); K(b, 0.3, 0.2, 0.15, 0, 1.08, 1.28, 0xf0d8a8); K(b, 0.12, 0.08, 0.04, 0, 1.17, 1.36, blk);
+    K(b, 0.06, 0.06, 0.04, -0.13, 1.3, 1.25, blk); K(b, 0.06, 0.06, 0.04, 0.13, 1.3, 1.25, blk);
+    K(b, 0.12, 0.12, 0.06, -0.22, 1.5, 0.95, s); K(b, 0.12, 0.12, 0.06, 0.22, 1.5, 0.95, s);
+    K(b, 0.07, 0.07, 0.6, 0, 1, -0.95, s); K(b, 0.14, 0.14, 0.14, 0, 1, -1.27, 0x8a4b1c);
+  } else if (kind === "fil") {
+    const s = 0x8e939b;
+    for (const [x, z] of [[-0.45, 0.75], [0.45, 0.75], [-0.45, -0.75], [0.45, -0.75]]) { K(b, 0.45, 1.1, 0.45, x, 0.55, z, s); K(b, 0.47, 0.1, 0.47, x, 0.05, z, 0xd8d2c4); }
+    K(b, 1.4, 1.3, 2.2, 0, 1.65, 0, s); K(b, 0.95, 0.95, 0.8, 0, 2, 1.35, s);
+    K(b, 0.12, 1, 0.85, -0.6, 2.05, 1.15, 0x7c8189); K(b, 0.12, 1, 0.85, 0.6, 2.05, 1.15, 0x7c8189);
+    K(b, 0.3, 0.55, 0.3, 0, 1.45, 1.78, s); K(b, 0.26, 0.5, 0.26, 0, 1, 1.84, s); K(b, 0.24, 0.24, 0.3, 0, 0.82, 1.94, s);
+    K(b, 0.1, 0.1, 0.45, -0.28, 1.5, 1.86, 0xf8f4e6); K(b, 0.1, 0.1, 0.45, 0.28, 1.5, 1.86, 0xf8f4e6);
+    K(b, 0.06, 0.08, 0.04, -0.3, 2.2, 1.76, blk); K(b, 0.06, 0.08, 0.04, 0.3, 2.2, 1.76, blk); K(b, 0.08, 0.6, 0.08, 0, 1.6, -1.12, s);
+  } else if (kind === "panda") {
+    const w = 0xf6f6f2;
+    for (const [x, z] of [[-0.3, 0.42], [0.3, 0.42], [-0.3, -0.42], [0.3, -0.42]]) K(b, 0.3, 0.46, 0.3, x, 0.23, z, blk);
+    K(b, 0.95, 0.85, 1.2, 0, 0.75, 0, w); K(b, 0.97, 0.5, 0.35, 0, 0.82, 0.28, blk); K(b, 0.7, 0.62, 0.6, 0, 1.25, 0.68, w);
+    K(b, 0.18, 0.18, 0.1, -0.27, 1.6, 0.58, blk); K(b, 0.18, 0.18, 0.1, 0.27, 1.6, 0.58, blk);
+    K(b, 0.16, 0.2, 0.02, -0.15, 1.3, 0.985, blk); K(b, 0.16, 0.2, 0.02, 0.15, 1.3, 0.985, blk);
+    K(b, 0.05, 0.05, 0.02, -0.15, 1.32, 0.995, 0xf8f8f8); K(b, 0.05, 0.05, 0.02, 0.15, 1.32, 0.995, 0xf8f8f8);
+    K(b, 0.12, 0.08, 0.06, 0, 1.15, 1, blk); K(b, 0.15, 0.15, 0.1, 0, 0.9, -0.62, w);
+    if (v % 2 === 1) K(b, 0.08, 0.08, 0.9, 0.35, 1, 0.95, 0x6cc24f, rotX(0.5));
+  } else if (kind === "kutup") {
+    const w = 0xf3f1ea;
+    for (const [x, z] of [[-0.33, 0.6], [0.33, 0.6], [-0.33, -0.6], [0.33, -0.6]]) K(b, 0.3, 0.62, 0.3, x, 0.31, z, w);
+    K(b, 0.95, 0.85, 1.7, 0, 0.95, 0, w); K(b, 0.6, 0.52, 0.6, 0, 1.2, 1.08, w); K(b, 0.32, 0.26, 0.26, 0, 1.1, 1.48, w);
+    K(b, 0.12, 0.08, 0.04, 0, 1.18, 1.62, blk); K(b, 0.06, 0.06, 0.04, -0.15, 1.32, 1.39, blk); K(b, 0.06, 0.06, 0.04, 0.15, 1.32, 1.39, blk);
+    K(b, 0.13, 0.13, 0.08, -0.22, 1.5, 0.94, w); K(b, 0.13, 0.13, 0.08, 0.22, 1.5, 0.94, w); K(b, 0.14, 0.14, 0.12, 0, 1.1, -0.9, w);
+  }
+  return (animalGeo[key] = bldGeo(b));
+}
+const ANIMAL_H = { tavsan: 0.9, penguen: 1.3, zebra: 2.2, zurafa: 4.5, aslan: 1.6, fil: 2.6, panda: 1.7, kutup: 1.6 };
+const ANIMAL_SPEED = { tavsan: 1.6, penguen: 0.9, zebra: 1.6, zurafa: 1.2, aslan: 1.4, fil: 0.9, panda: 0.7, kutup: 1.1 };
+const animals = [];
+function addAnimal(kind, i, anim) {
+  const p = PENS[kind];
+  const m = new THREE.Mesh(animalModel(kind, i), vcMat); m.castShadow = true;
+  const g = new THREE.Group(); g.add(m); scene.add(g);
+  const sc = (kind === "fil" || kind === "kutup" || kind === "zurafa") && i === 1 ? 0.7 : 1;   // yavru
+  const x = p.x + rand(-3, 3), z = p.z + rand(-3, 3);
+  g.position.set(x, 0, z); g.rotation.y = Math.random() * Math.PI * 2; g.scale.setScalar(sc);
+  const a = { g, m, kind, x, z, tx: x, tz: z, wait: rand(0, 3), speed: ANIMAL_SPEED[kind] * rand(0.85, 1.15), ph: Math.random() * 7, h: ANIMAL_H[kind] * sc, face: g.rotation.y, sc };
+  animals.push(a);
+  if (anim) { g.scale.setScalar(0.01); growing.push({ n: g, t: -0.15 * i, sc }); }
+}
+function updateAnimals(dt) {
+  for (const k in fed) fed[k] = Math.max(0, fed[k] - dt);
+  for (const a of animals) {
+    const happy = (fed[a.kind] || 0) > 0, sp = a.speed * (happy ? 1.4 : 1);
+    let moving = false;
+    if (a.wait > 0) a.wait -= dt;
+    else {
+      const dx = a.tx - a.x, dz = a.tz - a.z, d = Math.hypot(dx, dz);
+      if (d < 0.15) { const p = PENS[a.kind]; a.tx = p.x + rand(-3.6, 3.6); a.tz = p.z + rand(-3.6, 3.6); a.wait = happy ? rand(0.6, 2) : rand(1.5, 5); }
+      else { const st = Math.min(d, sp * dt); a.x += dx / d * st; a.z += dz / d * st; a.face = Math.atan2(dx, dz); moving = true; }
+    }
+    a.ph += dt * (a.kind === "tavsan" ? 10 : 7);
+    const hop = moving ? Math.abs(Math.sin(a.ph)) * (a.kind === "tavsan" ? 0.25 : 0.06) : happy ? Math.abs(Math.sin(a.ph * 0.6)) * 0.12 : 0;
+    a.g.position.set(a.x, hop, a.z);
+    a.g.rotation.y += angDiff(a.g.rotation.y, a.face) * Math.min(1, dt * 6);
+    if (a.kind === "penguen") a.m.rotation.z = moving ? Math.sin(a.ph) * 0.15 : 0;
+    if (happy && Math.random() < dt * 0.5) floatText("❤", a.x, a.h + 0.4, a.z);
+  }
+}
+
+// ---------------------------------------------------------------- Ziyaretçiler
+const visitorGeo = {};
+function visitorBody(skin, shirt, hair) {
+  const k = skin + "," + shirt + "," + hair;
+  if (visitorGeo[k]) return visitorGeo[k];
+  const b = Bld();
+  K(b, 0.62, 0.62, 0.34, 0, 1, 0, shirt); K(b, 0.2, 0.6, 0.26, -0.42, 0.98, 0, skin); K(b, 0.2, 0.6, 0.26, 0.42, 0.98, 0, skin);
+  K(b, 0.44, 0.44, 0.44, 0, 1.55, 0, skin); K(b, 0.48, 0.14, 0.48, 0, 1.79, -0.02, hair); K(b, 0.48, 0.3, 0.1, 0, 1.64, -0.21, hair);
+  K(b, 0.06, 0.07, 0.02, -0.1, 1.58, 0.22, 0x1b1b1b); K(b, 0.06, 0.07, 0.02, 0.1, 1.58, 0.22, 0x1b1b1b); K(b, 0.16, 0.04, 0.02, 0, 1.45, 0.22, 0x8a3b2a);
+  return (visitorGeo[k] = bldGeo(b));
+}
+function legGeo(hex) {
+  const k = "leg" + hex;
+  if (visitorGeo[k]) return visitorGeo[k];
+  const b = Bld(); K(b, 0.24, 0.7, 0.28, 0, -0.35, 0, hex); K(b, 0.25, 0.1, 0.32, 0, -0.68, 0.03, 0x2b2b2b);
+  return (visitorGeo[k] = bldGeo(b));
+}
+const visitors = [];
+let spawnT = 2;
+function spawnVisitor() {
+  const g = new THREE.Group(); scene.add(g);
+  g.scale.setScalar(Math.random() < 0.7 ? rand(0.82, 1) : rand(0.6, 0.7));
+  const body = new THREE.Mesh(visitorBody(pick(SKINS), pick(SHIRTS), pick(HAIRS)), vcMat); body.castShadow = true; g.add(body);
+  const lg = legGeo(pick(PANTS)), legs = [-0.16, 0.16].map(x => { const l = new THREE.Mesh(lg, vcMat); l.position.set(x, 0.7, 0); g.add(l); return l; });
+  if (Math.random() < 0.22) { const b = Bld(); K(b, 0.02, 1.3, 0.02, 0.45, 1.6, 0, 0xdddddd); S(b, 0.24, 0.24, 0.36, 0.45, 2.4, 0, pick([0xff4d6d, 0x3a86ff, 0xffd23f, 0x06d6a0]), 8); bldMesh(b, g, false); }
+  const x = rand(-1, 1), z = 33;
+  g.position.set(x, 0, z);
+  visitors.push({ g, legs, x, z, face: Math.PI, walk: 0, moving: false, path: [{ x: NODES.G.x + rand(-0.8, 0.8), z: NODES.G.z }, NODES.P], node: "P", wait: 0, stops: 2 + Math.floor(Math.random() * 3), look: 0, leaving: false, speed: rand(2.2, 3) });
+  if (owns("gise") && floaters.length < 8) floatText("+💰", 5.5, 3.9, 24.6, "#ffd23f");
+}
+function planVisitor(v) {
+  const path = [];
+  if (v.stops > 0) {
+    v.stops--;
+    const cands = [];
+    for (const c of attractions()) {
+      const p = findPath(v.node, c.node);
+      if (!p.length && v.node !== c.node) continue;
+      for (let i = 0; i < c.w; i++) cands.push([c, p]);
+    }
+    if (cands.length) {
+      const [c, p] = pick(cands);
+      for (const d of p) path.push(NODES[d]);
+      const spot = { x: c.x, z: c.z, stop: true };
+      path.push(spot, NODES[c.node]);
+      v.node = c.node; v.path = path; v.look = c.face;
+      return;
+    }
+  }
+  for (const d of findPath(v.node, "G")) path.push(NODES[d]);
+  path.push({ x: rand(-1, 1), z: 33.5 });
+  v.node = "G"; v.path = path; v.leaving = true;
+}
+function updateVisitors(dt) {
+  const f = flow(), max = f > 0 ? clamp(Math.floor(3 + f / 8), 3, MAX_VISITORS) : 0;
+  if ((spawnT -= dt) <= 0) {
+    spawnT = clamp(60 / Math.max(1, f), 1.2, 6) * rand(0.7, 1.3);
+    if (visitors.length < max) spawnVisitor();
+  }
+  for (let i = visitors.length - 1; i >= 0; i--) {
+    const v = visitors[i];
+    v.moving = false;
+    if (v.wait > 0) { v.wait -= dt; v.face = v.look; }
+    else if (!v.path.length) {
+      if (v.leaving) { scene.remove(v.g); visitors.splice(i, 1); continue; }
+      planVisitor(v);
+    } else {
+      const h = v.path[0], dx = h.x - v.x, dz = h.z - v.z, d = Math.hypot(dx, dz);
+      if (d < 0.12) { v.path.shift(); if (h.stop) v.wait = rand(2.5, 5.5); }
+      else { const st = Math.min(d, v.speed * dt); v.x += dx / d * st; v.z += dz / d * st; v.face = Math.atan2(dx, dz); v.moving = true; }
+    }
+    v.walk += dt * 9;
+    v.g.position.set(v.x, 0, v.z);
+    v.g.rotation.y += angDiff(v.g.rotation.y, v.face) * Math.min(1, dt * 10);
+    const sw = v.moving ? Math.sin(v.walk) * 0.6 : 0;
+    v.legs[0].rotation.x = sw; v.legs[1].rotation.x = -sw;
+  }
+}
+
+// ---------------------------------------------------------------- Satın alma kareleri
+const pads = {};
+const padMatOk = new THREE.MeshLambertMaterial({ color: 0xffe066, emissive: 0xffd23f, emissiveIntensity: 0.6 });
+const padMatNo = new THREE.MeshLambertMaterial({ color: 0xff9a62, emissive: 0xff7a3d, emissiveIntensity: 0.3 });
+const padRingGeo = new THREE.CylinderGeometry(1.3, 1.3, 0.06, 20), padDiskGeo = new THREE.CylinderGeometry(1.12, 1.12, 0.1, 20);
+const padRingMat = new THREE.MeshLambertMaterial({ color: 0xf4f1ea });
+function padPos(o) {
+  if (o.pad) return { x: o.pad[0], z: o.pad[1] };
+  if (o.pen) return { x: PENS[o.pen].x, z: PENS[o.pen].z };
+  const n = NODES[PENS[o.animal].node];
+  return { x: n.x + 2.2, z: n.z };
+}
+function syncPads() {
+  const vis = visibleItems();
+  for (const id in pads) if (!vis.includes(id)) { scene.remove(pads[id].g); delete pads[id]; }
+  for (const id of vis) {
+    if (pads[id]) continue;
+    const o = ITEM[id], p = padPos(o), g = new THREE.Group();
+    g.position.set(p.x, 0, p.z); scene.add(g);
+    const ring = new THREE.Mesh(padRingGeo, padRingMat); ring.position.y = 0.05; g.add(ring);
+    const disk = new THREE.Mesh(padDiskGeo, padMatOk); disk.position.y = 0.08; g.add(disk);
+    const tag = textSprite([["", "#fff"]], 4.4, 1.65, 512, 192); tag.position.y = 2.1; g.add(tag);
+    pads[id] = { g, disk, tag, inside: false, p };
+  }
+}
+function checkPads() {
+  padMatOk.emissiveIntensity = 0.45 + 0.3 * Math.sin(now * 4);
+  let first = null;
+  for (const id of Object.keys(pads)) {
+    const pd = pads[id], o = ITEM[id], ok = save.money >= o.price;
+    pd.disk.material = ok ? padMatOk : padMatNo;
+    const c = ok ? "#fff3a8" : "#ffc9a8";
+    setSprite(pd.tag, [[`${o.icon} ${o.name}`, c], ["💰 " + (o.price > 0 ? fmt(o.price) : "Bedava"), c]]);
+    const inside = Math.hypot(pl.x - pd.p.x, pl.z - pd.p.z) < PAD_R;
+    if (inside && !pd.inside) { pd.inside = true; buyItem(id); return; }
+    else if (!inside) pd.inside = false;
+    if (!first) first = id;
+  }
+  arrow.visible = !!first;
+  if (first) { const p = pads[first].p; arrow.position.set(p.x, 3.6 + Math.sin(now * 3) * 0.25, p.z); arrow.rotation.y = now * 2; }
+}
+
+// ---------------------------------------------------------------- Bahçeyi (yeniden) kur
+function rebuildZoo() {
+  for (const id in itemGroups) { scene.remove(itemGroups[id]); delete itemGroups[id]; }
+  for (const a of animals) scene.remove(a.g);
+  animals.length = 0;
+  for (const v of visitors) scene.remove(v.g);
+  visitors.length = 0;
+  if (bus) { scene.remove(bus.g); bus = null; }
+  growing.length = 0;
+  for (const o of ITEMS) if (owns(o.id)) buildItem(o.id, false);
+  buildGraph(); buildColliders(); syncPads(); updateCashTag();
+}
+
+// ================================================================ Avatar (platformdan)
+function drawFace(kind) {
+  const c = document.createElement("canvas"); c.width = c.height = 128;
+  const x = c.getContext("2d");
+  x.fillStyle = "#1b1b1b"; x.strokeStyle = "#1b1b1b"; x.lineWidth = 7; x.lineCap = "round";
+  if (kind === "cool") { x.fillRect(22, 40, 36, 18); x.fillRect(70, 40, 36, 18); x.fillRect(56, 44, 16, 5); }
+  else { x.beginPath(); x.ellipse(44, 50, 7, kind === "wow" ? 12 : 10, 0, 0, 7); x.ellipse(84, 50, 7, kind === "wow" ? 12 : 10, 0, 0, 7); x.fill(); }
+  x.beginPath();
+  if (kind === "wow") { x.ellipse(64, 92, 10, 13, 0, 0, 7); x.fill(); }
+  else if (kind === "grin") { x.moveTo(36, 82); x.quadraticCurveTo(64, 116, 92, 82); x.closePath(); x.fill(); }
+  else { x.arc(64, 74, 26, 0.25 * Math.PI, 0.75 * Math.PI); x.stroke(); }
+  return c;
+}
+const faceTex = {};
+const lambert = (color, extra = {}) => new THREE.MeshLambertMaterial({ color, ...extra });
+function mesh(geo, material, x = 0, y = 0, z = 0, parent = scene, shadow = true) {
+  const m = new THREE.Mesh(geo, material);
+  m.position.set(x, y, z); m.castShadow = shadow; m.receiveShadow = true;
+  parent.add(m); return m;
+}
+function buildAvatar(a) {
+  const g = new THREE.Group(), inner = new THREE.Group();
+  g.add(inner); inner.scale.setScalar(0.4);
+  const part = (w, h, d, c, x, y, z) => mesh(new THREE.BoxGeometry(w, h, d), lambert(c), x, y, z, inner);
+  const legs = [part(0.9, 2, 1, a.pants, -0.5, 1, 0), part(0.9, 2, 1, a.pants, 0.5, 1, 0)];
+  legs.forEach(l => { l.geometry.translate(0, -1, 0); l.position.y = 2; });
+  part(2, 2, 1, a.shirt, 0, 3, 0);
+  const arms = [part(0.9, 2, 1, a.skin, -1.45, 3, 0), part(0.9, 2, 1, a.skin, 1.45, 3, 0)];
+  arms.forEach(l => { l.geometry.translate(0, -0.8, 0); l.position.y = 3.8; });
+  mesh(new THREE.CylinderGeometry(0.62, 0.62, 1.2, 16), lambert(a.skin), 0, 4.6, 0, inner);
+  const face = FACES.includes(a.face) ? a.face : "smile";
+  if (!faceTex[face]) faceTex[face] = new THREE.CanvasTexture(drawFace(face));
+  mesh(new THREE.PlaneGeometry(0.9, 0.9), new THREE.MeshBasicMaterial({ map: faceTex[face], transparent: true }), 0, 4.6, 0.63, inner, false);
+  const hc = a.hatColor || "#e63946";
+  if (a.hat === "cap") { mesh(new THREE.CylinderGeometry(0.66, 0.66, 0.35, 16), lambert(hc), 0, 5.3, 0, inner); part(1.1, 0.08, 0.6, hc, 0, 5.15, 0.75); }
+  else if (a.hat === "crown") {
+    mesh(new THREE.CylinderGeometry(0.6, 0.55, 0.4, 8, 1, true), lambert(a.crownColor || "#ffd166", { side: THREE.DoubleSide }), 0, 5.4, 0, inner);
+    for (let i = 0; i < 6; i++) { const an = i / 6 * Math.PI * 2; mesh(new THREE.ConeGeometry(0.1, 0.3, 4), lambert(a.crownColor || "#ffd166"), Math.cos(an) * 0.55, 5.7, Math.sin(an) * 0.55, inner); }
+  } else if (a.hat === "headphones") {
+    mesh(new THREE.TorusGeometry(0.7, 0.07, 8, 20, Math.PI), lambert(hc), 0, 4.75, 0, inner);
+    part(0.25, 0.5, 0.5, hc, -0.7, 4.6, 0); part(0.25, 0.5, 0.5, hc, 0.7, 4.6, 0);
+  } else if (a.hat === "helmet") mesh(new THREE.SphereGeometry(0.95, 20, 14), lambert("#cfe8ff", { transparent: true, opacity: 0.35, depthWrite: false }), 0, 4.65, 0, inner, false);
+  return { group: g, legs, arms };
+}
+function poseFigure(parts, moving, walk) {
+  const sw = moving ? Math.sin(walk) * 0.7 : 0;
+  parts.legs[0].rotation.x = sw; parts.legs[1].rotation.x = -sw;
+  parts.arms[0].rotation.x = -sw; parts.arms[1].rotation.x = sw;
+}
+
+// ================================================================ Oyuncu
+const pl = { x: save.px, z: save.pz, face: Math.PI, moving: false, walk: 0, group: null, parts: null };
+const DEFAULT_AVATAR = { skin: "#e0ac69", shirt: "#2bb673", pants: "#2b2d42", hat: "cap", hatColor: "#ffd23f", face: "smile" };
+function rebuildAvatar() {
+  const rot = pl.group ? pl.group.rotation.y : Math.PI;
+  if (pl.group) scene.remove(pl.group);
+  const b = buildAvatar({ ...DEFAULT_AVATAR, ...((platform.profile && platform.profile.avatar) || {}) });
+  pl.group = b.group; pl.parts = b; pl.group.rotation.y = rot;
+  scene.add(pl.group);
+}
+rebuildAvatar();
+const nameTag = textSprite([["", "#fff"]], 3, 0.56, 512, 96);
+scene.add(nameTag);
+const playerName = () => (platform.profile && platform.profile.name) ? String(platform.profile.name).trim() : "";
+function updateNameTag() { setSprite(nameTag, [[(playerName() || "Bakıcı").slice(0, 18), "#ffffff"]]); }
+updateNameTag();
+
+const keys = new Set();
+const stick = { id: null, ox: 0, oy: 0, x: 0, y: 0 };
+const cam = { yaw: 0, pitch: 0.9, dist: 12 };
+function updatePlayer(dt) {
+  let fwd = 0, side = 0;
+  if (keys.has("KeyW") || keys.has("ArrowUp")) fwd += 1;
+  if (keys.has("KeyS") || keys.has("ArrowDown")) fwd -= 1;
+  if (keys.has("KeyA") || keys.has("ArrowLeft")) side -= 1;
+  if (keys.has("KeyD") || keys.has("ArrowRight")) side += 1;
+  fwd -= stick.y; side += stick.x;
+  const len = Math.hypot(fwd, side);
+  pl.moving = len > 0.05;
+  if (!pl.moving) return;
+  const k = Math.min(1, len) / len, sp = SPEED * (hasPass("speed") ? FAST_MULT : 1);
+  const mx = (-Math.sin(cam.yaw) * fwd + Math.cos(cam.yaw) * side) * k, mz = (-Math.cos(cam.yaw) * fwd - Math.sin(cam.yaw) * side) * k;
+  const nx = pl.x + mx * sp * dt, nz = pl.z + mz * sp * dt;
+  const stuck = blocked(pl.x, pl.z, 0.35);
+  if (stuck || !blocked(nx, pl.z, 0.35)) pl.x = clamp(nx, -BOUND, BOUND);
+  if (stuck || !blocked(pl.x, nz, 0.35)) pl.z = clamp(nz, -BOUND, BOUND);
+  pl.face = Math.atan2(mx, mz);
+  pl.walk += dt * 11;
+}
+function syncCamera(dt, instant) {
+  // Dik telefonda yatay görüş daralmasın: dikey FOV'u ekran oranına göre aç (en fazla 100°)
+  const asp = innerWidth / Math.max(1, innerHeight);
+  const fov = asp >= 1 ? 55 : Math.min(100, 2 * Math.atan(Math.tan(55 * Math.PI / 360) / asp) * 180 / Math.PI);
+  if (camera.fov !== fov) { camera.fov = fov; camera.updateProjectionMatrix(); }
+  const cd = cam.dist;
+  const tx = pl.x + Math.sin(cam.yaw) * Math.cos(cam.pitch) * cd, tz = pl.z + Math.cos(cam.yaw) * Math.cos(cam.pitch) * cd;
+  const ty = Math.max(0.8, 1.4 + Math.sin(cam.pitch) * cd);
+  const k = instant ? 1 : Math.min(1, dt * 8);
+  camera.position.x += (tx - camera.position.x) * k; camera.position.y += (ty - camera.position.y) * k; camera.position.z += (tz - camera.position.z) * k;
+  camera.lookAt(pl.x, 1.3, pl.z);
+  pl.group.position.set(pl.x, 0, pl.z);
+  pl.group.rotation.y += angDiff(pl.group.rotation.y, pl.face) * Math.min(1, dt * 14);
+  poseFigure(pl.parts, pl.moving, pl.walk);
+  nameTag.position.set(pl.x, 2.75, pl.z);
+  sun.position.set(pl.x - 10, 20, pl.z + 7); sun.target.position.set(pl.x, 0, pl.z);
+}
+function toScreen(x, y, z) {
+  const v = new THREE.Vector3(x, y, z).project(camera);
+  if (v.z > 1) return null;
+  return { x: (v.x + 1) / 2 * innerWidth, y: (1 - v.y) / 2 * innerHeight };
+}
+
+// ================================================================ Güncelleme
+let now = 0;
+function nearPen() {
+  let best = "", bd = FEED_DIST;
+  for (const k in PENS) {
+    if (!(save.animals[k] > 0)) continue;
+    const n = NODES[PENS[k].node], x = clamp(pl.x, n.x - 3.8, n.x + 3.8), d = Math.hypot(pl.x - x, pl.z - (n.z - 1.2));
+    if (d < bd) { bd = d; best = k; }
+  }
+  return best;
+}
+function interact() { const k = nearPen(); if (k) feed(k); }
+function update(dt) {
+  now += dt;
+  const g = incomePerSec() * dt;
+  if (g > 0) {
+    save.register = Math.min(1e15, save.register + g);
+    if (lv("oto") > 0 && save.register >= 1) { const n = Math.floor(save.register); save.register -= n; earn(n); }
+  }
+  if (!anyOverlay()) updatePlayer(dt);
+  if (Math.hypot(pl.x - CASH.x, pl.z - CASH.z) < CASH_R && save.register >= 1) collectCash();
+  checkPads();
+  updateAnimals(dt);
+  updateVisitors(dt);
+  if (bus) {
+    bus.s += dt * 4.5;
+    const [x, z, yaw] = busPos(bus.s);
+    bus.g.position.set(x, Math.abs(Math.sin(now * 8)) * 0.03, z);
+    bus.g.rotation.y += angDiff(bus.g.rotation.y, yaw) * Math.min(1, dt * 5);
+  }
+  for (let i = growing.length - 1; i >= 0; i--) {
+    const b = growing[i];
+    b.t += dt;
+    const t = clamp(b.t / 0.5, 0, 1);
+    let s = t < 1 ? 1 + Math.sin(t * Math.PI) * 0.12 : 1;
+    if (t < 0.6) s *= t;
+    if (b.sc) b.n.scale.setScalar(Math.max(0.01, s * b.sc)); else b.n.scale.set(1, Math.max(0.01, s), 1);
+    if (t >= 1) growing.splice(i, 1);
+  }
+  for (let i = floaters.length - 1; i >= 0; i--) {
+    const f = floaters[i];
+    f.t += dt; f.s.position.y += dt * 1.2; f.s.material.opacity = clamp(1.6 - f.t, 0, 1);
+    if (f.t > 1.6) { scene.remove(f.s); f.s.material.dispose(); floaters.splice(i, 1); }
+  }
+  updateCashTag();
+}
+
+// ================================================================ Arayüz
+const OVERLAYS = ["ovHelp", "ovPause", "ovUp", "ovShop", "ovOffline", "ovReborn"];
+const isShown = id => $(id).classList.contains("show");
+const anyOverlay = () => OVERLAYS.some(isShown);
+function show(id) {
+  keys.clear(); endAllPtrs();
+  render(id);
+  $(id).classList.add("show"); $(id).scrollTop = 0;
+}
+function hide(id) {
+  if (!isShown(id)) return;
+  $(id).classList.remove("show");
+  if (id === "ovHelp" && !save.helpSeen) { save.helpSeen = true; persist(true); }
+}
+function render(id) {
+  if (id === "ovUp") renderUpgrades();
+  else if (id === "ovShop") renderShop();
+  else if (id === "ovPause") {
+    $("pauseInfo").textContent = `💰 ${fmt(save.money)}   ·   🦁 ${animalCount()}/${ANIMAL_TOTAL} hayvan   ·   🏗️ ${Object.keys(save.built).length}/${ITEMS.length} yapı`;
+    document.querySelectorAll("[data-mute]").forEach(b => b.textContent = save.muted ? "Ses: Kapalı" : "Ses: Açık");
+  } else if (id === "ovOffline") $("offAmount").textContent = "💰 +" + fmt(offlineGain);
+  else if (id === "ovReborn") $("rebornTxt").textContent = `Karşılığında kalıcı gelir çarpanın ×${dec(save.multiplier)} → ×${dec(1 + REBIRTH_BONUS * (save.rebirths + 1))} olur.`;
+}
+function rerenderOpen() { for (const id of OVERLAYS) if (isShown(id)) render(id); }
+function renderUpgrades() {
+  $("upMoney").textContent = `💰 ${fmt(save.money)}   ·   📈 ${dec(incomePerSec())}/sn`;
+  let h = "";
+  for (const u of UPGRADES) {
+    const l = lv(u.id), maxed = l >= u.max;
+    let desc = "";
+    if (u.id === "bilet") desc = maxed ? `Bilet: 💰 ${ticket()}` : `Bilet: 💰 ${ticket()} → ${ticket() + 3}`;
+    else if (u.id === "kapasite") desc = maxed ? `En fazla ${fmt(capacity())} ziyaretçi/dk` : `En fazla ${fmt(capacity())} → ${fmt(Math.round(40 * Math.pow(1.5, l + 1)))} ziyaretçi/dk`;
+    else if (u.id === "bakim") desc = maxed ? `Hayvanlar +%${10 * l} çekicilik` : `Hayvanlar +%${10 * (l + 1)} çekicilik, yem ${FEED_TIME + 6 * (l + 1)} sn`;
+    else desc = "Kasadaki para kendiliğinden toplanır.";
+    const f = upgradePrice(u.id);
+    const btn = maxed ? `<button class="btn" disabled>${u.max > 1 ? "En üst" : "Sende"}</button>`
+      : `<button class="btn ${save.money >= f ? "gold" : ""}" data-up="${u.id}">💰 ${fmt(f)}</button>`;
+    h += `<div class="item"><div class="ic">${u.icon}</div><div><b>${esc(u.name)}${u.max > 1 ? " · Sv " + l : ""}</b><div class="muted">${esc(desc)}</div></div>${btn}</div>`;
+  }
+  const ready = rebirthReady();
+  h += `<div class="item"><div class="ic">♻️</div><div><b>Yeniden Doğuş · ×${dec(save.multiplier)}</b><div class="muted">${ready ? "Bahçe tamam! Sıfırla, kalıcı +%50 gelir kazan."
+    : `Bahçeyi tamamla (${Object.keys(save.built).length}/${ITEMS.length} yapı), sonra sıfırla ve kalıcı +%50 gelir kazan.`}</div></div>
+    <button class="btn ${ready ? "go" : ""}" id="btnOpenReborn" ${ready ? "" : "disabled"}>Yeniden Doğ</button></div>`;
+  $("upList").innerHTML = h;
+  $("upNote").textContent = `Talep: ${fmt(demand())} ziyaretçi/dk · Kapasite: ${fmt(capacity())} · Bilet + harcama: 💰 ${fmt(ticket() + spend())}`;
+  $("upList").querySelectorAll("[data-up]").forEach(b => b.onclick = () => buyUpgrade(b.dataset.up));
+  $("btnOpenReborn").onclick = () => { SFX.click(); show("ovReborn"); };
+}
+function renderShop() {
+  const j = platform.profile ? platform.profile.jeton : null;
+  $("shopJeton").textContent = j == null ? "" : `Küp Jeton bakiyen: KJ ${Number(j).toLocaleString("tr-TR")}`;
+  $("passList").innerHTML = PASSES.map(p => {
+    const b = hasPass(p.id) ? `<button class="btn" disabled>Sende</button>` : `<button class="btn blue" data-pass="${p.id}">KJ ${p.jeton}</button>`;
+    return `<div class="item"><div class="ic">${p.icon}</div><div><b>${esc(p.name)}</b><div class="muted">${esc(p.desc)}</div></div>${b}</div>`;
+  }).join("");
+  $("passList").querySelectorAll("[data-pass]").forEach(b => b.onclick = () => {
+    const p = PASSES.find(x => x.id === b.dataset.pass);
+    requestPurchase(p, ok => {
+      if (!ok) return;
+      save.passes[p.id] = true;
+      notify(`${p.icon} ${p.name} senin!`);
+      SFX.cash(); persist(true); updateHud(); rerenderOpen();
+    });
+  });
+  $("shopNote").textContent = platform.inside ? "Satın alımı Küp Evreni onaylar; Küp Jeton bakiyenden düşer." : "Küp Jeton ile almak için oyunu Küp Evreni'nden aç.";
+}
+let touchUI = matchMedia("(pointer: coarse)").matches;
+function hintText() {
+  if (!owns("gise")) return "Parlayan kareye bas: 🎟️ Bilet Gişesi'ni kur!";
+  if (rebirthReady()) return "🎉 Bahçe tamamlandı! 🛠️ Yükseltmeler'den ♻️ Yeniden Doğuş yap";
+  if (lv("oto") === 0 && save.register >= 30) return `Kasada 💰 ${fmt(save.register)} birikti! Toplamak için kasanın yeşil karesine bas`;
+  if (flow() >= capacity() && save.money >= upgradePrice("kapasite") && lv("kapasite") < 15) return "Bahçe dolu! 🛠️ Yükseltmeler'den ziyaretçi kapasitesini artır";
+  const k = nearPen();
+  if (k && !((fed[k] || 0) > 0)) return `🍖 Yem ver: ${PENS[k].icon} ${PENS[k].name} mutlu olsun`;
+  const l = visibleItems();
+  if (l.length) { const o = ITEM[l[0]]; return `Sıradaki: ${o.icon} ${o.name} (💰 ${fmt(o.price)}) · parlayan kareye bas`; }
+  return "Hayvanları besle, yükseltme al";
+}
+function updateHud() {
+  setText($("money"), "💰 " + fmt(save.money));
+  let ex = "";
+  if (hasPass("double")) ex += "  ×2";
+  if (save.rebirths > 0) ex += "  ♻️×" + dec(save.multiplier);
+  setText($("income"), `📈 ${dec(incomePerSec())}/sn${ex}`);
+  setText($("visit"), `👥 ${fmt(flow())}/dk · 🦁 ${animalCount()}/${ANIMAL_TOTAL}`);
+  const k = nearPen(), b = $("btnAct");
+  b.style.display = k && !anyOverlay() ? "block" : "none";
+  if (k) {
+    const left = fed[k] || 0;
+    b.disabled = left > 0;
+    const t = left > 0 ? `❤️ Mutlu (${Math.ceil(left)} sn)` : "🍖 Yem ver";
+    if (b._t !== t + touchUI) { b._t = t + touchUI; b.innerHTML = (left > 0 || touchUI ? "" : "<b>E</b>") + esc(t); }
+  }
+  setText($("hint"), hintText());
+}
+function toggleMute() {
+  save.muted = !save.muted;
+  if (A.master) A.master.gain.value = save.muted ? 0 : 0.5;
+  SFX.click(); persist(true); rerenderOpen();
+}
+function exitGame() {
+  // Platformda oyundan çıkışı üst çubuk yapar (kup:exit); tek başına açıldıysa kaydedip oyunda kalınır
+  SFX.click();
+  persist(true);
+  for (const id of OVERLAYS) $(id).classList.remove("show");
+  if (platform.inside) parent.postMessage({ type: "kup:exit" }, "*");
+  else notify("💾 Kaydedildi");
+}
+
+// ================================================================ Girdi
+document.querySelectorAll("[data-close]").forEach(b => b.addEventListener("click", () => { SFX.click(); hide(b.closest(".overlay").id); }));
+document.querySelectorAll("[data-open]").forEach(b => b.addEventListener("click", () => { SFX.click(); show(b.dataset.open); }));
+document.querySelectorAll("[data-mute]").forEach(b => b.addEventListener("click", toggleMute));
+document.querySelectorAll("[data-exit]").forEach(b => b.addEventListener("click", exitGame));
+$("btnResume").onclick = () => { SFX.click(); hide("ovPause"); };
+$("btnPauseUp").onclick = () => { SFX.click(); hide("ovPause"); show("ovUp"); };
+$("btnOffline").onclick = () => { SFX.cash(); hide("ovOffline"); };
+$("btnReborn").onclick = () => { hide("ovReborn"); hide("ovUp"); rebirth(); };
+const tap = (id, fn) => $(id).addEventListener("pointerdown", e => { e.preventDefault(); e.stopPropagation(); initAudio(); fn(); });
+tap("bUp", () => { SFX.click(); show("ovUp"); });
+tap("bShop", () => { SFX.click(); show("ovShop"); });
+tap("bHelp", () => { SFX.click(); show("ovHelp"); });
+tap("bPause", () => { SFX.click(); show("ovPause"); });
+tap("btnAct", interact);
+addEventListener("keydown", e => {
+  initAudio();
+  if (e.code === "Escape" || e.code === "KeyP") {
+    const open = OVERLAYS.filter(isShown);
+    if (open.length) { SFX.click(); hide(open[open.length - 1]); } else { SFX.click(); show("ovPause"); }
+    return;
+  }
+  if (anyOverlay()) return;
+  if (e.repeat) return;
+  keys.add(e.code);
+  if (e.code === "KeyE" || e.code === "Space") { interact(); e.preventDefault(); }
+  if (e.code === "KeyU") { SFX.click(); show("ovUp"); }
+  if (e.code.startsWith("Arrow")) e.preventDefault();
+});
+addEventListener("keyup", e => keys.delete(e.code));
+addEventListener("blur", () => keys.clear());
+addEventListener("wheel", e => { if (!anyOverlay()) cam.dist = clamp(cam.dist + Math.sign(e.deltaY) * 1.2, 5, 32); }, { passive: true });
+const ptrs = new Map();
+canvas.addEventListener("pointerdown", e => {
+  initAudio();
+  if (anyOverlay()) return;
+  const p = { x: e.clientX, y: e.clientY, stick: false };
+  if (e.pointerType !== "mouse") touchUI = true;
+  if (e.pointerType !== "mouse" && e.clientX < innerWidth / 2 && stick.id === null) {
+    p.stick = true; stick.id = e.pointerId; stick.ox = e.clientX; stick.oy = e.clientY;
+    const el = $("stick"); el.style.left = e.clientX + "px"; el.style.top = e.clientY + "px"; el.style.display = "block";
+  }
+  ptrs.set(e.pointerId, p);
+});
+addEventListener("pointermove", e => {
+  const p = ptrs.get(e.pointerId);
+  if (!p) return;
+  if (p.stick) {
+    let dx = e.clientX - stick.ox, dy = e.clientY - stick.oy;
+    const l = Math.hypot(dx, dy), max = 50;
+    if (l > max) { dx = dx / l * max; dy = dy / l * max; }
+    stick.x = dx / max; stick.y = dy / max;
+    $("stick").firstChild.style.transform = `translate(${dx}px, ${dy}px)`;
+  } else {
+    cam.yaw -= (e.clientX - p.x) * 0.006;
+    cam.pitch = clamp(cam.pitch + (e.clientY - p.y) * 0.004, 0.15, 1.35);
+  }
+  p.x = e.clientX; p.y = e.clientY;
+});
+function endPtr(e) {
+  const p = ptrs.get(e.pointerId);
+  if (!p) return;
+  ptrs.delete(e.pointerId);
+  if (p.stick) { stick.id = null; stick.x = stick.y = 0; $("stick").style.display = "none"; $("stick").firstChild.style.transform = ""; }
+}
+function endAllPtrs() { for (const id of [...ptrs.keys()]) endPtr({ pointerId: id }); }
+addEventListener("pointerup", endPtr);
+addEventListener("pointercancel", endPtr);
+addEventListener("contextmenu", e => e.preventDefault());
+document.addEventListener("visibilitychange", () => { if (document.hidden) { if (!anyOverlay()) show("ovPause"); persist(true); } });
+addEventListener("pagehide", () => persist(true));
+function resize() {
+  renderer.setPixelRatio(Math.min(1.5, devicePixelRatio || 1));
+  renderer.setSize(innerWidth, innerHeight, false);
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+}
+addEventListener("resize", resize);
+
+// ================================================================ Döngü
+let last = performance.now();
+function frame(t) {
+  const dt = Math.min(0.1, (t - last) / 1000); last = t;
+  update(dt);
+  syncCamera(dt);
+  updateHud();
+  persist();
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+window.step = sec => { for (let t = 0; t < sec; t += 1 / 30) { update(1 / 30); syncCamera(1 / 30); } updateHud(); renderer.render(scene, camera); };
+window.zoo = {
+  save: () => save, pl, cam, pads, visitors, animals, fed, ITEMS, buyItem, buyUpgrade, collectCash, rebirth, applyOffline, feed, interact, nearPen,
+  incomePerSec, flow, capacity, appeal, visibleItems, padPos, persist, receiveGifts, show, hide, stats,
+  setOffline: g => { offlineGain = g; },
+};
+
+// ================================================================ Başlat
+resize();
+rebuildZoo();
+applyOffline();
+syncCamera(0, true);
+updateHud();
+if (!save.helpSeen) show("ovHelp");
+if (offlineGain > 0) show("ovOffline");
+persist(true);
+setInterval(() => persist(true), 10000);
+if (platform.inside) parent.postMessage({ type: "kup:ready" }, "*");
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
