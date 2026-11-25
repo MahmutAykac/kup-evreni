@@ -1,0 +1,712 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Kule Ustası</title>
+<!--
+  Kule Ustası: kayan bloğu tam zamanında bırak, kuleyi yükselt (3D zamanlama / dizme oyunu).
+  Küp Evreni platformunda çalışır (tek başına da açılır). Kayıt anahtarı: kuleUstasi.
+  Kayıt: { best, games, totalBlocks, perfects, gold, owned, theme, passes, giftIds, helpSeen, muted } (best düz sayı).
+  Oyun: blok kulenin üstünde gidip gelir (her katta X / Z ekseni). Bırakınca alttakinin dışında kalan parça kesilip düşer;
+  hiç üst üste gelmezse kule yıkılır. TOLERANS içinde bırakmak "Mükemmel!" (tam oturur), 3+ seri bloğu biraz büyütür.
+  Kontroller: dokun / tıkla / Space / Enter: bırak · Esc / P: duraklat.
+  Godot sürümü: godot/betikler/kule.gd (aynı kurallar, aynı kayıt).
+  Test kancası: window.step(sn) oyun mantığını elle ilerletir; window.kule test için iç durumu verir.
+-->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>/* Küp Evreni grafik modu (Profil → Grafik modu): performans | dengeli | yuksek */(function () { try {
+  var m = "dengeli"; try { m = JSON.parse(localStorage.getItem("kupGrafik") || '"dengeli"'); } catch (e) {}
+  if (m !== "performans" && m !== "yuksek") return;
+  var O = THREE.WebGLRenderer, Y = function (p) {
+    p = p || {}; p.antialias = m === "yuksek";
+    var r = new O(p), sp = r.setPixelRatio.bind(r);
+    r.setPixelRatio = function (x) { sp(m === "yuksek" ? Math.min(2, window.devicePixelRatio || 1) : Math.max(0.5, (x || 1) * 0.6)); };
+    r.setPixelRatio(1);
+    if (m === "performans") Object.defineProperty(r.shadowMap, "enabled", { get: function () { return false; }, set: function () {} });
+    return r;
+  };
+  Y.prototype = O.prototype; THREE.WebGLRenderer = Y;
+} catch (e) {} })();</script>
+<style>
+  :root { --panel: rgba(30, 40, 66, 0.7); --line: rgba(255,255,255,0.2); --text: #fff; --gold: #ffd23f; --card: #f3f8ff; --ink: #1d2a44; }
+  * { box-sizing: border-box; }
+  html, body { -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; overscroll-behavior: none; }
+  html, body { margin: 0; height: 100%; background: #bfe3ff; color: var(--text); font-family: "Trebuchet MS", system-ui, sans-serif;
+    overflow: hidden; -webkit-user-select: none; user-select: none; touch-action: none; }
+  button { font: inherit; color: inherit; }
+  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  .pill { background: var(--panel); border-radius: 14px; padding: 7px 12px; }
+  #gold { position: fixed; left: 14px; top: 12px; font-size: 20px; font-weight: 700; color: var(--gold); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #score { position: fixed; left: 0; right: 0; top: 6px; text-align: center; font-size: 72px; font-weight: 700; pointer-events: none;
+    text-shadow: 0 3px 0 rgba(0,0,0,0.12), 0 0 14px rgba(0,0,0,0.18); font-variant-numeric: tabular-nums; }
+  #combo { position: fixed; left: 0; right: 0; top: 92px; text-align: center; font-size: 19px; font-weight: 700; color: #fff3a8; pointer-events: none;
+    text-shadow: 0 2px 3px rgba(0,0,0,0.45); }
+  #pause { position: fixed; right: 14px; top: 12px; width: 52px; height: 48px; border: 2px solid var(--line); background: var(--panel); border-radius: 14px;
+    cursor: pointer; font-size: 20px; font-weight: 700; }
+  #hint { position: fixed; left: 0; right: 0; bottom: 70px; text-align: center; font-size: 22px; font-weight: 700; pointer-events: none;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.45); animation: blink 1.4s ease-in-out infinite; display: none; }
+  @keyframes blink { 50% { opacity: 0.45; } }
+  #toasts { position: fixed; top: 110px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 6px; align-items: center;
+    pointer-events: none; z-index: 20; width: max-content; max-width: calc(100vw - 32px); }
+  .toast { background: rgba(243,248,255,0.96); color: var(--ink); padding: 6px 14px; border-radius: 10px; font-size: 15px; animation: tfade 3s forwards; text-align: center; }
+  @keyframes tfade { 0%, 82% { opacity: 1; } 100% { opacity: 0; transform: translateY(-8px); } }
+  .pop { position: fixed; pointer-events: none; font-weight: 700; font-size: 20px; color: #fff; text-shadow: 0 2px 3px rgba(0,0,0,0.5); animation: rise 0.9s forwards;
+    z-index: 4; white-space: nowrap; transform: translateX(-50%); }
+  .pop.big { font-size: 28px; color: #fff3a8; }
+  @keyframes rise { 30% { opacity: 1; } to { opacity: 0; margin-top: -60px; } }
+  .overlay { position: fixed; inset: 0; display: none; align-items: flex-start; justify-content: center; background: rgba(10,20,40,0.55);
+    padding: 16px; overflow-y: auto; touch-action: pan-y; z-index: 10; }
+  .overlay.light { background: rgba(10,20,40,0.28); }
+  .overlay.show { display: flex; }
+  .card { background: var(--card); color: var(--ink); border-radius: 18px; padding: 18px 22px; width: 100%; max-width: 520px; margin: auto 0; line-height: 1.45;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.3); text-align: center; }
+  .card h1 { margin: 0 0 8px; font-size: 27px; color: #1f7ac2; }
+  .card ul { padding-left: 20px; margin: 8px 0; text-align: left; }
+  .card li { margin: 5px 0; }
+  .muted { color: #5b6b85; font-size: 14px; }
+  .goldtxt { color: #b07800; font-weight: 700; }
+  .bigscore { font-size: 64px; font-weight: 700; color: #1f7ac2; line-height: 1.1; }
+  .rec { color: #d0453a; font-weight: 700; }
+  .btn { border: 0; border-radius: 12px; padding: 12px 14px; cursor: pointer; font-weight: 700; background: #e1e9f5; color: #2b3a55; font-size: 16px; }
+  .btn.go { background: #2b9de8; color: #fff; font-size: 19px; }
+  .btn.gold { background: var(--gold); color: #4a3a00; }
+  .btn.green { background: #06d6a0; color: #fff; }
+  .btn:disabled { opacity: 0.45; cursor: default; }
+  .col { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+  .rowb { display: flex; gap: 8px; }
+  .rowb .btn { flex: 1; }
+  .item { display: grid; grid-template-columns: 58px 1fr auto; gap: 10px; align-items: center; padding: 9px 0; border-bottom: 1px solid #dfe8f5; text-align: left; }
+  .item .btn { min-width: 104px; font-size: 14px; padding: 9px 12px; }
+  .sw { display: flex; gap: 2px; height: 30px; }
+  .sw i { flex: 1; border-radius: 2px; }
+  .sect { text-align: left; font-weight: 700; color: #1f7ac2; font-size: 18px; margin-top: 12px; }
+  #noWebgl { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 16px; text-align: center; font-size: 18px; color: #222; background: #fff; z-index: 50; }
+  @media (max-width: 560px), (max-height: 480px) {
+    #score { font-size: 56px; }
+    #combo { top: 74px; font-size: 16px; }
+    #gold { font-size: 17px; }
+    .card { padding: 14px 16px; }
+    .bigscore { font-size: 52px; }
+  }
+  /* Oyun sonu kartı: dikte altta, yatayda sağda (kule görünsün) */
+  @media (orientation: portrait) { #ovOver { align-items: flex-end; } #ovOver .card { margin: 0; } }
+  @media (orientation: landscape) { #ovOver { justify-content: flex-end; } #ovOver .card { max-width: min(480px, 54vw); } }
+  @media (max-aspect-ratio: 3/4) { #score { top: 40px; } #combo { top: 112px; } #toasts { top: 150px; } #hint { bottom: 110px; } }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="gold" class="pill">💰 0</div>
+<div id="score" style="display:none">0</div>
+<div id="combo"></div>
+<button id="pause" title="Duraklat (Esc)" style="display:none">II</button>
+<div id="hint">Bırakmak için dokun</div>
+<div id="toasts"></div>
+
+<div id="ovStart" class="overlay light"><div class="card">
+  <h1>🧱 Kule Ustası</h1>
+  <div style="color:#3b4a66">Kayan bloğu tam zamanında bırak, kuleyi gökyüzüne yükselt!</div>
+  <div class="goldtxt" id="startInfo" style="margin-top:8px"></div>
+  <div class="col">
+    <button class="btn go" id="btnPlay">Oyna</button>
+    <div class="rowb"><button class="btn" data-open="ovShop">Mağaza</button><button class="btn" data-open="ovHelp">Nasıl oynanır?</button></div>
+    <div class="rowb"><button class="btn" data-mute></button><button class="btn" data-exit>Çık</button></div>
+  </div>
+</div></div>
+<div id="ovPause" class="overlay"><div class="card">
+  <h1>Duraklatıldı</h1>
+  <div style="color:#3b4a66;font-size:19px" id="pauseInfo"></div>
+  <div class="col">
+    <button class="btn go" id="btnResume">Devam</button>
+    <div class="rowb"><button class="btn" data-play>Yeniden başla</button><button class="btn" data-open="ovShop">Mağaza</button></div>
+    <div class="rowb"><button class="btn" data-mute></button><button class="btn" data-exit>Çık</button></div>
+  </div>
+</div></div>
+<div id="ovOver" class="overlay light"><div class="card">
+  <h1>Kule yıkıldı!</h1>
+  <div class="bigscore" id="overScore">0</div>
+  <div class="muted">kat yüksekliğinde kule</div>
+  <div id="overBest" style="font-size:19px;margin-top:6px"></div>
+  <div class="goldtxt" id="overGold" style="margin-top:4px"></div>
+  <div class="col">
+    <button class="btn go" data-play>Tekrar</button>
+    <div class="rowb"><button class="btn" data-open="ovShop">Mağaza</button><button class="btn" data-exit>Çık</button></div>
+  </div>
+</div></div>
+<div id="ovShop" class="overlay"><div class="card">
+  <h1>Mağaza</h1>
+  <div class="goldtxt" id="shopGold" style="text-align:left;font-size:19px"></div>
+  <div id="themeList"></div>
+  <div class="sect">Küp Jeton</div>
+  <div class="goldtxt" id="shopJeton" style="text-align:left"></div>
+  <div id="passList"></div>
+  <div class="muted" id="shopNote" style="margin-top:8px;text-align:left"></div>
+  <div class="col"><button class="btn" data-close>Kapat</button></div>
+</div></div>
+<div id="ovHelp" class="overlay"><div class="card">
+  <h1>Nasıl oynanır?</h1>
+  <ul>
+    <li>Blok kulenin üstünde bir o yana bir bu yana kayar.</li>
+    <li><b>Ekrana dokun</b>, tıkla ya da <b>Space</b>'e bas: blok düşer.</li>
+    <li>Alttaki bloğun dışında kalan parça <b>kesilir</b> ve düşer; blok gittikçe küçülür.</li>
+    <li>Tam üstüne bırakırsan ✨ <b>Mükemmel!</b> Üst üste 3 mükemmel bloğu biraz büyütür.</li>
+    <li>Blok hiç üst üste gelmezse kule yıkılır. Yükseldikçe blok hızlanır!</li>
+    <li>Her blok +1, her mükemmel +2 💰 Altın. Altınla Mağaza'dan yeni blok temaları al.</li>
+  </ul>
+  <div class="muted">Klavye: Space / Enter bırak · Esc / P duraklat.</div>
+  <div class="col"><button class="btn go" data-close>Anladım</button></div>
+</div></div>
+<div id="noWebgl">3D için WebGL gerekli; bu tarayıcıda açılamadı. Chrome / Edge ile açmayı dene.</div>
+
+<script>
+"use strict";
+// ================================================================ Yardımcılar
+const $ = id => document.getElementById(id);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmt = n => Math.floor(n).toLocaleString("tr-TR");
+function setText(el, t) { if (el._t !== t) { el._t = t; el.textContent = t; } }
+function notify(msg) {
+  const el = document.createElement("div");
+  el.className = "toast"; el.textContent = msg;
+  $("toasts").appendChild(el);
+  setTimeout(() => el.remove(), 3000);
+  while ($("toasts").children.length > 3) $("toasts").firstChild.remove();
+}
+let popN = 0;
+function popText(txt, x, y, big) {
+  if (popN > 10) return;
+  const el = document.createElement("div");
+  el.className = "pop" + (big ? " big" : ""); el.textContent = txt; el.style.left = x + "px"; el.style.top = y + "px";
+  if (!big) el.style.color = "#ffd23f";
+  document.body.appendChild(el); popN++;
+  setTimeout(() => { el.remove(); popN--; }, 900);
+}
+// hsl (0..1) → THREE.Color ve CSS (Godot sürümüyle aynı formül)
+function hsl(h, s, l) { return new THREE.Color().setHSL(((h % 1) + 1) % 1, s, clamp(l, 0, 1)); }
+
+// ================================================================ Config
+const BLOCK_H = 0.5;          // blok yüksekliği
+const BASE = 3;               // başlangıç blok kenarı (en fazla bu kadar büyür)
+const RANGE = 4.6;            // blok, alttakinin merkezinden bu kadar uzağa kadar gidip gelir
+const TOLERANCE = 0.12;       // bu kadar yakınsa "Mükemmel!" (tam oturur)
+const GROW = 0.2;             // 3+ mükemmel seride blok bu kadar büyür
+const SPEED0 = 3, SPEED_STEP = 0.055, SPEED_MAX = 7.5;
+const GOLD_BLOCK = 1, GOLD_PERFECT = 2;
+const VISIBLE_BLOCKS = 70;    // en üstteki bu kadar blok çizilir
+// Temalar: blok rengi = hsl(h0 + kat × step + hd·sin, s, l + ld·sin); arka plan bloğun tonunu izler (bh kaydırma, bs doygunluk, bt/bb üst/alt açıklık)
+const THEMES = [
+  { id: "klasik", name: "Klasik", icon: "🧱", price: 0, h0: 0.55, step: 0.022, hd: 0, s: 0.6, l: 0.62, ld: 0, bh: 0.08, bs: 0.5, bt: 0.9, bb: 0.72 },
+  { id: "seker", name: "Şeker", icon: "🍬", price: 150, h0: 0.9, step: 0.035, hd: 0, s: 0.75, l: 0.8, ld: 0, bh: 0.5, bs: 0.65, bt: 0.94, bb: 0.82 },
+  { id: "tas", name: "Taş", icon: "🪨", price: 300, h0: 0.08, step: 0.003, hd: 0.02, s: 0.12, l: 0.52, ld: 0.08, bh: 0.5, bs: 0.18, bt: 0.8, bb: 0.56 },
+  { id: "neon", name: "Neon", icon: "💡", price: 500, h0: 0.8, step: 0.045, hd: 0, s: 1, l: 0.56, ld: 0, bh: 0.5, bs: 0.7, bt: 0.06, bb: 0.17, glow: true },
+  { id: "gece", name: "Gece", icon: "🌙", price: 800, h0: 0.6, step: 0.008, hd: 0.06, s: 0.55, l: 0.48, ld: 0.05, bh: 0.02, bs: 0.6, bt: 0.1, bb: 0.26 },
+  { id: "altin", name: "Altın Bloklar", icon: "👑", price: -1, h0: 0.115, step: 0, hd: 0.018, s: 0.85, l: 0.55, ld: 0.07, bh: 0.65, bs: 0.35, bt: 0.16, bb: 0.34, metal: true },
+];
+const THEME = Object.fromEntries(THEMES.map(t => [t.id, t]));
+// Küp Jeton (Küp Evreni platform parası) ile alınanlar
+const PASSES = [
+  { id: "altin", name: "Altın Bloklar", icon: "👑", jeton: 50, desc: "Parıl parıl altın blok teması ve koyu arka plan. Kalıcı." },
+];
+
+// ================================================================ Kayıt
+const SAVE_KEY = "kuleUstasi";
+function freshSave() {
+  return { best: 0, games: 0, totalBlocks: 0, perfects: 0, gold: 0, owned: { klasik: true }, theme: "klasik", passes: {}, giftIds: [], helpSeen: false, muted: false };
+}
+let save = freshSave();
+try {
+  const s = JSON.parse(localStorage.getItem(SAVE_KEY) || "null");
+  if (s && typeof s === "object") save = { ...save, ...s, owned: { klasik: true, ...(s.owned || {}) }, passes: { ...(s.passes || {}) },
+    giftIds: Array.isArray(s.giftIds) ? s.giftIds : [] };
+} catch (e) {}
+for (const k of ["best", "games", "totalBlocks", "perfects", "gold"]) save[k] = Math.floor(Math.max(0, +save[k] || 0));
+save.helpSeen = !!save.helpSeen; save.muted = !!save.muted;
+const ownsTheme = id => id === "altin" ? !!save.passes.altin : !!(THEME[id] && save.owned[id]);
+if (!ownsTheme(save.theme)) save.theme = "klasik";
+let lastSave = 0;
+function persist(force) {
+  if (!force && performance.now() - lastSave < 4000) return;
+  lastSave = performance.now();
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) {}
+  reportStats();
+}
+
+// ================================================================ Küp Evreni köprüsü
+const platform = { inside: window.parent !== window, profile: null, reqs: {} };
+function reportStats() {
+  if (!platform.inside) return;
+  parent.postMessage({ type: "kup:stats", stats: { "🏆 En yüksek": String(save.best), "🧱 Blok": fmt(save.totalBlocks),
+    "✨ Mükemmel": fmt(save.perfects), "🎮 Oyun": fmt(save.games) } }, "*");
+}
+function requestPurchase(item, done) {
+  if (!platform.inside) { notify("Küp Jeton ile almak için oyunu Küp Evreni'nden aç (ana klasördeki index.html)"); return; }
+  const reqId = Math.random().toString(36).slice(2);
+  platform.reqs[reqId] = done;
+  parent.postMessage({ type: "kup:purchase", reqId, id: item.id, name: item.name, price: item.jeton, icon: item.icon }, "*");
+}
+addEventListener("message", e => {
+  if (!platform.inside || e.source !== parent) return;
+  const m = e.data || {};
+  if (m.type === "kup:profile") { platform.profile = m; rerenderOpen(); }
+  else if (m.type === "kup:purchaseResult") {
+    if (platform.profile) platform.profile.jeton = m.jeton;
+    const done = platform.reqs[m.reqId]; delete platform.reqs[m.reqId];
+    if (done) done(!!m.ok);
+    rerenderOpen();
+  }
+  else if (m.type === "kup:gift") receiveGifts(m.gifts);
+});
+if (platform.inside) parent.postMessage({ type: "kup:ready" }, "*");
+
+// ================================================================ Küp Evreni hediyeleri (admin panelinden)
+function applyGiftItem(key, n) {
+  if (key === "gold" || key === "money") { save.gold = Math.min(1e12, save.gold + Math.min(n, 1e9)); return true; }
+  const [kind, id] = key.split(":");
+  if ((kind === "pass" || kind === "theme") && id === "altin") { if (save.passes.altin) return false; save.passes.altin = true; return true; }
+  if (kind === "theme") { if (!THEME[id] || ownsTheme(id)) return false; save.owned[id] = true; return true; }
+  return false;
+}
+function receiveGifts(gifts) {
+  save.giftIds = save.giftIds || [];
+  let any = false;
+  const acks = [];
+  for (const g of Array.isArray(gifts) ? gifts : []) {
+    if (!g || !g.gid) continue;
+    const skipped = [];
+    if (!save.giftIds.includes(g.gid)) {
+      for (const it of g.items || []) {
+        const n = Math.max(1, Math.floor(Number(it.n) || 1));
+        if (applyGiftItem(String(it.key), n)) any = true; else skipped.push(String(it.key));
+      }
+      save.giftIds = [g.gid, ...save.giftIds].slice(0, 200);
+    }
+    acks.push({ type: "kup:giftAck", gid: g.gid, skipped });
+  }
+  persist(true);
+  if (platform.inside) for (const a of acks) parent.postMessage(a, "*");
+  if (any) { SFX.cash(); notify("🎁 Hediye alındı!"); updateHud(); rerenderOpen(); }
+}
+
+// ================================================================ Ses (WebAudio ile sentezlenir)
+const A = { ctx: null };
+function initAudio() {
+  if (A.ctx) { if (A.ctx.state === "suspended") A.ctx.resume(); return; }
+  try { A.ctx = (c => { try { const g = c.createGain(), d = c.destination, oku = () => { let s = {}; try { s = JSON.parse(localStorage.getItem("kupSes") || "{}"); } catch (e) {} const v = (s.ana ?? 1) * (s.efekt ?? 1); g.gain.value = v >= 0 && v <= 1 ? v : 1; }; oku(); g.connect(d); Object.defineProperty(c, "destination", { get: () => g }); addEventListener("storage", e => { if (e.key === "kupSes") oku(); }); } catch (e) {} return c; })(new (window.AudioContext || window.webkitAudioContext)()); /* Küp Evreni ses ayarı (Profil → Ses) */ } catch (e) { return; }
+  A.master = A.ctx.createGain(); A.master.gain.value = save.muted ? 0 : 0.5; A.master.connect(A.ctx.destination);
+  A.noise = A.ctx.createBuffer(1, A.ctx.sampleRate, A.ctx.sampleRate);
+  const d = A.noise.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+}
+const audioOn = () => A.ctx && A.ctx.state === "running";
+function tone(freq, dur, type = "sine", gain = 0.1, freqEnd, delay = 0) {
+  if (!audioOn()) return;
+  const t0 = A.ctx.currentTime + delay, o = A.ctx.createOscillator(), g = A.ctx.createGain();
+  o.type = type; o.frequency.setValueAtTime(freq, t0);
+  if (freqEnd) o.frequency.exponentialRampToValueAtTime(freqEnd, t0 + dur);
+  g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(gain, t0 + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  o.connect(g).connect(A.master); o.start(t0); o.stop(t0 + dur + 0.05);
+}
+function noise(dur, gain, freq, type = "lowpass", delay = 0) {
+  if (!audioOn()) return;
+  const t0 = A.ctx.currentTime + delay, s = A.ctx.createBufferSource(), f = A.ctx.createBiquadFilter(), g = A.ctx.createGain();
+  s.buffer = A.noise; f.type = type; f.frequency.value = freq;
+  g.gain.setValueAtTime(gain, t0); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  s.connect(f).connect(g).connect(A.master); s.start(t0, Math.random() * 0.5); s.stop(t0 + dur + 0.05);
+}
+const PENTA = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21, 24];
+const SFX = {
+  place: () => { const f = 300 + Math.random() * 30; tone(f, 0.09, "triangle", 0.16, f * 0.56); noise(0.05, 0.12, 1700, "bandpass"); },
+  perfect: combo => { const f = 523.25 * Math.pow(2, PENTA[clamp(combo - 1, 0, PENTA.length - 1)] / 12);
+    tone(f, 0.35, "sine", 0.14); tone(f * 2, 0.3, "triangle", 0.04); tone(f * 1.5, 0.25, "sine", 0.05, undefined, 0.05); },
+  cut: () => { noise(0.12, 0.25, 900); tone(220, 0.08, "square", 0.04, 110); },
+  fall: () => { tone(300, 0.6, "sawtooth", 0.07, 70); noise(0.5, 0.25, 400, "lowpass", 0.15); },
+  record: () => [659, 784, 1046].forEach((f, i) => tone(f, i === 2 ? 0.35 : 0.18, "triangle", 0.09, undefined, i * 0.12)),
+  cash: () => { [1318, 1760].forEach((f, i) => tone(f, 0.12, "square", 0.04, undefined, i * 0.07)); },
+  click: () => tone(620, 0.05, "square", 0.03),
+  bad: () => tone(200, 0.2, "sawtooth", 0.05, 140),
+};
+
+// ================================================================ 3D sahne
+const canvas = $("game");
+let renderer;
+try { renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true }); }
+catch (e) { $("noWebgl").style.display = "flex"; throw e; }
+renderer.setClearColor(0x000000, 0);
+const scene = new THREE.Scene();
+const camera = new THREE.OrthographicCamera(-6, 6, 6, -6, 0.1, 200);
+scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+const sun = new THREE.DirectionalLight(0xfff6e8, 0.75);
+sun.position.set(5.5, 10, 2.5);
+scene.add(sun, sun.target);
+const BOX = new THREE.BoxGeometry(1, 1, 1);
+const matCache = new Map();
+
+const curTheme = () => THEME[save.theme] || THEMES[0];
+function blockColor(level, t = curTheme()) {
+  return hsl(t.h0 + level * t.step + t.hd * Math.sin(level * 0.35), t.s, t.l + t.ld * Math.sin(level * 0.5));
+}
+function blockMat(level) {
+  const t = curTheme(), key = t.id + ":" + level;
+  if (matCache.has(key)) return matCache.get(key);
+  const c = blockColor(level, t);
+  let m;
+  if (t.metal) m = new THREE.MeshPhongMaterial({ color: c, specular: 0xfff1b0, shininess: 60, emissive: c.clone().multiplyScalar(0.25) });
+  else m = new THREE.MeshLambertMaterial({ color: c, emissive: t.glow ? c.clone().multiplyScalar(0.22) : 0x000000 });
+  if (matCache.size > 400) matCache.clear();
+  matCache.set(key, m);
+  return m;
+}
+function placeMesh(m, b) { m.position.set(b.x, b.y, b.z); m.scale.set(Math.max(0.001, b.w), BLOCK_H, Math.max(0.001, b.d)); }
+function blockMesh(b) {
+  const m = new THREE.Mesh(BOX, blockMat(b.level));
+  m.userData.level = b.level;
+  placeMesh(m, b); scene.add(m);
+  return m;
+}
+// Kaide: üst yüzü kat 0'ın üstüyle aynı hizada, aşağı doğru uzun
+const pedestal = new THREE.Mesh(BOX, new THREE.MeshLambertMaterial({ color: 0x5a7fa0 }));
+pedestal.scale.set(BASE, 40, BASE); pedestal.position.set(0, BLOCK_H / 2 - 20, 0);
+scene.add(pedestal);
+
+// ================================================================ Oyun durumu
+let state = "menu";          // menu · play · over
+let level = 0, combo = 0, runGold = 0, runPerfect = 0, newRecord = false, overT = 0;
+let topB = null, mover = null;
+const blocks = [], chunks = [], rings = [];
+let shownLevel = 0, camY = 0, camSize = 13;
+const camOff = { x: 0, y: 0 };
+
+function recolor() {
+  for (const b of blocks) b.material = blockMat(b.userData.level);
+  if (mover) mover.mesh.material = blockMat(mover.level);
+  pedestal.material.color.copy(blockColor(0)).multiplyScalar(0.75);
+  updateBg(true);
+}
+function resetScene() {
+  for (const b of blocks) scene.remove(b); blocks.length = 0;
+  for (const c of chunks) scene.remove(c.mesh); chunks.length = 0;
+  for (const r of rings) { scene.remove(r.mesh); r.mesh.material.dispose(); } rings.length = 0;
+  if (mover) scene.remove(mover.mesh);
+  mover = null;
+  level = 0; combo = 0; runGold = 0; runPerfect = 0; newRecord = false;
+  topB = { x: 0, z: 0, w: BASE, d: BASE, y: 0, level: 0 };
+  shownLevel = 0; camY = 0;
+  recolor();
+  updateCamera(1, true);
+}
+const speed = () => Math.min(SPEED_MAX, SPEED0 + level * SPEED_STEP);
+function play() {
+  for (const id of ["ovStart", "ovPause", "ovOver", "ovShop", "ovHelp"]) hide(id);
+  resetScene();
+  state = "play";
+  save.games++;
+  persist(true);
+  spawnMover();
+  $("hint").style.display = "block";
+  updateHud();
+}
+function spawnMover() {
+  const axis = level % 2 === 0 ? "x" : "z";
+  mover = { x: topB.x, z: topB.z, w: topB.w, d: topB.d, y: topB.y + BLOCK_H, level: level + 1, axis, dir: 1 };
+  mover[axis] = topB[axis] - RANGE;
+  mover.mesh = blockMesh(mover);
+}
+function screenOf(x, y, z) {
+  const v = new THREE.Vector3(x, y, z).project(camera);
+  return [(v.x + 1) / 2 * innerWidth, (1 - v.y) / 2 * innerHeight];
+}
+// Bloğu bırak. Sonuç: "perfect" · "cut" · "miss" (oyun bitti) · "" (oyunda değil)
+function drop() {
+  if (state !== "play" || !mover || anyOverlay()) return "";
+  const e = mover.axis, sk = e === "x" ? "w" : "d";
+  const diff = mover[e] - topB[e];
+  const hLo = mover[e] - mover[sk] / 2, hHi = mover[e] + mover[sk] / 2;
+  const uLo = topB[e] - topB[sk] / 2, uHi = topB[e] + topB[sk] / 2;
+  const lo = Math.max(hLo, uLo), hi = Math.min(hHi, uHi);
+  const mesh = mover.mesh, sg = Math.sign(diff) || 1;
+  if (hi - lo <= 0) {
+    // Hiç üst üste gelmedi: blok tümden düşer
+    addChunk(mesh, new THREE.Vector3(e === "x" ? sg * 1.5 : 0, 0, e === "z" ? sg * 1.5 : 0), e, sg);
+    mover = null;
+    gameOver();
+    return "miss";
+  }
+  let res = "cut";
+  if (Math.abs(diff) <= TOLERANCE) {
+    res = "perfect";
+    mover[e] = topB[e];
+    combo++;
+    if (combo >= 3) mover[sk] = Math.min(BASE, mover[sk] + GROW);
+  } else {
+    combo = 0;
+    // Taşan parça kesilip düşer
+    const pLo = diff > 0 ? hi : hLo, pHi = diff > 0 ? hHi : lo;
+    const pb = { x: mover.x, z: mover.z, w: mover.w, d: mover.d, y: mover.y, level: mover.level };
+    pb[e] = (pLo + pHi) / 2; pb[sk] = pHi - pLo;
+    addChunk(blockMesh(pb), new THREE.Vector3(e === "x" ? sg * 1.2 : 0, 0.5, e === "z" ? sg * 1.2 : 0), e, sg);
+    mover[e] = (lo + hi) / 2; mover[sk] = hi - lo;
+  }
+  placeMesh(mesh, mover);
+  blocks.push(mesh);
+  topB = { x: mover.x, z: mover.z, w: mover.w, d: mover.d, y: mover.y, level: mover.level };
+  mover = null;
+  level++;
+  save.totalBlocks++;
+  let gain = GOLD_BLOCK;
+  const [sx, sy] = screenOf(topB.x, topB.y + BLOCK_H, topB.z);
+  if (res === "perfect") {
+    gain = GOLD_PERFECT; runPerfect++; save.perfects++;
+    SFX.perfect(combo);
+    addRing(topB);
+    popText("Mükemmel!" + (combo >= 2 ? ` ×${combo}` : ""), sx, sy - 70, true);
+  } else { SFX.place(); SFX.cut(); }
+  save.gold += gain; runGold += gain;
+  popText(`+${gain}`, sx + 50, sy - 30);
+  $("hint").style.display = "none";
+  if (blocks.length > VISIBLE_BLOCKS) blocks[blocks.length - VISIBLE_BLOCKS - 1].visible = false;
+  persist();
+  spawnMover();
+  updateHud();
+  return res;
+}
+function addChunk(mesh, v, axis, sg) {
+  // Kenarından devrilir gibi döner
+  const w = axis === "x" ? new THREE.Vector3(0, 0, -sg * 3) : new THREE.Vector3(sg * 3, 0, 0);
+  chunks.push({ mesh, v, w, t: 0 });
+}
+function addRing(b) {
+  const m = new THREE.Mesh(BOX, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.75, depthWrite: false }));
+  m.position.set(b.x, b.y - BLOCK_H / 2 + 0.01, b.z);
+  m.scale.set(b.w + 0.2, 0.04, b.d + 0.2);
+  scene.add(m);
+  rings.push({ mesh: m, t: 0, w: b.w, d: b.d });
+}
+function gameOver() {
+  state = "over";
+  combo = 0;
+  $("hint").style.display = "none";
+  SFX.fall();
+  if (level > save.best) { newRecord = save.best > 0; save.best = level; }
+  persist(true);
+  overT = 1.1;
+  updateHud();
+}
+
+// ================================================================ Döngü
+let last = performance.now();
+const AXIS = new THREE.Vector3();
+function update(dt) {
+  if (state === "play" && mover && !anyOverlay()) {
+    const e = mover.axis, c = topB[e];
+    let p = mover[e] + mover.dir * speed() * dt;
+    if (p > c + RANGE) { p = c + RANGE; mover.dir = -1; }
+    else if (p < c - RANGE) { p = c - RANGE; mover.dir = 1; }
+    mover[e] = p;
+    placeMesh(mover.mesh, mover);
+  }
+  for (let i = chunks.length - 1; i >= 0; i--) {
+    const c = chunks[i];
+    c.t += dt; c.v.y -= 22 * dt;
+    c.mesh.position.addScaledVector(c.v, dt);
+    AXIS.copy(c.w).normalize();
+    c.mesh.rotateOnWorldAxis(AXIS, c.w.length() * dt * Math.min(1, c.t * 3));
+    if (c.t > 3) { scene.remove(c.mesh); chunks.splice(i, 1); }
+  }
+  for (let i = rings.length - 1; i >= 0; i--) {
+    const r = rings[i];
+    r.t += dt;
+    const k = r.t / 0.6;
+    r.mesh.scale.set(r.w + 0.2 + k * 1.6, 0.04, r.d + 0.2 + k * 1.6);
+    r.mesh.material.opacity = 0.75 * (1 - k);
+    if (k >= 1) { scene.remove(r.mesh); r.mesh.material.dispose(); rings.splice(i, 1); }
+  }
+  if (state === "over" && overT > 0) { overT -= dt; if (overT <= 0) show("ovOver"); }
+  updateCamera(dt);
+  updateBg();
+}
+function updateCamera(dt, instant) {
+  const W = innerWidth, H = innerHeight, portrait = H > W;
+  let ty = topB.y + 1.2, size = portrait ? 11.5 : 13;     // dik ekranda genişlik, yatayda yükseklik
+  let ox = 0, oy = 0;                                       // görüntü kaydırma: oyun bitince kule kartın üstünde / yanında kalır
+  if (state === "over") {
+    // Oyun bitince bütün kule görünsün
+    const h = level * BLOCK_H + 2.5;
+    ty = level * BLOCK_H / 2 - 0.8;
+    if (portrait) { size = Math.max(size, h / 0.38 * W / H); oy = -0.27 * size * H / W; }   // kart altta, kule üstte
+    else { size = Math.max(size, h * 1.15); ox = 0.24 * size * W / H; }                    // kart sağda, kule solda
+  }
+  camY = instant ? ty : lerp(camY, ty, Math.min(1, dt * 4));
+  camSize = instant ? size : lerp(camSize, size, Math.min(1, dt * 2.5));
+  const k2 = instant ? 1 : Math.min(1, dt * 3);
+  camOff.x = lerp(camOff.x, ox, k2); camOff.y = lerp(camOff.y, oy, k2);
+  const hw = portrait ? camSize / 2 : camSize / 2 * W / H, hh = portrait ? camSize / 2 * H / W : camSize / 2;
+  camera.left = -hw + camOff.x; camera.right = hw + camOff.x; camera.top = hh + camOff.y; camera.bottom = -hh + camOff.y;
+  camera.updateProjectionMatrix();
+  camera.position.set(12, camY + 10.5, 12);
+  camera.lookAt(0, camY, 0);
+}
+let lastBg = "";
+function updateBg(force) {
+  shownLevel = lerp(shownLevel, topB.level, force ? 1 : 0.05);
+  const t = curTheme(), h = t.h0 + shownLevel * t.step + t.bh;
+  const a = hsl(h, t.bs, t.bt).getStyle(), b = hsl(h - 0.06, t.bs, t.bb).getStyle();
+  const css = `linear-gradient(180deg, ${a}, ${b})`;
+  if (css !== lastBg) { lastBg = css; document.body.style.background = css; }
+}
+function frame(t) {
+  const dt = Math.min(0.1, (t - last) / 1000);
+  last = t;
+  update(dt);
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+window.step = sec => { for (let t = 0; t < sec; t += 1 / 30) update(1 / 30); updateHud(); renderer.render(scene, camera); };
+window.kule = { drop, play, get top() { return topB; }, get mover() { return mover; }, get state() { return state; }, get level() { return level; }, get combo() { return combo; }, save: () => save };
+
+// ================================================================ Arayüz
+const OVERLAYS = ["ovStart", "ovPause", "ovOver", "ovShop", "ovHelp"];
+const anyOverlay = () => OVERLAYS.some(id => $(id).classList.contains("show"));
+const topOverlay = () => { for (let i = OVERLAYS.length - 1; i >= 0; i--) if ($(OVERLAYS[i]).classList.contains("show")) return OVERLAYS[i]; return null; };
+function show(id) { renderOpen(id); $(id).classList.add("show"); $(id).scrollTop = 0; }
+function hide(id) {
+  $(id).classList.remove("show");
+  if (id === "ovHelp" && !save.helpSeen) { save.helpSeen = true; persist(true); }
+  if (id === "ovShop") rerenderOpen();
+}
+function rerenderOpen() { for (const id of OVERLAYS) if ($(id).classList.contains("show")) renderOpen(id); }
+function renderOpen(id) {
+  document.querySelectorAll("[data-mute]").forEach(b => b.textContent = save.muted ? "Ses: Kapalı" : "Ses: Açık");
+  if (id === "ovStart") $("startInfo").textContent = `🏆 En yüksek: ${save.best}     💰 ${fmt(save.gold)} Altın`;
+  else if (id === "ovPause") $("pauseInfo").textContent = `Yükseklik: ${level}`;
+  else if (id === "ovOver") {
+    $("overScore").textContent = level;
+    $("overBest").innerHTML = (newRecord ? `<span class="rec">✨ Yeni rekor!</span> ` : "") + `🏆 En yüksek: ${save.best}`;
+    $("overGold").textContent = `💰 +${runGold} Altın   ✨ ${runPerfect} mükemmel`;
+  } else if (id === "ovShop") renderShop();
+}
+const swatch = t => `<div class="sw">${[0, 6, 12, 18].map(i => `<i style="background:${blockColor(i, t).getStyle()}"></i>`).join("")}</div>`;
+function renderShop() {
+  $("shopGold").textContent = `💰 ${fmt(save.gold)} Altın`;
+  $("themeList").innerHTML = THEMES.filter(t => t.price >= 0).map(t => {
+    let b;
+    if (t.id === save.theme) b = `<button class="btn" disabled>Seçili</button>`;
+    else if (ownsTheme(t.id)) b = `<button class="btn green" data-sel="${t.id}">Seç</button>`;
+    else b = `<button class="btn gold" data-buy="${t.id}">${t.price} Altın</button>`;
+    return `<div class="item">${swatch(t)}<div><b>${t.icon} ${esc(t.name)}</b>${ownsTheme(t.id) ? "" : `<div class="muted">Altınla alınır</div>`}</div>${b}</div>`;
+  }).join("");
+  const j = platform.profile ? platform.profile.jeton : null;
+  $("shopJeton").textContent = j == null ? "" : `Küp Jeton bakiyen: KJ ${Number(j).toLocaleString("tr-TR")}`;
+  $("passList").innerHTML = PASSES.map(p => {
+    const own = !!save.passes[p.id];
+    const b = own ? (save.theme === p.id ? `<button class="btn" disabled>Seçili</button>` : `<button class="btn green" data-sel="${p.id}">Seç</button>`)
+      : `<button class="btn go" style="font-size:14px" data-pass="${p.id}">KJ ${p.jeton}</button>`;
+    return `<div class="item">${swatch(THEME[p.id])}<div><b>${p.icon} ${esc(p.name)}</b><div class="muted">${esc(p.desc)}</div></div>${b}</div>`;
+  }).join("");
+  $("ovShop").querySelectorAll("[data-sel]").forEach(b => b.onclick = () => selectTheme(b.dataset.sel));
+  $("ovShop").querySelectorAll("[data-buy]").forEach(b => b.onclick = () => buyTheme(b.dataset.buy));
+  $("ovShop").querySelectorAll("[data-pass]").forEach(b => b.onclick = () => {
+    const p = PASSES.find(x => x.id === b.dataset.pass);
+    requestPurchase(p, ok => {
+      if (!ok) return;
+      save.passes[p.id] = true; save.theme = p.id;
+      notify(`${p.icon} ${p.name} senin!`);
+      SFX.cash(); persist(true); recolor(); rerenderOpen();
+    });
+  });
+  $("shopNote").textContent = platform.inside ? "Satın alımı Küp Evreni onaylar; Küp Jeton bakiyenden düşer." : "Küp Jeton ile almak için oyunu Küp Evreni'nden aç.";
+}
+function selectTheme(id) {
+  if (!ownsTheme(id)) return;
+  SFX.click(); save.theme = id; persist(true); recolor(); rerenderOpen();
+}
+function buyTheme(id) {
+  const t = THEME[id];
+  if (!t || t.price < 0 || ownsTheme(id)) return;
+  if (save.gold < t.price) { SFX.bad(); notify(`Yetersiz Altın (${fmt(save.gold)} / ${t.price})`); return; }
+  save.gold -= t.price; save.owned[id] = true; save.theme = id;
+  SFX.cash(); notify(`${t.icon} ${t.name} teması senin!`);
+  persist(true); recolor(); updateHud(); rerenderOpen();
+}
+function updateHud() {
+  setText($("score"), String(level));
+  $("score").style.display = state === "play" ? "" : "none";
+  setText($("combo"), combo >= 2 && state === "play" ? `✨ Mükemmel serisi ×${combo}` : "");
+  setText($("gold"), "💰 " + fmt(save.gold));
+  $("pause").style.display = state === "play" ? "" : "none";
+}
+function pause() { if (state === "play" && !anyOverlay()) { SFX.click(); show("ovPause"); } }
+function toggleMute() {
+  save.muted = !save.muted;
+  if (A.master) A.master.gain.value = save.muted ? 0 : 0.5;
+  SFX.click(); persist(true); rerenderOpen();
+}
+function exitGame() {
+  // Platformda oyundan çıkışı üst çubuk yapar; burada başlangıç ekranına dönülür (platform isterse kup:exit'i dinleyebilir)
+  SFX.click();
+  persist(true);
+  if (state === "play") { if (mover) { scene.remove(mover.mesh); mover = null; } }
+  for (const id of OVERLAYS) $(id).classList.remove("show");
+  state = "menu";
+  $("hint").style.display = "none";
+  resetScene();
+  updateHud();
+  show("ovStart");
+  if (platform.inside) parent.postMessage({ type: "kup:exit" }, "*");
+}
+
+// ================================================================ Girdi
+document.querySelectorAll("[data-close]").forEach(b => b.addEventListener("click", () => { SFX.click(); hide(b.closest(".overlay").id); }));
+document.querySelectorAll("[data-open]").forEach(b => b.addEventListener("click", () => { SFX.click(); show(b.dataset.open); }));
+document.querySelectorAll("[data-play]").forEach(b => b.addEventListener("click", () => { SFX.click(); play(); }));
+document.querySelectorAll("[data-mute]").forEach(b => b.addEventListener("click", toggleMute));
+document.querySelectorAll("[data-exit]").forEach(b => b.addEventListener("click", exitGame));
+$("btnPlay").onclick = () => { SFX.click(); play(); };
+$("btnResume").onclick = () => { SFX.click(); hide("ovPause"); };
+$("pause").addEventListener("pointerdown", e => e.stopPropagation());
+$("pause").onclick = pause;
+addEventListener("pointerdown", () => initAudio(), true);
+canvas.addEventListener("pointerdown", e => {
+  if (e.button !== 0 && e.pointerType === "mouse") return;
+  e.preventDefault();
+  drop();
+});
+addEventListener("keydown", e => {
+  initAudio();
+  if (e.repeat) return;
+  const k = e.code;
+  if (k === "Escape" || k === "KeyP") {
+    const o = topOverlay();
+    if (o === "ovShop" || o === "ovHelp") { SFX.click(); hide(o); }
+    else if (o === "ovPause") { SFX.click(); hide("ovPause"); }
+    else pause();
+    return;
+  }
+  if (k === "Space" || k === "Enter" || k === "NumpadEnter" || k === "ArrowUp" || k === "KeyW") {
+    e.preventDefault();
+    if (state === "play" && !anyOverlay()) drop();
+    else if (topOverlay() === "ovOver" || topOverlay() === "ovStart") { SFX.click(); play(); }
+  }
+});
+addEventListener("contextmenu", e => e.preventDefault());
+document.addEventListener("visibilitychange", () => { if (document.hidden) { if (state === "play" && !anyOverlay()) show("ovPause"); persist(true); } });
+function resize() {
+  renderer.setPixelRatio(Math.min(2, devicePixelRatio || 1));
+  renderer.setSize(innerWidth, innerHeight, false);
+  updateCamera(1, true);
+}
+addEventListener("resize", resize);
+
+// ================================================================ Başlat
+resetScene();
+resize();
+show("ovStart");
+if (!save.helpSeen) show("ovHelp");
+updateHud();
+persist(true);
+setInterval(() => persist(true), 10000);
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

@@ -1,0 +1,26 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "app.kupevreni",
+      "sha256_cert_fingerprints": [
+        "16:41:F7:58:8C:55:EA:BD:23:17:43:AB:FA:1F:55:DF:63:AA:A4:ED:C2:97:90:DD:56:F0:50:62:41:34:F4:20"
+      ]
+    }
+  },
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "app.kupevreni.admin",
+      "sha256_cert_fingerprints": [
+        "36:85:0B:86:8F:91:F5:E2:A0:22:7C:96:53:81:0C:6F:22:4A:A5:D4:7E:EA:4E:64:5B:DB:31:D3:3A:85:71:E1"
+      ]
+    }
+  }
+]
